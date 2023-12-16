@@ -23,15 +23,14 @@ typedef double f64;
 
 typedef struct loc_t loc_t;
 typedef struct err_diag_t err_diag_t;
-typedef struct fs_file_t fs_file_t;
-typedef struct fs_node_t fs_node_t;
 typedef struct token_t token_t;
-typedef u32 fs_rnode_t;
-typedef u32 fs_rfile_t;
 typedef u16 type_t;
 typedef u32 istr_t;
-
-typedef u32 ir_rblk_t;
+typedef u32 rmod_t;
+typedef u32 rfile_t;
+typedef u32 file_ref_t;
+typedef struct mod_t mod_t;
+typedef struct file_t file_t;
 
 istr_t sv_intern(u8 *sv, size_t len);
 istr_t sv_move(const char *p);
@@ -179,7 +178,7 @@ struct loc_t {
 	u32 col;
 	u32 pos;
 	u16 len;
-	fs_rfile_t file;
+	rfile_t file;
 };
 
 struct token_t {
@@ -188,22 +187,61 @@ struct token_t {
 	istr_t lit;
 };
 
-struct fs_node_t {
-	const char *path;
-	fs_rnode_t parent;
-	fs_rnode_t *children;
-	u32 children_len;
-	u32 our_files;
-	istr_t name; // shortname
-	bool is_src_scanned; // importing a module where == true and our_files == 0 is an error
-	bool is_main;
+#define SCOPE_ROOT 0
+
+enum ir_nkind_t {
+	NODE_PROC_DECL,
+	NODE_BINOP,
+	NODE_INTEGER_LITERAL,
 };
 
-struct fs_file_t {
+typedef struct ir_scope_t ir_scope_t;
+typedef u32 ir_localref_t;
+typedef struct ir_local_t ir_local_t;
+typedef struct ir_expr_t ir_expr_t;
+typedef enum ir_nkind_t ir_nkind_t;
+
+// TODO: define helper function for invalid loc_t
+// TODO: fancy arena allocators? fuck that!
+//       we're going for a quick and dirty bootstrap
+
+struct ir_local_t {
+	istr_t name;
+	loc_t loc;
+};
+
+struct ir_scope_t {
+	ir_scope_t *parent;
+	ir_localref_t *locals;
+};
+
+struct ir_expr_t {
+	ir_nkind_t kind;
+	loc_t loc;
+	type_t type;
+};
+
+struct mod_t {
+
+	struct disk_t {
+		bool is_stub;
+		const char *path;
+		//
+		rmod_t parent;
+		rmod_t *children;
+		u32 children_len;
+		istr_t name; // shortname
+		u32 files_count;
+	} on_disk;
+
+	// ir_local_t *locals;
+};
+
+struct file_t {
 	const char *fp;
 	u8 *data;
 	size_t len;
-	fs_rnode_t module;
+	rmod_t mod;
 };
 
 struct err_diag_t {
@@ -214,55 +252,14 @@ struct err_diag_t {
 };
 
 extern u32 fs_files_queue_len;
-extern fs_file_t fs_files_queue[512];
+extern file_t fs_files_queue[512];
 
-fs_rfile_t fs_register_repl(void);
-fs_file_t *fs_filep(fs_rfile_t ref);
-fs_node_t *fs_nodep(fs_rnode_t ref);
-const char *fs_module_symbol_sv(fs_rnode_t module, istr_t symbol);
+void fs_set_entry_argp(const char *argp);
+rfile_t fs_set_entry_repl(void); // will register current directory
+rmod_t fs_register_root(const char *dp);
+rmod_t fs_register_import(rmod_t src, const char *fp, loc_t onerror_loc);
 
-void pentry(fs_rfile_t f);
-
-#define SCOPE_ROOT 0
-
-typedef u32 ir_rinst_t;
-typedef u32 ir_rscope_t;
-typedef struct ir_scope_t ir_scope_t;
-typedef struct ir_inst_t ir_inst_t;
-
-enum ir_ikind_t {
-	INST_NOP,
-	INST_PROC_DECL,
-	INST_INTEGER_LITERAL,
-	INST_CALL,
-};
-
-typedef enum ir_ikind_t ir_ikind_t;
-
-// lexical basic blocks?
-struct ir_scope_t {
-	ir_rscope_t id;
-	ir_rinst_t label_self; // continue here
-	ir_rinst_t label_pred; // break here
-	ir_rinst_t first;
-	ir_rinst_t last;
-	u32 len;
-};
-
-// TODO: define helper function for invalid loc_t
-
-struct ir_inst_t {
-	ir_ikind_t kind;
-	ir_rinst_t id;
-	ir_rinst_t next;
-	ir_rinst_t prev;
-	loc_t loc;
-	type_t type;
-
-	union {
-		
-	};
-};
+void pentry(rfile_t f);
 
 // TYPE_UNKNOWN is something else and non concrete
 #define TYPE_INFER ((type_t)-1)
@@ -325,9 +322,10 @@ struct tinfo_t {
 			u8 len;
 		} d_tuple;
 		struct {
-			fs_rnode_t module;
+			rmod_t mod;
 			istr_t name;
 		} d_named;
+
 		// type_t type_ref;
 	};
 

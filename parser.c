@@ -66,8 +66,8 @@ struct pctx_t {
 	// u32 es_len;
 	// pimport_t is[64]; // import stack
 	// u32 is_len;
-	fs_rfile_t file;
-	fs_rnode_t module;
+	rfile_t file;
+	rmod_t module;
 	bool has_done_imports;
 	//
 	struct {
@@ -261,7 +261,6 @@ void NORETURN punexpected(const char *err) {
 	err_with_pos(p.token.loc, "unexpected %s, %s", tok_dbg_str(p.token), err);
 }
 
-
 void pexpr(ir_rscope_t s) {
 	assert_not_reached();
 }
@@ -293,6 +292,8 @@ type_t ptype_id(istr_t lit) {
 type_t ptype(void) {
 	// loc_t initial_pos = p.token.loc;
 	type_t type;
+	
+	// TODO: support parsing of function types in parentheses
 
 	switch (p.token.kind) {
 		case TOK_IDENT: {
@@ -488,7 +489,7 @@ void ptop_stmt(void) {
 	}
 }
 
-void pentry(fs_rfile_t file) {
+void pentry(rfile_t file) {
 	fs_file_t *f = fs_filep(file);
 	
 	p = (pctx_t){

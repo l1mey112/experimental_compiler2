@@ -23,7 +23,7 @@ void NORETURN err_with_pos(loc_t loc, const char *fmt, ...) {
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	fs_file_t *file = fs_filep(loc.file);
+	file_t *file = &fs_files_queue[loc.file];
 
 	snprintf(err_diag.err_string, sizeof(err_diag.err_string), "%s:%u:%u: %s", file->fp, loc.line_nr + 1, loc.col + 1, buf);
 	longjmp(err_diag.unwind, 1);
@@ -37,12 +37,8 @@ void NORETURN err_without_pos(const char *fmt, ...) {
 	longjmp(err_diag.unwind, 1);
 }
 
-int main() {
+int main(int argc, const char *argv[]) {
 	char inp[1024];
-
-	fs_rnode_t repl = fs_register_repl();
-	fs_file_t *replp = fs_filep(repl); 
-	replp->fp = "<stdin>";
 
 	// used for quick concrete type lookups
 	{
@@ -54,26 +50,64 @@ int main() {
 		#undef X
 		typeinfo_concrete_istr_size = i;
 	}
-	
-	// TODO: register_root() etc for module system
-	while (true) {
-		printf("> ");
-		if (!fgets(inp, sizeof(inp), stdin)) {
-			break;
-		}
 
+	// TODO: register `lib/`
+
+	if (argc == 1) {
+		// repl
+		rfile_t repl = fs_set_entry_repl();
+		file_t *replp = &fs_files_queue[repl];
+
+		rfile_t i = fs_files_queue_len - 1;
+		
+		while (true) {
+			printf("> ");
+			if (!fgets(inp, sizeof(inp), stdin)) {
+				break;
+			}
+
+			if (setjmp(err_diag.unwind)) {
+				// TODO: report error at proper area and print offending line
+				//       err_string is good enough for now
+				eprintf("error: %s\n", err_diag.err_string);
+				continue;
+			}
+
+			replp->data = (u8*)inp;
+			replp->len = strlen(inp);
+
+			pentry(repl);
+
+			// queue can grow
+			for (; i < fs_files_queue_len; i++) {
+				pentry(i);
+			}
+		}
+	} else if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
 			// TODO: report error at proper area and print offending line
 			//       err_string is good enough for now
 			eprintf("error: %s\n", err_diag.err_string);
-			continue;
+			return 1;
 		}
 
-		replp->data = (u8*)inp;
-		replp->len = strlen(inp);
-
-		pentry(repl);
-		// TODO: import queue, construct large module HIR
+		fs_set_entry_argp(argv[1]);
+		
+		// queue can grow
+		for (rfile_t i = 0; i < fs_files_queue_len; i++) {
+			u32 old_sz = fs_files_queue_len;
+			eprintf("parsing file '%s'\n", fs_files_queue[i].fp);
+			pentry(i);
+			if (old_sz != fs_files_queue_len) {
+				eprintf("  %u new files added\n", fs_files_queue_len - old_sz);
+			}
+		}
+	} else {
+		eprintf("usage: %s <file|dir>\n", argv[0]);
+		eprintf("usage: %s\n", argv[0]);
 	}
+	
+	// TODO: register_root() etc for module system
+	
 	eprintf("exiting\n");
 }
