@@ -27,6 +27,16 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 				return false;
 			}
 			return true;
+		case TYPE_TUPLE:
+			if (a->d_tuple.len != b->d_tuple.len) {
+				return false;
+			}
+			for (u32 i = 0; i < a->d_tuple.len; i++) {
+				if (a->d_tuple.elems[i] != b->d_tuple.elems[i]) {
+					return false;
+				}
+			}
+			return true;
 		default:
 			assert_not_reached();
 	}
@@ -89,6 +99,10 @@ static void _type_dbg_str(type_t type) {
 			p += (expr); \
 		} while (0)
 		
+	if (type == TYPE_INFER) {
+		COMMIT(sprintf((char *)p, "<infer:-1>"));
+		return;
+	}
 
 	if (type < _TYPE_CONCRETE_MAX) {
 		COMMIT(sprintf((char *)p, "%s", ctinfo_str[type]));			
@@ -140,4 +154,10 @@ const char *type_dbg_str(type_t type) {
 	p[nwritten] = '\0';
 
 	return (const char *)oldp;
+}
+
+void types_dump(void) {
+	for (type_t i = 0; i < type_len; i++) {
+		printf("%u: %s\n", i + _TYPE_CONCRETE_MAX, type_dbg_str(i + _TYPE_CONCRETE_MAX));
+	}
 }

@@ -264,6 +264,9 @@ struct ir_inst_t {
 	};
 };
 
+// TYPE_UNKNOWN is something else and non concrete
+#define TYPE_INFER ((type_t)-1)
+
 #define TYPE_X_CONCRETE_LITERALS_LIST \
 	X(TYPE_I8, "i8") \
 	X(TYPE_I16, "i16") \
@@ -338,4 +341,5 @@ struct tinfo_t {
 };
 
 type_t type_new(tinfo_t typeinfo, loc_t *loc);
+void types_dump(void);
 const char *type_dbg_str(type_t type);

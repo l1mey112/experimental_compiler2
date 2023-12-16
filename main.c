@@ -73,7 +73,6 @@ int main() {
 		replp->len = strlen(inp);
 
 		pentry(repl);
-
 		// TODO: import queue, construct large module HIR
 	}
 	eprintf("exiting\n");

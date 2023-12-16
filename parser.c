@@ -69,6 +69,12 @@ struct pctx_t {
 	fs_rfile_t file;
 	fs_rnode_t module;
 	bool has_done_imports;
+	//
+	struct {
+		istr_t name; // -1 for none
+		type_t type;
+		loc_t loc;
+	} next_type;
 };
 
 pctx_t p;
@@ -408,10 +414,22 @@ void pproc(ir_rscope_t s) {
 	pexpect(TOK_ASSIGN);
 	// TODO: pexpr(s);
 
+	type_t type = TYPE_INFER;
+	if (p.next_type.name == name) {
+		type = p.next_type.type;
+		p.next_type.name = (u32)-1;
+	}
+
+	printf("type: %s\n", type_dbg_str(type));
 	printf("scope(%u): proc %s\n", s, sv_from(name));
 }
 
 void ptypedecl(ir_rscope_t s) {
+	// guard in here and in `pstmt()`
+	if (p.next_type.name != (u32)-1) {
+		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
+	}
+	
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
@@ -422,17 +440,18 @@ void ptypedecl(ir_rscope_t s) {
 	//      ^^^
 
 	type_t type = ptype();
-	const char *v = type_dbg_str(type);
-	printf("type parsed: %s\n", v);
+
+	p.next_type.type = type;
+	p.next_type.name = name;
+	p.next_type.loc = name_loc;
 }
 
 void pstmt(ir_rscope_t s) {
+	bool has_next_type = p.next_type.name != (u32)-1;
+	
 	if (p.token.kind == TOK_IDENT && p.peek.kind == TOK_COLON) {
 		pproc(s);
-		return;
-	}
-
-	switch (p.token.kind) {
+	} else switch (p.token.kind) {
 		case TOK_IO: {
 			pproc(s);	
 			break;
@@ -442,16 +461,21 @@ void pstmt(ir_rscope_t s) {
 				pproc(s);
 				break;
 			}
-
 			if (p.peek.kind == TOK_DOUBLE_COLON) {
 				ptypedecl(s);
 				break;
 			}
+			// fall through
 		}
 		default: {
 			pexpr(s);
-			break;		
+			break;
 		}
+	}
+
+	// error if type decl not used
+	if (has_next_type && p.next_type.name != (u32)-1) {
+		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
 	}
 }
 
@@ -474,6 +498,7 @@ void pentry(fs_rfile_t file) {
 		.plast_nl = f->data,
 		.file = file,
 		.module = f->module,
+		.next_type.name = -1,
 	};
 
 	pnext(); // tok
