@@ -140,6 +140,14 @@ static token_t plex(void) {
 			continue;
 		}
 
+		if (ch == ';') {
+			p.pc++;
+			while (p.pc < p.pend && *p.pc != '\n') {
+				p.pc++;
+			}
+			continue;
+		}
+
 		if (is_id_begin(ch)) {
 			u8 *start = p.pc;
 
@@ -515,7 +523,7 @@ void ptypedecl(ir_scope_t *s) {
 	//      ^^^
 
 	if (ir_exists_in(s, name)) {
-		err_with_pos(name_loc, "type decl cannot proceed definition `%s`", sv_from(name));
+		err_with_pos(name_loc, "type decl must come before definition `%s`", sv_from(name));
 	}
 
 	type_t type = ptype();
