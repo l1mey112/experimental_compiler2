@@ -9,7 +9,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 	
 	if (a->is_named && b->is_named) {
 		// may be TYPE_UNKNOWN
-		return a->d_named.module == b->d_named.module && a->d_named.name == b->d_named.name;
+		return a->d_named.mod == b->d_named.mod && a->d_named.name == b->d_named.name;
 	}
 
 	if (a_type != b_type) {
@@ -62,7 +62,7 @@ type_t type_new(tinfo_t typeinfo, loc_t *loc) {
 			if (typeinfo.is_named && nb->is_named && typeinfo.kind != nb->kind) {
 				if (typeinfo.kind != TYPE_UNKNOWN) {
 					// therefore nb->kind != TYPE_UNKNOWN, and is already defined
-					err_with_pos(*loc, "type '%s' already defined", fs_module_symbol_sv(typeinfo.d_named.module, typeinfo.d_named.name));
+					err_with_pos(*loc, "type `%s` already defined", fs_module_symbol_str(typeinfo.d_named.mod, typeinfo.d_named.name));
 				}
 			}
 
@@ -100,7 +100,7 @@ static void _type_dbg_str(type_t type) {
 		} while (0)
 		
 	if (type == TYPE_INFER) {
-		COMMIT(sprintf((char *)p, "<infer:-1>"));
+		COMMIT(sprintf((char *)p, "<infer>"));
 		return;
 	}
 
@@ -114,7 +114,7 @@ static void _type_dbg_str(type_t type) {
 	switch (typeinfo->kind) {
 		case TYPE_UNKNOWN:
 			assert(typeinfo->is_named);
-			COMMIT(sprintf((char *)p, "%s", fs_module_symbol_sv(typeinfo->d_named.module, typeinfo->d_named.name)));
+			COMMIT(sprintf((char *)p, "%s", fs_module_symbol_str(typeinfo->d_named.mod, typeinfo->d_named.name)));
 			return;
 		case TYPE_TUPLE:
 			COMMIT(sprintf((char *)p, "("));

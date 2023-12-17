@@ -1,58 +1,14 @@
 #include "all.h"
 
 #include "stb_ds.h"
+#include <setjmp.h>
 
 typedef struct pctx_t pctx_t;
-/* typedef struct pval_t pval_t;
 typedef struct pimport_t pimport_t;
-typedef enum pvkind_t pkind_t;
 
 struct pimport_t {
 
 };
-
-enum pvkind_t {
-	VAL_INST,
-	VAL_SYM,
-	VAL_LOCAL,
-	VAL_INTEGER_LITERAL,
-};
-
-struct pval_t {
-	pkind_t kind;
-	loc_t loc;
-	type_t type;
-
-	union {
-		//
-	};
-}; */
-
-/* enum pskind_t {
-	SCOPE_FUNCTION,
-	SCOPE_BLOCK,
-	SCOPE_LOOP,
-	SCOPE_SWITCH,
-};
-
-struct pscope_t {
-	istr_t label; // -1 for none
-	pskind_t kind;
-
-	ir_rblk_t bb;   // continue here
-	ir_rblk_t pred; // break here
-
-	// var_start
-	// var_end
-	// var_enclosing (proc_t)
-	
-	bool is_break;    // TODO: impl
-	bool is_continue; // TODO: impl
-
-	union {
-		// if expression etc
-	};
-}; */
 
 struct pctx_t {
 	u8 *pstart;
@@ -62,12 +18,11 @@ struct pctx_t {
 	u32 line_nr;
 	token_t token;
 	token_t peek;
-	// pval_t es[128]; // expr stack
-	// u32 es_len;
 	// pimport_t is[64]; // import stack
 	// u32 is_len;
 	rfile_t file;
-	rmod_t module;
+	rmod_t mod;
+	mod_t *modp;
 	bool has_done_imports;
 	//
 	struct {
@@ -79,6 +34,91 @@ struct pctx_t {
 
 pctx_t p;
 
+#define VAR_PTR(id) (&p.modp->vars[id])
+
+static bool ir_exists_in(ir_scope_t *scope, istr_t name) {
+	if (scope == NULL) {
+		scope = &p.modp->toplevel;
+	}
+
+	for (u32 i = 0; i < arrlen(scope->locals); i++) {
+		ir_rvar_t id = scope->locals[i];
+		ir_var_t *var = &p.modp->vars[id];
+
+		if (var->name == name) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// NULL meaning toplevel
+static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t onerror) {
+	if (ir_exists_in(scope, name)) {
+		err_with_pos(onerror, "variable `%s` already exists in scope", sv_from(name));
+	}
+	
+	ir_rvar_t id = arrlen(p.modp->vars);
+	ir_var_t var = {
+		.loc = onerror,
+		.name = name,
+		.type = type,
+	};
+	arrpush(p.modp->vars, var);
+
+	if (scope == NULL) {
+		scope = &p.modp->toplevel;
+	}
+
+	arrpush(scope->locals, id);
+	
+	return id;	
+}
+
+// NULL meaning toplevel, but that doesn't make sense?
+// will search parent
+static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
+	if (scope == NULL) {
+		scope = &p.modp->toplevel;
+	}
+
+	for (u32 i = 0; i < arrlen(scope->locals); i++) {
+		ir_rvar_t id = scope->locals[i];
+		ir_var_t *var = &p.modp->vars[id];
+
+		if (var->name == name) {
+			*out = id;
+			return true;
+		}
+	}
+
+	// what an opportunity for tail recursion!
+	if (scope->parent != NULL) {
+		return ir_search_var(scope->parent, name, out);
+	} else {
+		return false;
+	}
+}
+
+static ir_scope_t *ir_new_scope(ir_scope_t *parent) {
+	ir_scope_t *scope = malloc(sizeof(ir_scope_t));
+	*scope = (ir_scope_t){.parent = parent};
+	return scope;
+}
+
+// find declaration in exprs, or NULL
+// warning: possibly unstable pointer
+static ir_node_t *ir_find_decl(ir_node_t *exprs, istr_t name) {
+	for (u32 i = 0; i < arrlen(exprs); i++) {
+		ir_node_t *expr = &exprs[i];
+		if (expr->kind == NODE_PROC_DECL && expr->d_proc_decl.name == name) {
+			return expr;
+		}
+	}
+	return NULL;
+}
+
 static bool is_id_begin(u8 ch) {
     return isalpha(ch) || ch == '_';
 }
@@ -87,7 +127,7 @@ static bool is_id(u8 ch) {
     return isalpha(ch) || ch == '_' || isdigit(ch);
 }
 
-token_t plex(void) {
+static token_t plex(void) {
 	while (p.pc < p.pend) {
 		u8 ch = *p.pc;
 
@@ -261,17 +301,7 @@ void NORETURN punexpected(const char *err) {
 	err_with_pos(p.token.loc, "unexpected %s, %s", tok_dbg_str(p.token), err);
 }
 
-void pexpr(ir_rscope_t s) {
-	assert_not_reached();
-}
-
-// function declarations:
-// - io <name>            = ...
-// - io <name>: <pattern> = ...
-// - <name>:    <pattern> = ...
-
-// TODO: figure out internal representation of a pattern match
-void ppattern(void) {
+ir_node_t pexpr(ir_scope_t *s) {
 	assert_not_reached();
 }
 
@@ -387,7 +417,15 @@ type_t ptype(void) {
 	return type;
 }
 
-void pproc(ir_rscope_t s) {
+// will create vars it cannot find
+ir_pattern_t ppattern(ir_scope_t *s) {
+	assert_not_reached();
+}
+
+// function declarations:
+// - io <name>            = ...
+// - <name>:    <pattern> = ...
+bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 	bool is_io = false;
 
 	if (p.token.kind == TOK_IO) {
@@ -407,13 +445,16 @@ void pproc(ir_rscope_t s) {
 	// name:
 	//     ^
 	
-	if (p.token.kind == TOK_COLON) {
+	// remember, `io fn` has no patterns
+	if (!is_io && p.token.kind == TOK_COLON) {
 		pnext();
 		// TODO: parse pattern
 	}
 
 	pexpect(TOK_ASSIGN);
-	// TODO: pexpr(s);
+	
+	ir_node_t expr = {.kind = NODE_INTEGER_LIT, .type = TYPE_INFER, .d_integer_lit = sv_move("999")}; // pexpr(s);
+	ir_pattern_t pattern = {.kind = PATTERN_UNDERSCORE}; // ppattern(scope);
 
 	type_t type = TYPE_INFER;
 	if (p.next_type.name == name) {
@@ -421,11 +462,44 @@ void pproc(ir_rscope_t s) {
 		p.next_type.name = (u32)-1;
 	}
 
-	printf("type: %s\n", type_dbg_str(type));
-	printf("scope(%u): proc %s\n", s, sv_from(name));
+	if (!is_io && ir_exists_in(s, name)) {
+		// this will never be NULL
+		ir_node_t *other_def = ir_find_decl(multi_exprs, name);
+
+		if (other_def->kind != NODE_PROC_DECL) {
+			err_with_pos(name_loc, "redefinition of `%s`", sv_from(name));
+		}
+
+		arrpush(other_def->d_proc_decl.exprs, expr);
+		arrpush(other_def->d_proc_decl.patterns, pattern);
+		return false;
+	}
+
+	// create new var before evaluation so it can be referenced recursively
+	(void)ir_new_var(s, name, type, name_loc);
+	ir_scope_t *scope = ir_new_scope(s);
+
+	ir_node_t *exprs = NULL;
+	arrpush(exprs, expr);
+
+	ir_pattern_t *patterns = NULL;
+	arrpush(patterns, pattern);
+
+	*out_expr = (ir_node_t){
+		.kind = NODE_PROC_DECL,
+		.loc = name_loc,
+		.type = TYPE_UNIT,
+		.d_proc_decl = {
+			.name = name,
+			.exprs = exprs,
+			.patterns = patterns,
+			.scope = scope,
+		}
+	};
+	return true;
 }
 
-void ptypedecl(ir_rscope_t s) {
+void ptypedecl(ir_scope_t *s) {
 	// guard in here and in `pstmt()`
 	if (p.next_type.name != (u32)-1) {
 		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
@@ -440,6 +514,10 @@ void ptypedecl(ir_rscope_t s) {
 	// v :: i32 -> i32 -> ...
 	//      ^^^
 
+	if (ir_exists_in(s, name)) {
+		err_with_pos(name_loc, "type decl cannot proceed definition `%s`", sv_from(name));
+	}
+
 	type_t type = ptype();
 
 	p.next_type.type = type;
@@ -447,19 +525,26 @@ void ptypedecl(ir_rscope_t s) {
 	p.next_type.loc = name_loc;
 }
 
-void pstmt(ir_rscope_t s) {
+void pcheck_unused_typedecl(void) {
+	if (p.next_type.name != (u32)-1) {
+		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
+	}
+}
+
+// `multi_exprs` is used when multiple function declarations are in the same scope
+// can be null
+bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
+	bool set = false;
 	bool has_next_type = p.next_type.name != (u32)-1;
 	
-	if (p.token.kind == TOK_IDENT && p.peek.kind == TOK_COLON) {
-		pproc(s);
-	} else switch (p.token.kind) {
+	switch (p.token.kind) {
 		case TOK_IO: {
-			pproc(s);	
+			set = pproc(expr, s, NULL);
 			break;
 		}
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_COLON) {
-				pproc(s);
+				set = pproc(expr, s, multi_exprs);
 				break;
 			}
 			if (p.peek.kind == TOK_DOUBLE_COLON) {
@@ -469,28 +554,35 @@ void pstmt(ir_rscope_t s) {
 			// fall through
 		}
 		default: {
-			pexpr(s);
+			*expr = pexpr(s);
+			set = true;
 			break;
 		}
 	}
 
 	// error if type decl not used
-	if (has_next_type && p.next_type.name != (u32)-1) {
-		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
+	if (has_next_type) {
+		pcheck_unused_typedecl();
 	}
+
+	return set;
 }
 
 void ptop_stmt(void) {
 	switch (p.token.kind) {
 		default: {
-			pstmt(SCOPE_ROOT);
-			break;		
+			ir_node_t expr;
+			bool set = pstmt(&expr, NULL, p.modp->exprs);
+			if (set) {
+				arrpush(p.modp->exprs, expr);
+			}
+			break;
 		}
 	}
 }
 
 void pentry(rfile_t file) {
-	fs_file_t *f = fs_filep(file);
+	file_t *f = FILE_PTR(file);
 	
 	p = (pctx_t){
 		.pstart = f->data,
@@ -498,7 +590,8 @@ void pentry(rfile_t file) {
 		.pend = f->data + f->len,
 		.plast_nl = f->data,
 		.file = file,
-		.module = f->module,
+		.mod = f->mod,
+		.modp = MOD_PTR(f->mod),
 		.next_type.name = -1,
 	};
 
@@ -507,5 +600,57 @@ void pentry(rfile_t file) {
 
 	while (p.token.kind != TOK_EOF) {
 		ptop_stmt();
+	}
+	pcheck_unused_typedecl();
+}
+
+void _ir_dump_pattern(ir_pattern_t pattern) {
+	switch (pattern.kind) {
+		case PATTERN_UNDERSCORE: {
+			printf("_");
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
+	void *_ = alloc_scratch(0);
+	switch (node.kind) {
+		case NODE_PROC_DECL: {
+			ir_rvar_t var;
+			assert(ir_search_var(s, node.d_proc_decl.name, &var));
+			type_t fn_type = modp->vars[var].type;
+			
+			printf("%s :: %s\n", sv_from(node.d_proc_decl.name), type_dbg_str(fn_type));
+			printf("proc %s _ =\n", sv_from(node.d_proc_decl.name));
+			for (int i = 0, c = arrlen(node.d_proc_decl.exprs); i < c; i++) {
+				printf("  | ");
+				_ir_dump_pattern(node.d_proc_decl.patterns[i]);
+				printf(" = ");
+				_ir_dump_node(modp, &node.d_proc_decl.scope, node.d_proc_decl.exprs[i]);
+				printf("\n");
+			}
+			break;
+		}
+		case NODE_INTEGER_LIT: {
+			printf("%s", sv_from(node.d_integer_lit));
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+	alloc_reset(_);
+}
+
+void ir_dump_module(rmod_t mod) {
+	mod_t *modp = MOD_PTR(mod);
+	printf("module %s\n", sv_from(modp->on_disk.name));
+	for (u32 i = 0; i < arrlen(modp->exprs); i++) {
+		printf("\n");
+		_ir_dump_node(modp, NULL, modp->exprs[i]);
 	}
 }

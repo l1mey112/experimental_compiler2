@@ -26,9 +26,8 @@ typedef struct err_diag_t err_diag_t;
 typedef struct token_t token_t;
 typedef u16 type_t;
 typedef u32 istr_t;
-typedef u32 rmod_t;
-typedef u32 rfile_t;
-typedef u32 file_ref_t;
+typedef u16 rmod_t;
+typedef u16 rfile_t;
 typedef struct mod_t mod_t;
 typedef struct file_t file_t;
 
@@ -187,42 +186,85 @@ struct token_t {
 	istr_t lit;
 };
 
-#define SCOPE_ROOT 0
-
-enum ir_nkind_t {
-	NODE_PROC_DECL,
-	NODE_BINOP,
-	NODE_INTEGER_LITERAL,
-};
-
 typedef struct ir_scope_t ir_scope_t;
-typedef u32 ir_localref_t;
-typedef struct ir_local_t ir_local_t;
-typedef struct ir_expr_t ir_expr_t;
-typedef enum ir_nkind_t ir_nkind_t;
+typedef u32 ir_rvar_t;
+typedef struct ir_var_t ir_var_t;
+typedef struct ir_node_t ir_node_t;
+typedef struct ir_pattern_t ir_pattern_t;
 
 // TODO: define helper function for invalid loc_t
 // TODO: fancy arena allocators? fuck that!
 //       we're going for a quick and dirty bootstrap
 
-struct ir_local_t {
+struct ir_var_t {
 	istr_t name;
-	loc_t loc;
-};
-
-struct ir_scope_t {
-	ir_scope_t *parent;
-	ir_localref_t *locals;
-};
-
-struct ir_expr_t {
-	ir_nkind_t kind;
 	loc_t loc;
 	type_t type;
 };
 
-struct mod_t {
+struct ir_scope_t {
+	ir_scope_t *parent;
+	ir_rvar_t *locals;
+};
 
+// TODO: match on tuples and arrays
+struct ir_pattern_t {
+	enum pattern_kind_t {
+		PATTERN_VAR,
+		PATTERN_UNDERSCORE,
+		PATTERN_TUPLE
+	} kind;
+
+	loc_t loc;
+
+	union {
+		ir_rvar_t d_var;
+		struct {
+			ir_pattern_t *arg;
+			u32 len;
+		} d_tuple;
+	};
+};
+
+struct ir_node_t {
+	enum node_kind_t {
+		NODE_PROC_DECL,
+		NODE_DO_BLOCK,
+		NODE_BINOP,
+		NODE_INTEGER_LIT,
+		NODE_VAR,
+		NODE_CAST,
+	} kind;
+	
+	type_t type;
+	loc_t loc;
+
+	// #define MATCH_DO_BLOCK(expr, v, t) \
+	// 	case NODE_DO_BLOCK: {typeof((expr).do_block) *v = &(expr).do_block; t break;}
+
+	union {
+		ir_rvar_t d_var;
+		struct {
+			istr_t label; // -1 for none
+			ir_node_t *exprs;
+		} d_do_block;
+		struct {
+			ir_node_t *lhs;
+			ir_node_t *rhs;
+		} d_binop;
+		ir_node_t *d_cast;
+		istr_t d_integer_lit;
+		struct {
+			istr_t name;
+			ir_scope_t scope;
+			//
+			ir_pattern_t *patterns;
+			ir_node_t *exprs;
+		} d_proc_decl;
+	};
+};
+
+struct mod_t {
 	struct disk_t {
 		bool is_stub;
 		const char *path;
@@ -234,7 +276,9 @@ struct mod_t {
 		u32 files_count;
 	} on_disk;
 
-	// ir_local_t *locals;
+	ir_var_t *vars;
+	ir_scope_t toplevel;
+	ir_node_t *exprs;
 };
 
 struct file_t {
@@ -253,13 +297,22 @@ struct err_diag_t {
 
 extern u32 fs_files_queue_len;
 extern file_t fs_files_queue[512];
+extern u32 fs_mod_arena_len;
+extern mod_t fs_mod_arena[128];
+
+#define MOD_PTR(mod) (&fs_mod_arena[mod])
+#define FILE_PTR(file) (&fs_files_queue[file])
 
 void fs_set_entry_argp(const char *argp);
 rfile_t fs_set_entry_repl(void); // will register current directory
 rmod_t fs_register_root(const char *dp);
 rmod_t fs_register_import(rmod_t src, const char *fp, loc_t onerror_loc);
+//
+istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
+const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 
 void pentry(rfile_t f);
+void ir_dump_module(rmod_t mod);
 
 // TYPE_UNKNOWN is something else and non concrete
 #define TYPE_INFER ((type_t)-1)
@@ -328,14 +381,6 @@ struct tinfo_t {
 
 		// type_t type_ref;
 	};
-
-	/* union {
-		struct {
-			bool atomic : 1;
-			bool nullable : 1;
-		};
-		u8 flags;
-	}; */
 };
 
 type_t type_new(tinfo_t typeinfo, loc_t *loc);

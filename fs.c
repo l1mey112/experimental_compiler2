@@ -34,7 +34,7 @@ rmod_t fs_roots[8];
 
 static rmod_t _fs_make_stub(const char *dp, rmod_t parent) {
 	rmod_t id = fs_mod_arena_len++;
-	mod_t *mod = &fs_mod_arena[id];
+	mod_t *mod = MOD_PTR(id);
 	mod->on_disk.is_stub = true;
 	mod->on_disk.path = dp;
 	return id;
@@ -48,11 +48,11 @@ static void _fs_slurp_file_with_size(const char *fp, rmod_t mod, size_t size) {
 		ptr = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
 		close(0);
 		if (ptr == MAP_FAILED) {
-			err_without_pos("error: failed to mmap file '%s' - %s\n", fp, strerror(errno));
+			err_without_pos("failed to mmap file '%s' (errno: %s)", fp, strerror(errno));
 		}
 	}
 
-	file_t *file = &fs_files_queue[fs_files_queue_len++];
+	file_t *file = FILE_PTR(fs_files_queue_len++);
 
 	file->fp = fp;
 	file->data = (u8 *)ptr;
@@ -64,7 +64,7 @@ static void _fs_slurp_file_with_size(const char *fp, rmod_t mod, size_t size) {
 // ./compiler .        -> is_main: true, slurp: true
 static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bool slurp) {
 	rmod_t ref = fs_mod_arena_len++;
-	mod_t *mod = &fs_mod_arena[ref];
+	mod_t *mod = MOD_PTR(ref);
 
 	mod->on_disk.path = dp;
 	mod->on_disk.parent = parent;
@@ -77,7 +77,7 @@ static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bo
 
 	DIR *dir = opendir(dp);
 	if (!dir) {
-		err_without_pos("error: failed to open directory '%s' - %s\n", mod->on_disk.path, strerror(errno));
+		err_without_pos("failed to open directory '%s' (errno: %s)", mod->on_disk.path, strerror(errno));
 	}
 
 	u32 files_count = 0;
@@ -98,7 +98,7 @@ static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bo
 		asprintf(&concat_name, "%s/%s", mod->on_disk.path, entry->d_name);
 
 		if (stat(concat_name, &statbuf)) {
-			err_without_pos("error: failed to stat '%s' - %s\n", concat_name, strerror(errno));
+			err_without_pos("failed to stat '%s' (errno: %s)", concat_name, strerror(errno));
 		}
 
 		if (S_ISDIR(statbuf.st_mode)) {
@@ -118,7 +118,7 @@ static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bo
 	mod->on_disk.children_len = arrlen(children);
 
 	if (closedir(dir)) {
-		err_without_pos("error: failed to close directory '%s' - %s\n", mod->on_disk.path, strerror(errno));
+		err_without_pos("failed to close directory '%s' (errno: %s)", mod->on_disk.path, strerror(errno));
 	}
 
 	return ref;
@@ -127,7 +127,7 @@ static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bo
 static void _fs_slurp_file(const char *p, rmod_t mod) {
 	struct stat statbuf;
 	if (stat(p, &statbuf)) {
-		err_without_pos("error: failed to stat '%s' - %s\n", p, strerror(errno));
+		err_without_pos("failed to stat '%s' (errno: %s)", p, strerror(errno));
 	}
 	_fs_slurp_file_with_size(p, mod, statbuf.st_size);
 	fs_mod_arena[mod].on_disk.files_count++;
@@ -141,7 +141,7 @@ static rmod_t _fs_set_entry_root(const char *dp) {
 
 static rmod_t _fs_set_entry_file(const char *fp) {
 	const char *bp = base_path(fp);
-	rmod_t mod = _fs_make_directory(fp, -1, true, false);
+	rmod_t mod = _fs_make_directory(bp, -1, true, false);
 	fs_roots[fs_roots_len++] = mod; // assign root
 	_fs_slurp_file(fp, mod);
 	return mod;
@@ -157,24 +157,73 @@ void fs_set_entry_argp(const char *argp) {
 
 // roots are searched left to right, for their enclosing directories
 rmod_t fs_register_root(const char *dp) {
-	rmod_t mod = _fs_make_directory(dp, (u32)-1, false, false);
+	rmod_t mod = _fs_make_directory(dp, (rmod_t)-1, false, false);
 	fs_roots[fs_roots_len++] = mod; // assign root
 	return mod;
 }
 
 rfile_t fs_set_entry_repl(void) {
 	const char *dp = get_current_dir_name();
-	rmod_t mod = _fs_make_directory(dp, (u32)-1, true, false);
-	mod_t *modp = &fs_mod_arena[mod];
+	rmod_t mod = _fs_make_directory(dp, (rmod_t)-1, true, false);
+	mod_t *modp = MOD_PTR(mod);
 
 	modp->on_disk.files_count++;
 
 	rfile_t file = fs_files_queue_len++;
-	file_t *filep = &fs_files_queue[file];
+	file_t *filep = FILE_PTR(file);
 	filep->mod = mod;
 	filep->fp = "<repl>";
 
 	return file;
+}
+
+static bool _fs_is_root(rmod_t mod) {
+	for (u32 i = 0; i < fs_mod_arena_len; i++) {
+		if (fs_roots[i] == mod) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static u32 _fs_module_symbol_str_conv(rmod_t mod, u8 *p) {
+	u32 nwritten = 0;
+	mod_t *node = MOD_PTR(mod);
+	if (node->on_disk.parent != (rmod_t)-1 && !_fs_is_root(node->on_disk.parent)) {
+		nwritten = _fs_module_symbol_str_conv(node->on_disk.parent, p);
+		p += nwritten;
+		*p++ = '.', nwritten++;
+	}
+	const char *sv = sv_from(node->on_disk.name);
+	nwritten += ptrcpy(p, (u8 *)sv, strlen(sv));
+	return nwritten;
+}
+
+// symbol can be -1
+const char *fs_module_symbol_str(rmod_t mod, istr_t symbol) {
+	// module: mod1.mod2.mod3 <-- follow chain from mod3
+	// symbol: add()
+	// return: mod1.mod2.mod3.add
+
+	u8 *p = alloc_scratch(0);
+
+	u32 nwritten = _fs_module_symbol_str_conv(mod, p);
+	if (symbol != (istr_t)-1) {
+		p[nwritten++] = '.';
+		const char *sv = sv_from(symbol);
+		nwritten += ptrcpy(p + nwritten, (u8 *)sv, strlen(sv));
+	}
+	p[nwritten++] = '\0';
+	(void)alloc_scratch(nwritten);
+
+	return (const char *)p;
+}
+
+istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol) {
+	const char *p = fs_module_symbol_str(mod, symbol);
+	istr_t intern = sv_intern((u8*)p, strlen(p));
+	alloc_reset((u8*)p);
+	return intern;
 }
 
 const char *last_path(const char* path) {

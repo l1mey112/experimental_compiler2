@@ -23,7 +23,7 @@ void NORETURN err_with_pos(loc_t loc, const char *fmt, ...) {
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	file_t *file = &fs_files_queue[loc.file];
+	file_t *file = FILE_PTR(loc.file);
 
 	snprintf(err_diag.err_string, sizeof(err_diag.err_string), "%s:%u:%u: %s", file->fp, loc.line_nr + 1, loc.col + 1, buf);
 	longjmp(err_diag.unwind, 1);
@@ -53,10 +53,15 @@ int main(int argc, const char *argv[]) {
 
 	// TODO: register `lib/`
 
+	int rval = 0;
+
 	if (argc == 1) {
-		// repl
+		// TODO: repl shoudln't tear down the parsing context every SINGLE time
+		//       just edit pfile() instead
+		// TODO: how would this work with error recovery?
+		//       discard the stream, but keep the module etc (typedecls need to stay too)
 		rfile_t repl = fs_set_entry_repl();
-		file_t *replp = &fs_files_queue[repl];
+		file_t *replp = FILE_PTR(repl);
 
 		rfile_t i = fs_files_queue_len - 1;
 		
@@ -83,12 +88,14 @@ int main(int argc, const char *argv[]) {
 				pentry(i);
 			}
 		}
+		eprintf("exiting repl\n");
 	} else if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
 			// TODO: report error at proper area and print offending line
 			//       err_string is good enough for now
 			eprintf("error: %s\n", err_diag.err_string);
-			return 1;
+			rval = 1;
+			goto ret;
 		}
 
 		fs_set_entry_argp(argv[1]);
@@ -106,8 +113,11 @@ int main(int argc, const char *argv[]) {
 		eprintf("usage: %s <file|dir>\n", argv[0]);
 		eprintf("usage: %s\n", argv[0]);
 	}
-	
+ret:
 	// TODO: register_root() etc for module system
 	
-	eprintf("exiting\n");
+
+	ir_dump_module(0); // main module
+
+	return rval;
 }
