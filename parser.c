@@ -77,6 +77,7 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t o
 }
 
 // NULL meaning toplevel, but that doesn't make sense?
+// out can be NULL
 // will search parent
 static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
 	if (scope == NULL) {
@@ -88,7 +89,9 @@ static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
 		ir_var_t *var = &p.modp->vars[id];
 
 		if (var->name == name) {
-			*out = id;
+			if (out) {
+				*out = id;
+			}
 			return true;
 		}
 	}
@@ -101,7 +104,14 @@ static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
 	}
 }
 
-static ir_scope_t *ir_new_scope(ir_scope_t *parent) {
+static ir_scope_t ir_new_scope(ir_scope_t *parent) {
+	ir_scope_t scope = {
+		.parent = parent,
+	};
+	return scope;
+}
+
+static ir_scope_t *ir_new_scope_ptr(ir_scope_t *parent) {
 	ir_scope_t *scope = malloc(sizeof(ir_scope_t));
 	*scope = (ir_scope_t){.parent = parent};
 	return scope;
@@ -117,6 +127,12 @@ static ir_node_t *ir_find_decl(ir_node_t *exprs, istr_t name) {
 		}
 	}
 	return NULL;
+}
+
+static ir_node_t *ir_memdup(ir_node_t node) {
+	ir_node_t *ptr = malloc(sizeof(ir_node_t));
+	*ptr = node;
+	return ptr;
 }
 
 static bool is_id_begin(u8 ch) {
@@ -309,8 +325,156 @@ void NORETURN punexpected(const char *err) {
 	err_with_pos(p.token.loc, "unexpected %s, %s", tok_dbg_str(p.token), err);
 }
 
-ir_node_t pexpr(ir_scope_t *s) {
-	assert_not_reached();
+enum {
+	PREC_UNKNOWN, // default
+	PREC_ASSIGN,  // = += -= *= /= %=
+	PREC_CMP,     // && || (TODO: needs parens)
+	PREC_EQ,      // == != < > <= >=
+	PREC_BOR,     // |
+	PREC_XOR,     // ^
+	//PREC_BAND,    // &
+	PREC_ADD,     // + -
+	PREC_MUL,     // * / %
+	PREC_CAST,    // :
+	PREC_PREFIX,  // - * ! &
+	PREC_POSTFIX, // ++ --
+	PREC_CALL,    // .x x() x[]
+};
+
+static u8 ptok_prec(tok_t kind) {
+	// PREC_PREFIX is determined elsewhere
+
+	switch (kind) {
+		case TOK_DOT:
+		case TOK_OSQ:
+		case TOK_OPAR:
+			return PREC_CALL;
+		case TOK_INC:
+		case TOK_DEC:
+			return PREC_POSTFIX;
+		case TOK_COLON:
+			return PREC_CAST;
+		case TOK_MUL:
+		case TOK_DIV:
+		case TOK_MOD:
+			return PREC_MUL;
+		case TOK_ADD:
+		case TOK_SUB:
+			return PREC_ADD;
+		/* case TOK_BAND:
+			return PREC_BAND; */
+		case TOK_XOR:
+			return PREC_XOR;
+		/* case TOK_BOR:
+			return PREC_BOR; */
+		case TOK_EQ:
+		case TOK_NEQ:
+		case TOK_LT:
+		case TOK_GT:
+		case TOK_GE:
+		case TOK_LE:
+			return PREC_EQ;
+		case TOK_AND:
+		case TOK_OR:
+			return PREC_CMP;
+		case TOK_ASSIGN:
+		case TOK_ASSIGN_ADD:
+		case TOK_ASSIGN_SUB:
+		case TOK_ASSIGN_MUL:
+		case TOK_ASSIGN_DIV:
+		case TOK_ASSIGN_MOD:
+			return PREC_ASSIGN;
+		default:
+			return PREC_UNKNOWN;
+	}
+}
+
+ir_node_t pexpr(ir_scope_t *s, u8 prec) {
+	ir_node_t node;
+	
+	switch (p.token.kind) {
+		case TOK_IDENT: {
+			// TODO: modules
+			ir_rvar_t var;
+			if (ir_search_var(s, p.token.lit, &var)) {
+				node = (ir_node_t){
+					.kind = NODE_VAR,
+					.loc = p.token.loc,
+					.type = TYPE_INFER,
+					.d_var = var,
+				};
+			} else {
+				node = (ir_node_t){
+					.kind = NODE_SYM,
+					.loc = p.token.loc,
+					.type = TYPE_INFER,
+					.d_sym = p.token.lit,
+				};
+			}
+			pnext();
+			break;
+		}
+		case TOK_OPAR: {
+			pnext();
+			node = pexpr(s, 0);
+			pexpect(TOK_CPAR);
+			break;
+		}
+		case TOK_INTEGER: {
+			node = (ir_node_t){
+				.kind = NODE_INTEGER_LIT,
+				.loc = p.token.loc,
+				.type = TYPE_INFER,
+				.d_integer_lit = p.token.lit,
+			};
+			pnext();
+			break;
+		}
+		default: {}
+	}
+
+	if (p.token.kind == TOK_EOF) {
+		return node;
+	}
+
+	while (prec < ptok_prec(p.token.kind)) {
+		token_t token = p.token;
+
+		switch (token.kind) {
+			case TOK_INC:
+			case TOK_DEC: {
+				pnext();
+				node = (ir_node_t){
+					.kind = NODE_POSTFIX,
+					.loc = token.loc,
+					.type = TYPE_INFER,
+					.d_postfix.expr = ir_memdup(node),
+					.d_postfix.kind = token.kind,
+				};
+				continue;
+			}
+			default: {
+				if (TOK_IS_INFIX(token.kind)) {
+					pnext();
+					ir_node_t rhs = pexpr(s, ptok_prec(token.kind));
+					node = (ir_node_t){
+						.kind = NODE_INFIX,
+						.loc = token.loc,
+						.type = TYPE_INFER,
+						.d_infix.lhs = ir_memdup(node),
+						.d_infix.rhs = ir_memdup(rhs),
+						.d_infix.kind = token.kind,
+					};
+					continue;
+				} else {
+					goto exit;
+				}
+			}
+		}
+	}
+exit:
+
+	return node;
 }
 
 // will be filled from main()
@@ -427,7 +591,38 @@ type_t ptype(void) {
 
 // will create vars it cannot find
 ir_pattern_t ppattern(ir_scope_t *s) {
-	assert_not_reached();
+	switch (p.token.kind) {
+		case TOK_UNDERSCORE: {
+			pnext();
+			return (ir_pattern_t){
+				.kind = PATTERN_UNDERSCORE,
+			};
+		}
+		case TOK_IDENT: {
+			istr_t name = p.token.lit;
+			loc_t name_loc = p.token.loc;
+			pnext();
+			ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc);
+			return (ir_pattern_t){
+				.loc = name_loc,
+				.kind = PATTERN_VAR,
+				.d_var = var,
+			};
+		}
+		case TOK_INTEGER: {
+			istr_t val = p.token.lit;
+			loc_t loc = p.token.loc;
+			pnext();
+			return (ir_pattern_t){
+				.loc = loc,
+				.kind = PATTERN_INTEGER_LIT,
+				.d_integer_lit = val,
+			};
+		}
+		default: {
+			punexpected("expected pattern");
+		}
+	}
 }
 
 // function declarations:
@@ -450,19 +645,46 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 
 	pnext();
 
-	// name:
+	// name: <pattern> =
 	//     ^
+
+	// io name =
+	//         ^
+
+	ir_scope_t enclosing_scope = ir_new_scope(s);
+	ir_pattern_t pattern;
 	
 	// remember, `io fn` has no patterns
 	if (!is_io && p.token.kind == TOK_COLON) {
 		pnext();
-		// TODO: parse pattern
+		ir_pattern_t *patterns = NULL;
+
+		// <pattern>, <pattern>, <pattern> = ...
+		// ^^^^^^^^^
+
+		do {
+			ir_pattern_t pattern = ppattern(&enclosing_scope);
+			arrpush(patterns, pattern);
+			if (p.token.kind == TOK_COMMA) {
+				pnext();
+			} else {
+				break;
+			}
+		} while (true);
+
+		pattern = (ir_pattern_t){
+			.kind = PATTERN_TUPLE,
+			.loc = name_loc,
+			.d_tuple = {
+				.elems = patterns,
+				.len = arrlen(patterns),
+			},
+		};
 	}
 
 	pexpect(TOK_ASSIGN);
-	
-	ir_node_t expr = {.kind = NODE_INTEGER_LIT, .type = TYPE_INFER, .d_integer_lit = sv_move("999")}; // pexpr(s);
-	ir_pattern_t pattern = {.kind = PATTERN_UNDERSCORE}; // ppattern(scope);
+
+	ir_node_t expr = pexpr(&enclosing_scope, 0);
 
 	type_t type = TYPE_INFER;
 	if (p.next_type.name == name) {
@@ -480,18 +702,21 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 
 		arrpush(other_def->d_proc_decl.exprs, expr);
 		arrpush(other_def->d_proc_decl.patterns, pattern);
+		arrpush(other_def->d_proc_decl.scopes, enclosing_scope);
 		return false;
 	}
 
 	// create new var before evaluation so it can be referenced recursively
 	(void)ir_new_var(s, name, type, name_loc);
-	ir_scope_t *scope = ir_new_scope(s);
 
 	ir_node_t *exprs = NULL;
 	arrpush(exprs, expr);
 
 	ir_pattern_t *patterns = NULL;
 	arrpush(patterns, pattern);
+
+	ir_scope_t *scopes = NULL;
+	arrpush(scopes, enclosing_scope);
 
 	*out_expr = (ir_node_t){
 		.kind = NODE_PROC_DECL,
@@ -501,7 +726,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 			.name = name,
 			.exprs = exprs,
 			.patterns = patterns,
-			.scope = scope,
+			.scopes = scopes,
 		}
 	};
 	return true;
@@ -562,7 +787,7 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 			// fall through
 		}
 		default: {
-			*expr = pexpr(s);
+			*expr = pexpr(s, 0);
 			set = true;
 			break;
 		}
@@ -612,15 +837,55 @@ void pentry(rfile_t file) {
 	pcheck_unused_typedecl();
 }
 
-void _ir_dump_pattern(ir_pattern_t pattern) {
+void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 	switch (pattern.kind) {
 		case PATTERN_UNDERSCORE: {
 			printf("_");
 			break;
 		}
+		case PATTERN_INTEGER_LIT: {
+			printf("%s", sv_from(pattern.d_integer_lit));
+			break;
+		}
+		case PATTERN_VAR: {
+			ir_var_t *varp = &modp->vars[pattern.d_var];
+			printf("%s", sv_from(varp->name));
+			break;
+		}
+		case PATTERN_TUPLE: {
+			printf("(");
+			for (u32 i = 0; i < pattern.d_tuple.len; i++) {
+				_ir_dump_pattern(modp, s, pattern.d_tuple.elems[i]);
+				if (i != pattern.d_tuple.len - 1) {
+					printf(", ");
+				}
+			}
+			printf(")");
+			break;
+		}
 		default: {
 			assert_not_reached();
 		}
+	}
+}
+
+const char *_ir_op_literal(tok_t tok) {
+	switch (tok) {
+		#define X(val, lit) \
+			case val: return lit;
+		TOK_X_OPERATOR_LIST
+		#undef X
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+void _ir_dump_scope(mod_t *modp, ir_scope_t *s) {
+	for (int i = 0, c = arrlen(s->locals); i < c; i++) {
+		ir_rvar_t var = s->locals[i];
+		ir_var_t *varp = &modp->vars[var];
+		printf("  %s :: %s\n", sv_from(varp->name), type_dbg_str(varp->type));
 	}
 }
 
@@ -633,18 +898,38 @@ void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			type_t fn_type = modp->vars[var].type;
 			
 			printf("%s :: %s\n", sv_from(node.d_proc_decl.name), type_dbg_str(fn_type));
-			printf("proc %s _ =\n", sv_from(node.d_proc_decl.name));
+			printf("%s _ = switch\n", sv_from(node.d_proc_decl.name));
 			for (int i = 0, c = arrlen(node.d_proc_decl.exprs); i < c; i++) {
-				printf("  | ");
-				_ir_dump_pattern(node.d_proc_decl.patterns[i]);
-				printf(" = ");
-				_ir_dump_node(modp, &node.d_proc_decl.scope, node.d_proc_decl.exprs[i]);
+				// _ir_dump_scope(modp, &node.d_proc_decl.scopes[i]);
+				printf("  "); // TODO: nr_tabs = 1
+				_ir_dump_pattern(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.patterns[i]);
+				printf(" -> ");
+				_ir_dump_node(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.exprs[i]);
 				printf("\n");
 			}
 			break;
 		}
+		case NODE_VAR: {
+			printf("%s", sv_from(modp->vars[node.d_var].name));
+			break;
+		}
+		case NODE_SYM: {
+			printf("%s", sv_from(node.d_sym));
+			break;
+		}
 		case NODE_INTEGER_LIT: {
 			printf("%s", sv_from(node.d_integer_lit));
+			break;
+		}
+		case NODE_POSTFIX: {
+			_ir_dump_node(modp, s, *node.d_postfix.expr);
+			printf("%s", node.d_postfix.kind == TOK_INC ? "++" : "--");
+			break;
+		}
+		case NODE_INFIX: {
+			_ir_dump_node(modp, s, *node.d_infix.lhs);
+			printf(" %s ", _ir_op_literal(node.d_infix.kind));
+			_ir_dump_node(modp, s, *node.d_infix.rhs);
 			break;
 		}
 		default: {

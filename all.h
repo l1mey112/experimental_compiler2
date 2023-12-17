@@ -77,6 +77,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 
 // in specific order due to how operators are parsed
 #define TOK_X_OPERATOR_LIST \
+	X(TOK_UNDERSCORE, "_") \
 	X(TOK_ARROW, "->") \
 	X(TOK_INC, "++") \
 	X(TOK_ASSIGN_ADD, "+=") \
@@ -103,7 +104,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_GT, ">") \
 	X(TOK_AND, "&&") \
 	X(TOK_OR, "||") \
-	X(TOK_BAND, "&") \
+	X(TOK_PIPE, "|") \
 	X(TOK_XOR, "^") \
 	X(TOK_TILDE, "~") \
 	X(TOK_DOT, ".") \
@@ -115,6 +116,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_DOUBLE_COLON, "::") \
 	X(TOK_COLON, ":") \
 	X(TOK_QUESTION, "?")
+
+//	X(TOK_BAND, "&") \
 
 #define TOK_HAS_LIT(t) \
 	((t) == TOK_IDENT || \
@@ -147,14 +150,16 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	(t) == TOK_GE || \
 	(t) == TOK_AND || \
 	(t) == TOK_OR || \
-	(t) == TOK_BAND || \
-	(t) == TOK_BOR || \
 	(t) == TOK_XOR || \
 	(t) == TOK_LSHIFT || \
 	(t) == TOK_RSHIFT || \
 	(t) == TOK_RUSHIFT || \
-	(t) == TOK_DOT || \
-	(t) == TOK_AS)
+	(t) == TOK_DOT)
+
+// TODO: impl pipe
+// (t) == TOK_BAND || \
+// (t) == TOK_BOR || \
+	
 
 #define TOK_X_LIST \
 	X(TOK_UNDEFINED, "tok_undefined") \
@@ -212,7 +217,8 @@ struct ir_pattern_t {
 	enum pattern_kind_t {
 		PATTERN_VAR,
 		PATTERN_UNDERSCORE,
-		PATTERN_TUPLE
+		PATTERN_TUPLE,
+		PATTERN_INTEGER_LIT,
 	} kind;
 
 	loc_t loc;
@@ -220,9 +226,10 @@ struct ir_pattern_t {
 	union {
 		ir_rvar_t d_var;
 		struct {
-			ir_pattern_t *arg;
+			ir_pattern_t *elems;
 			u32 len;
 		} d_tuple;
+		istr_t d_integer_lit;
 	};
 };
 
@@ -230,9 +237,11 @@ struct ir_node_t {
 	enum node_kind_t {
 		NODE_PROC_DECL,
 		NODE_DO_BLOCK,
-		NODE_BINOP,
+		NODE_INFIX,
+		NODE_POSTFIX,
 		NODE_INTEGER_LIT,
 		NODE_VAR,
+		NODE_SYM,
 		NODE_CAST,
 	} kind;
 	
@@ -244,6 +253,11 @@ struct ir_node_t {
 
 	union {
 		ir_rvar_t d_var;
+		istr_t d_sym;
+		struct {
+			ir_node_t *expr;
+			tok_t kind;
+		} d_postfix;
 		struct {
 			istr_t label; // -1 for none
 			ir_node_t *exprs;
@@ -251,12 +265,13 @@ struct ir_node_t {
 		struct {
 			ir_node_t *lhs;
 			ir_node_t *rhs;
-		} d_binop;
+			tok_t kind;
+		} d_infix;
 		ir_node_t *d_cast;
 		istr_t d_integer_lit;
 		struct {
 			istr_t name;
-			ir_scope_t scope;
+			ir_scope_t *scopes;
 			//
 			ir_pattern_t *patterns;
 			ir_node_t *exprs;
