@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
@@ -15,26 +16,36 @@ err_diag_t err_diag;
 	#error "not portable to places other than linux"
 #endif
 
-void NORETURN err_with_pos(loc_t loc, const char *fmt, ...) {
-	char buf[256];
+void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
+	char err_string[256];
 	
 	va_list args;
 	va_start(args, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, args);
+	vsnprintf(err_string, sizeof(err_string), fmt, args);
 	va_end(args);
 
 	file_t *file = FILE_PTR(loc.file);
 
-	snprintf(err_diag.err_string, sizeof(err_diag.err_string), "%s:%u:%u: %s", file->fp, loc.line_nr + 1, loc.col + 1, buf);
-	longjmp(err_diag.unwind, 1);
+	if (isatty(fileno(stdout))) {
+		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, file->fp, loc.line_nr + 1, loc.col + 1, err_string);	
+	} else {
+		eprintf("%s: %s:%u:%u: %s\n", type, file->fp, loc.line_nr + 1, loc.col + 1, err_string);	
+	}
 }
 
-void NORETURN err_without_pos(const char *fmt, ...) {
+void print_diag_without_pos(const char *type, const char *fmt, ...) {
+	char err_string[256];
+	
 	va_list args;
 	va_start(args, fmt);
-	vsnprintf(err_diag.err_string, sizeof(err_diag.err_string), fmt, args);
+	vsnprintf(err_string, sizeof(err_string), fmt, args);
 	va_end(args);
-	longjmp(err_diag.unwind, 1);
+
+	if (isatty(fileno(stdout))) {
+		eprintf("\033[1;31m%s:\033[0m %s\n", type, err_string);
+	} else {
+		eprintf("%s: %s\n", type, err_string);
+	}
 }
 
 int main(int argc, const char *argv[]) {
@@ -72,9 +83,6 @@ int main(int argc, const char *argv[]) {
 			}
 
 			if (setjmp(err_diag.unwind)) {
-				// TODO: report error at proper area and print offending line
-				//       err_string is good enough for now
-				eprintf("error: %s\n", err_diag.err_string);
 				continue;
 			}
 
@@ -91,9 +99,6 @@ int main(int argc, const char *argv[]) {
 		eprintf("exiting repl\n");
 	} else if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
-			// TODO: report error at proper area and print offending line
-			//       err_string is good enough for now
-			eprintf("error: %s\n", err_diag.err_string);
 			rval = 1;
 			goto ret;
 		}

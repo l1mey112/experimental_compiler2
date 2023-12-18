@@ -45,11 +45,43 @@ void alloc_reset(u8 *p);
 #define NORETURN __attribute__ ((noreturn))
 #define ARRAYLEN(v) ((u32)(sizeof(v) / sizeof(*(v))))
 
-void err_with_pos(loc_t loc, const char *fmt, ...)
-	__attribute__((format(printf, 2, 3))) NORETURN;
+struct err_diag_t {
+	jmp_buf unwind;
+};
 
-void err_without_pos(const char *fmt, ...)
-	__attribute__((format(printf, 1, 2))) NORETURN;
+extern err_diag_t err_diag;
+
+void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...);
+void print_diag_without_pos(const char *type, const char *fmt, ...);
+
+#define err_unwind() longjmp(err_diag.unwind, 1)
+
+#define print_err_with_pos(loc, fmt, ...) do {                 \
+		print_diag_with_pos("error", loc, fmt, ##__VA_ARGS__); \
+	} while (0)
+
+#define print_err_without_pos(fmt, ...) do {                 \
+		print_diag_without_pos("error", fmt, ##__VA_ARGS__); \
+	} while (0)
+
+#define print_hint_with_pos(loc, fmt, ...) do {               \
+		print_diag_with_pos("hint", loc, fmt, ##__VA_ARGS__); \
+	} while (0)
+
+#define print_hint_without_pos(fmt, ...) do {               \
+		print_diag_without_pos("hint", fmt, ##__VA_ARGS__); \
+	} while (0)
+
+#define err_with_pos(loc, fmt, ...) do {             \
+		print_err_with_pos(loc, fmt, ##__VA_ARGS__); \
+		err_unwind();                                \
+	} while (0)
+
+#define err_without_pos(fmt, ...) do {             \
+		print_err_without_pos(fmt, ##__VA_ARGS__); \
+		err_unwind();                              \
+	} while (0)
+
 
 #define sv_cmp_literal(a, alen, b) sv_cmp(a, alen, (u8 *)b, sizeof(b "") - 1)
 static inline bool sv_cmp(u8 *a, size_t alen, u8 *b, size_t blen) {
@@ -325,13 +357,6 @@ struct file_t {
 	u8 *data;
 	size_t len;
 	rmod_t mod;
-};
-
-struct err_diag_t {
-	jmp_buf unwind;
-	char err_string[256];
-	// TODO: more err information
-	// loc_t err_loc;
 };
 
 extern u32 fs_files_queue_len;
