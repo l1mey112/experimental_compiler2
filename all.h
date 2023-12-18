@@ -266,6 +266,7 @@ struct ir_node_t {
 			tok_t kind;
 		} d_prefix;
 		struct {
+			ir_scope_t scope;
 			istr_t label; // -1 for none
 			ir_node_t *exprs;
 		} d_do_block;

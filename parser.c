@@ -111,12 +111,6 @@ static ir_scope_t ir_new_scope(ir_scope_t *parent) {
 	return scope;
 }
 
-static ir_scope_t *ir_new_scope_ptr(ir_scope_t *parent) {
-	ir_scope_t *scope = malloc(sizeof(ir_scope_t));
-	*scope = (ir_scope_t){.parent = parent};
-	return scope;
-}
-
 // find declaration in exprs, or NULL
 // warning: possibly unstable pointer
 static ir_node_t *ir_find_decl(ir_node_t *exprs, istr_t name) {
@@ -404,6 +398,47 @@ static u8 ptok_prec(tok_t kind) {
 	}
 }
 
+bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs);
+
+// do
+//     ...
+//     ...
+ir_node_t pdo(ir_scope_t *s) {
+	loc_t oloc = p.token.loc;
+	pnext();
+	if (p.token.loc.line_nr == oloc.line_nr) {
+		err_with_pos(oloc, "expected newline after `do`");
+	}
+	u32 bcol = p.token.loc.col;
+
+	ir_node_t block = {
+		.kind = NODE_DO_BLOCK,
+		.loc = oloc,
+		.type = TYPE_INFER,
+		.d_do_block = {
+			.scope = ir_new_scope(s),
+			.exprs = NULL,
+			.label = (istr_t)-1,
+		},
+	};
+
+	while (p.token.kind != TOK_EOF) {
+		u32 cln = p.token.loc.line_nr;
+		
+		ir_node_t expr;
+		bool set = pstmt(&expr, &block.d_do_block.scope, block.d_do_block.exprs);
+		if (set) {
+			arrpush(block.d_do_block.exprs, expr);
+		}
+
+		if (cln != p.token.loc.line_nr && p.token.loc.col != bcol) {
+			break;
+		}
+	}
+
+	return block;
+}
+
 // end_tok as 0 means undefined
 ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 	ir_node_t node;
@@ -449,12 +484,16 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 			pnext();
 			break;
 		}
+		case TOK_DO: {
+			node = pdo(s);
+			break;
+		}
 		default: {
 			token_t token = p.token;
 
 			if (TOK_IS_PREFIX(token.kind)) {
 				pnext();
-				/* if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
+				if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
 					node = (ir_node_t){
 						.kind = NODE_INTEGER_LIT,
 						.loc = token.loc,
@@ -465,7 +504,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 						},
 					};
 					pnext();
-				} else  */{
+				} else {
 					ir_node_t rhs = pexpr(s, PREC_PREFIX, 0);
 					node = (ir_node_t){
 						.kind = NODE_PREFIX,
@@ -829,6 +868,7 @@ void pcheck_unused_typedecl(void) {
 
 // `multi_exprs` is used when multiple function declarations are in the same scope
 // can be null
+// IT IS VERY IMPORTANT THAT `multi_exprs` HAS SCOPE `s`
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 	bool set = false;
 	bool has_next_type = p.next_type.name != (u32)-1;
@@ -952,26 +992,21 @@ void _ir_dump_scope(mod_t *modp, ir_scope_t *s) {
 	}
 }
 
-void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
-	void *_ = alloc_scratch(0);
+static u32 _ir_tabcnt = 0;
+void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node);
+
+void _ir_tabs(void) {
+	for (u32 i = 0; i < _ir_tabcnt; i++) {
+		printf("  ");
+	}
+}
+
+#define TAB_PRINTF(...) \
+	_ir_tabs(); \
+	printf(__VA_ARGS__);
+
+void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
-		case NODE_PROC_DECL: {
-			ir_rvar_t var;
-			assert(ir_search_var(s, node.d_proc_decl.name, &var));
-			type_t fn_type = modp->vars[var].type;
-			
-			printf("%s :: %s\n", sv_from(node.d_proc_decl.name), type_dbg_str(fn_type));
-			printf("%s _ = switch\n", sv_from(node.d_proc_decl.name));
-			for (int i = 0, c = arrlen(node.d_proc_decl.exprs); i < c; i++) {
-				// _ir_dump_scope(modp, &node.d_proc_decl.scopes[i]);
-				printf("  "); // TODO: nr_tabs = 1
-				_ir_dump_pattern(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.patterns[i]);
-				printf(" -> ");
-				_ir_dump_node(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.exprs[i]);
-				printf("\n");
-			}
-			break;
-		}
 		case NODE_VAR: {
 			printf("%s", sv_from(modp->vars[node.d_var].name));
 			break;
@@ -989,32 +1024,72 @@ void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_POSTFIX: {
-			_ir_dump_node(modp, s, *node.d_postfix.expr);
+			_ir_dump_expr(modp, s, *node.d_postfix.expr);
 			printf("%s", node.d_postfix.kind == TOK_INC ? "++" : "--");
 			break;
 		}
 		case NODE_INFIX: {
 			printf("(%s ", _ir_op_literal(node.d_infix.kind));
-			_ir_dump_node(modp, s, *node.d_infix.lhs);
+			_ir_dump_expr(modp, s, *node.d_infix.lhs);
 			printf(" ");
-			_ir_dump_node(modp, s, *node.d_infix.rhs);
+			_ir_dump_expr(modp, s, *node.d_infix.rhs);
 			printf(")");
 			break;
 		}
 		case NODE_PREFIX: {
 			printf("%s", _ir_op_literal(node.d_prefix.kind));
-			_ir_dump_node(modp, s, *node.d_prefix.expr);
+			_ir_dump_expr(modp, s, *node.d_prefix.expr);
 			break;
 		}
 		case NODE_CALL: {
-			_ir_dump_node(modp, s, *node.d_call.f);
+			_ir_dump_expr(modp, s, *node.d_call.f);
 			printf("(");
-			_ir_dump_node(modp, s, *node.d_call.arg);
+			_ir_dump_expr(modp, s, *node.d_call.arg);
 			printf(")");
+			break;
+		}
+		case NODE_DO_BLOCK: {
+			printf("do\n");
+			_ir_tabcnt++;
+			for (int i = 0, c = arrlen(node.d_do_block.exprs); i < c; i++) {
+				_ir_dump_stmt(modp, &node.d_do_block.scope, node.d_do_block.exprs[i]);
+			}
+			_ir_tabcnt--;
 			break;
 		}
 		default: {
 			assert_not_reached();
+		}
+	}
+}
+
+void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
+	void *_ = alloc_scratch(0);
+	switch (node.kind) {
+		case NODE_PROC_DECL: {
+			ir_rvar_t var;
+			assert(ir_search_var(s, node.d_proc_decl.name, &var));
+			type_t fn_type = modp->vars[var].type;
+			
+			TAB_PRINTF("%s :: %s\n", sv_from(node.d_proc_decl.name), type_dbg_str(fn_type));
+			TAB_PRINTF("%s _ = switch\n", sv_from(node.d_proc_decl.name));
+			_ir_tabcnt++;
+			for (u32 i = 0, c = arrlenu(node.d_proc_decl.exprs); i < c; i++) {
+				// _ir_dump_scope(modp, &node.d_proc_decl.scopes[i]);
+				_ir_tabs();
+				_ir_dump_pattern(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.patterns[i]);
+				printf(" -> ");
+				_ir_dump_expr(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.exprs[i]);
+				printf("\n");
+			}
+			_ir_tabcnt--;
+			break;
+		}
+		default: {
+			_ir_tabs();
+			_ir_dump_expr(modp, s, node);
+			printf("\n");
+			break;
 		}
 	}
 	alloc_reset(_);
@@ -1023,8 +1098,7 @@ void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 void ir_dump_module(rmod_t mod) {
 	mod_t *modp = MOD_PTR(mod);
 	printf("module %s\n\n", sv_from(modp->on_disk.name));
-	for (u32 i = 0; i < arrlen(modp->exprs); i++) {
-		_ir_dump_node(modp, NULL, modp->exprs[i]);
-		printf("\n");
+	for (u32 i = 0, c = arrlenu(modp->exprs); i < c; i++) {
+		_ir_dump_stmt(modp, NULL, modp->exprs[i]);
 	}
 }

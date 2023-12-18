@@ -1,9 +1,9 @@
-add :: i32 -> i32 -> i32
-add: p, q = p + q
-;
-addone: p = -1 - 2
-addone: p = a b - 9 - 222
-;
-tester: p, q = q (-p + 2) 6
-;
-unary_fuckup: p = p -20
+a: x = do
+	b: y = x + y
+	brk b (0)
+
+b: x = do
+		1
+		2
+		3
+		+ 5
