@@ -287,7 +287,7 @@ struct ir_node_t {
 			istr_t name;
 			ir_scope_t *scopes;
 			//
-			ir_pattern_t *patterns;
+			ir_pattern_t *patterns; // NULL meaning single expr single scope
 			ir_node_t *exprs;
 		} d_proc_decl;
 		struct {

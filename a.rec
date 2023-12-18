@@ -1,5 +1,4 @@
-a: x = do
-	b: y = x + y
-	b 10
+io main = do
+	x = y
 
-v: v = (v, v, v)
+	y = x
