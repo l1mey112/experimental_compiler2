@@ -436,6 +436,26 @@ ir_node_t pdo(ir_scope_t *s) {
 		}
 	}
 
+	if (block.d_do_block.exprs == NULL) {
+		return (ir_node_t){
+			.kind = NODE_TUPLE_UNIT,
+			.loc = oloc,
+			.type = TYPE_UNIT,
+		};
+	}
+
+	// wrap last expr in break
+	// TODO: don't do this unless the last expr is not a break
+	ir_node_t *last = &arrlast(block.d_do_block.exprs);
+	ir_node_t node = *last;
+	
+	*last = (ir_node_t){
+		.kind = NODE_BREAK_INFERRED,
+		.loc = node.loc,
+		.type = TYPE_INFER,
+		.d_break_inferred.expr = ir_memdup(node)
+	};
+
 	return block;
 }
 
@@ -1118,6 +1138,11 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 				}
 			}
 			printf(")");
+			break;
+		}
+		case NODE_BREAK_INFERRED: {
+			printf("ibrk ");
+			_ir_dump_expr(modp, s, *node.d_break_inferred.expr);
 			break;
 		}
 		default: {

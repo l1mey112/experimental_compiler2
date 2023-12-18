@@ -248,6 +248,7 @@ struct ir_node_t {
 		NODE_CALL,
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
+		NODE_BREAK_INFERRED,
 	} kind;
 	
 	type_t type;
@@ -296,6 +297,9 @@ struct ir_node_t {
 		struct {
 			ir_node_t *elems;
 		} d_tuple;
+		struct {
+			ir_node_t *expr;
+		} d_break_inferred;
 	};
 };
 
