@@ -125,10 +125,11 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 
 #define TOK_IS_PREFIX(t) \
 	((t) == TOK_SUB || \
-	(t) == TOK_NOT || \
-	(t) == TOK_TILDE || \
+	(t) == TOK_NOT)
+
+/* (t) == TOK_TILDE || \
 	(t) == TOK_MUL || \
-	(t) == TOK_BAND)
+	(t) == TOK_BAND) */
 
 #define TOK_IS_INFIX(t) \
 	((t) == TOK_ADD || \
@@ -239,10 +240,12 @@ struct ir_node_t {
 		NODE_DO_BLOCK,
 		NODE_INFIX,
 		NODE_POSTFIX,
+		NODE_PREFIX,
 		NODE_INTEGER_LIT,
 		NODE_VAR,
 		NODE_SYM,
 		NODE_CAST,
+		NODE_CALL,
 	} kind;
 	
 	type_t type;
@@ -259,6 +262,10 @@ struct ir_node_t {
 			tok_t kind;
 		} d_postfix;
 		struct {
+			ir_node_t *expr;
+			tok_t kind;
+		} d_prefix;
+		struct {
 			istr_t label; // -1 for none
 			ir_node_t *exprs;
 		} d_do_block;
@@ -268,7 +275,10 @@ struct ir_node_t {
 			tok_t kind;
 		} d_infix;
 		ir_node_t *d_cast;
-		istr_t d_integer_lit;
+		struct {
+			istr_t lit;
+			bool negate;
+		} d_integer_lit;
 		struct {
 			istr_t name;
 			ir_scope_t *scopes;
@@ -276,6 +286,10 @@ struct ir_node_t {
 			ir_pattern_t *patterns;
 			ir_node_t *exprs;
 		} d_proc_decl;
+		struct {
+			ir_node_t *f;
+			ir_node_t *arg;
+		} d_call;
 	};
 };
 

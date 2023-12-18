@@ -325,21 +325,36 @@ void NORETURN punexpected(const char *err) {
 	err_with_pos(p.token.loc, "unexpected %s, %s", tok_dbg_str(p.token), err);
 }
 
-enum {
+enum : u8 {
 	PREC_UNKNOWN, // default
 	PREC_ASSIGN,  // = += -= *= /= %=
 	PREC_CMP,     // && || (TODO: needs parens)
 	PREC_EQ,      // == != < > <= >=
-	PREC_BOR,     // |
+	//PREC_BOR,     // |
 	PREC_XOR,     // ^
 	//PREC_BAND,    // &
 	PREC_ADD,     // + -
 	PREC_MUL,     // * / %
 	PREC_CAST,    // :
+	PREC_DEFAULT_CALL,
 	PREC_PREFIX,  // - * ! &
 	PREC_POSTFIX, // ++ --
-	PREC_CALL,    // .x x() x[]
+	PREC_INDEX,   // .x x[]
 };
+
+// v k + 20
+// v(k + 20)
+
+// add p 1
+//
+// - add(p)(1)
+// - add(p(1))
+
+// add 2 + 2 3
+//
+// ghci: add(2) + 2(3)
+
+// add 
 
 static u8 ptok_prec(tok_t kind) {
 	// PREC_PREFIX is determined elsewhere
@@ -347,8 +362,8 @@ static u8 ptok_prec(tok_t kind) {
 	switch (kind) {
 		case TOK_DOT:
 		case TOK_OSQ:
-		case TOK_OPAR:
-			return PREC_CALL;
+		case TOK_IDENT:
+			return PREC_INDEX;
 		case TOK_INC:
 		case TOK_DEC:
 			return PREC_POSTFIX;
@@ -389,9 +404,11 @@ static u8 ptok_prec(tok_t kind) {
 	}
 }
 
-ir_node_t pexpr(ir_scope_t *s, u8 prec) {
+// end_tok as 0 means undefined
+ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 	ir_node_t node;
-	
+	u32 line_nr = p.token.loc.line_nr;
+
 	switch (p.token.kind) {
 		case TOK_IDENT: {
 			// TODO: modules
@@ -416,7 +433,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec) {
 		}
 		case TOK_OPAR: {
 			pnext();
-			node = pexpr(s, 0);
+			node = pexpr(s, 0, TOK_CPAR);
 			pexpect(TOK_CPAR);
 			break;
 		}
@@ -425,54 +442,100 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec) {
 				.kind = NODE_INTEGER_LIT,
 				.loc = p.token.loc,
 				.type = TYPE_INFER,
-				.d_integer_lit = p.token.lit,
+				.d_integer_lit = {
+					.lit = p.token.lit,
+				},
 			};
 			pnext();
 			break;
 		}
-		default: {}
-	}
+		default: {
+			token_t token = p.token;
 
-	if (p.token.kind == TOK_EOF) {
-		return node;
-	}
-
-	while (prec < ptok_prec(p.token.kind)) {
-		token_t token = p.token;
-
-		switch (token.kind) {
-			case TOK_INC:
-			case TOK_DEC: {
+			if (TOK_IS_PREFIX(token.kind)) {
 				pnext();
-				node = (ir_node_t){
-					.kind = NODE_POSTFIX,
-					.loc = token.loc,
-					.type = TYPE_INFER,
-					.d_postfix.expr = ir_memdup(node),
-					.d_postfix.kind = token.kind,
-				};
-				continue;
-			}
-			default: {
-				if (TOK_IS_INFIX(token.kind)) {
-					pnext();
-					ir_node_t rhs = pexpr(s, ptok_prec(token.kind));
+				/* if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
 					node = (ir_node_t){
-						.kind = NODE_INFIX,
+						.kind = NODE_INTEGER_LIT,
 						.loc = token.loc,
 						.type = TYPE_INFER,
-						.d_infix.lhs = ir_memdup(node),
-						.d_infix.rhs = ir_memdup(rhs),
-						.d_infix.kind = token.kind,
+						.d_integer_lit = {
+							.lit = p.token.lit,
+							.negate = true,
+						},
 					};
-					continue;
-				} else {
-					goto exit;
+					pnext();
+				} else  */{
+					ir_node_t rhs = pexpr(s, PREC_PREFIX, 0);
+					node = (ir_node_t){
+						.kind = NODE_PREFIX,
+						.loc = token.loc,
+						.type = TYPE_INFER,
+						.d_prefix.expr = ir_memdup(rhs),
+						.d_prefix.kind = token.kind,
+					};
 				}
+			} else {
+				punexpected("expected expression");
 			}
 		}
 	}
-exit:
+
+	while (true) {
+		token_t token = p.token;
+
+		if (token.kind == TOK_EOF) {
+			return node;
+		}
+
+		if (prec < ptok_prec(p.token.kind)) {
+			switch (token.kind) {
+				case TOK_INC:
+				case TOK_DEC: {
+					pnext();
+					node = (ir_node_t){
+						.kind = NODE_POSTFIX,
+						.loc = token.loc,
+						.type = TYPE_INFER,
+						.d_postfix.expr = ir_memdup(node),
+						.d_postfix.kind = token.kind,
+					};
+					continue;
+				}
+				default: {
+					if (TOK_IS_INFIX(token.kind)) {
+						pnext();
+						ir_node_t rhs = pexpr(s, ptok_prec(token.kind), 0);
+						node = (ir_node_t){
+							.kind = NODE_INFIX,
+							.loc = token.loc,
+							.type = TYPE_INFER,
+							.d_infix.lhs = ir_memdup(node),
+							.d_infix.rhs = ir_memdup(rhs),
+							.d_infix.kind = token.kind,
+						};
+						continue;
+					}
+				}
+			}
+		}
+
+		if (prec == 0) {
+			if (token.loc.line_nr != line_nr || token.kind == end_tok) {
+				break;
+			}
+			ir_node_t rhs = pexpr(s, PREC_DEFAULT_CALL, 0);
+			node = (ir_node_t){
+				.kind = NODE_CALL,
+				.loc = token.loc,
+				.type = TYPE_INFER,
+				.d_call.f = ir_memdup(node),
+				.d_call.arg = ir_memdup(rhs),
+			};
+			continue;
+		}
+		break;
+	}
 
 	return node;
 }
@@ -684,7 +747,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 
 	pexpect(TOK_ASSIGN);
 
-	ir_node_t expr = pexpr(&enclosing_scope, 0);
+	ir_node_t expr = pexpr(&enclosing_scope, 0, 0);
 
 	type_t type = TYPE_INFER;
 	if (p.next_type.name == name) {
@@ -787,7 +850,7 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 			// fall through
 		}
 		default: {
-			*expr = pexpr(s, 0);
+			*expr = pexpr(s, 0, 0);
 			set = true;
 			break;
 		}
@@ -918,7 +981,11 @@ void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_INTEGER_LIT: {
-			printf("%s", sv_from(node.d_integer_lit));
+			if (node.d_integer_lit.negate) {
+				printf("-%s", sv_from(node.d_integer_lit.lit));
+			} else {
+				printf("%s", sv_from(node.d_integer_lit.lit));
+			}
 			break;
 		}
 		case NODE_POSTFIX: {
@@ -927,9 +994,23 @@ void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_INFIX: {
+			printf("(%s ", _ir_op_literal(node.d_infix.kind));
 			_ir_dump_node(modp, s, *node.d_infix.lhs);
-			printf(" %s ", _ir_op_literal(node.d_infix.kind));
+			printf(" ");
 			_ir_dump_node(modp, s, *node.d_infix.rhs);
+			printf(")");
+			break;
+		}
+		case NODE_PREFIX: {
+			printf("%s", _ir_op_literal(node.d_prefix.kind));
+			_ir_dump_node(modp, s, *node.d_prefix.expr);
+			break;
+		}
+		case NODE_CALL: {
+			_ir_dump_node(modp, s, *node.d_call.f);
+			printf("(");
+			_ir_dump_node(modp, s, *node.d_call.arg);
+			printf(")");
 			break;
 		}
 		default: {
@@ -941,9 +1022,9 @@ void _ir_dump_node(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 
 void ir_dump_module(rmod_t mod) {
 	mod_t *modp = MOD_PTR(mod);
-	printf("module %s\n", sv_from(modp->on_disk.name));
+	printf("module %s\n\n", sv_from(modp->on_disk.name));
 	for (u32 i = 0; i < arrlen(modp->exprs); i++) {
-		printf("\n");
 		_ir_dump_node(modp, NULL, modp->exprs[i]);
+		printf("\n");
 	}
 }

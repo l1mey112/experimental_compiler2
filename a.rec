@@ -1,8 +1,9 @@
-v: 0 = 0
-v: k = k + 20
-
 add :: i32 -> i32 -> i32
 add: p, q = p + q
-add: 0, q = 0 + q
-add: p, 0 = p + 0
-add: 0, 0 = 0 + 0
+;
+addone: p = -1 - 2
+addone: p = a b - 9 - 222
+;
+tester: p, q = q (-p + 2) 6
+;
+unary_fuckup: p = p -20
