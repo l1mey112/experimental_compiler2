@@ -439,8 +439,13 @@ ir_node_t pdo(ir_scope_t *s) {
 	return block;
 }
 
+enum : u8 {
+	PEXPR_ET_NONE,
+	PEXPR_ET_PAREN,
+};
+
 // end_tok as 0 means undefined
-ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
+ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok) {
 	ir_node_t node;
 	u32 line_nr = p.token.loc.line_nr;
 
@@ -467,9 +472,49 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 			break;
 		}
 		case TOK_OPAR: {
+			loc_t oloc = p.token.loc;
 			pnext();
-			node = pexpr(s, 0, TOK_CPAR);
-			pexpect(TOK_CPAR);
+			if (p.token.kind == TOK_CPAR) {
+				node = (ir_node_t){
+					.kind = NODE_TUPLE_UNIT,
+					.loc = oloc,
+					.type = TYPE_UNIT,
+				};
+				pnext();
+				break;
+			}
+			bool first = true;
+			ir_node_t *elems = NULL;
+			while (p.token.kind != TOK_CPAR) {
+				if (first) {
+					node = pexpr(s, 0, PEXPR_ET_PAREN);
+				} else {
+					if (elems == NULL) {
+						arrpush(elems, node);
+					}
+					node = pexpr(s, 0, PEXPR_ET_PAREN);
+					arrpush(elems, node);					
+				}
+
+				if (p.token.kind == TOK_COMMA) {
+					pnext();
+				} else if (p.token.kind != TOK_CPAR) {
+					punexpected("expected `,` or `)`");
+				}
+
+				first = false;
+			}
+			pnext();
+			if (elems != NULL) {
+				node = (ir_node_t){
+					.kind = NODE_TUPLE,
+					.loc = oloc,
+					.type = TYPE_INFER,
+					.d_tuple = {
+						.elems = elems,
+					},
+				};
+			}
 			break;
 		}
 		case TOK_INTEGER: {
@@ -485,8 +530,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 			break;
 		}
 		case TOK_DO: {
-			node = pdo(s);
-			break;
+			return pdo(s); // isn't meant to be chained possibly?
 		}
 		default: {
 			token_t token = p.token;
@@ -559,9 +603,13 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, tok_t end_tok) {
 			}
 		}
 
-		if (prec == 0) {
-			if (token.loc.line_nr != line_nr || token.kind == end_tok) {
-				break;
+		if (prec == 0 && token.loc.line_nr == line_nr) {
+			if (end_tok == PEXPR_ET_PAREN) {
+				if (token.kind == TOK_CPAR || token.kind == TOK_COMMA) {
+					break;
+				}
+			} else if (end_tok != PEXPR_ET_NONE) {
+				assert_not_reached();
 			}
 			ir_node_t rhs = pexpr(s, PREC_DEFAULT_CALL, 0);
 			node = (ir_node_t){
@@ -633,7 +681,7 @@ type_t ptype(void) {
 				if (first) {
 					single = type;
 				} else {
-					if (single != (type_t)-1) {
+					if (elems == NULL) {
 						arrpush(elems, single);
 						single = (type_t)-1;
 					}
@@ -764,7 +812,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 		// <pattern>, <pattern>, <pattern> = ...
 		// ^^^^^^^^^
 
-		do {
+		while (true) {
 			ir_pattern_t pattern = ppattern(&enclosing_scope);
 			arrpush(patterns, pattern);
 			if (p.token.kind == TOK_COMMA) {
@@ -772,7 +820,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 			} else {
 				break;
 			}
-		} while (true);
+		}
 
 		pattern = (ir_pattern_t){
 			.kind = PATTERN_TUPLE,
@@ -1055,6 +1103,21 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 				_ir_dump_stmt(modp, &node.d_do_block.scope, node.d_do_block.exprs[i]);
 			}
 			_ir_tabcnt--;
+			break;
+		}
+		case NODE_TUPLE_UNIT: {
+			printf("()");
+			break;
+		}
+		case NODE_TUPLE: {
+			printf("(");
+			for (int i = 0, c = arrlen(node.d_tuple.elems); i < c; i++) {
+				_ir_dump_expr(modp, s, node.d_tuple.elems[i]);
+				if (i != c - 1) {
+					printf(", ");
+				}
+			}
+			printf(")");
 			break;
 		}
 		default: {

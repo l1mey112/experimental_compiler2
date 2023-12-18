@@ -1,9 +1,5 @@
 a: x = do
 	b: y = x + y
-	brk b (0)
+	brk b 10
 
-b: x = do
-		1
-		2
-		3
-		+ 5
+v: v = (v, v, v)

@@ -246,6 +246,8 @@ struct ir_node_t {
 		NODE_SYM,
 		NODE_CAST,
 		NODE_CALL,
+		NODE_TUPLE_UNIT,
+		NODE_TUPLE,
 	} kind;
 	
 	type_t type;
@@ -291,6 +293,9 @@ struct ir_node_t {
 			ir_node_t *f;
 			ir_node_t *arg;
 		} d_call;
+		struct {
+			ir_node_t *elems;
+		} d_tuple;
 	};
 };
 
