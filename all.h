@@ -393,8 +393,11 @@ rmod_t fs_register_import(rmod_t src, const char *fp, loc_t onerror_loc);
 istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 
+void cmodule(rmod_t mod);
 void pentry(rfile_t f);
 void ir_dump_module(rmod_t mod);
+
+ir_node_t *ir_memdup(ir_node_t node);
 
 // TYPE_UNKNOWN is something else and non concrete
 #define TYPE_INFER ((type_t)-1)
@@ -413,6 +416,11 @@ void ir_dump_module(rmod_t mod);
 	X(TYPE_F32, "f32") \
 	X(TYPE_F64, "f64") \
 	X(TYPE_BOOL, "bool")
+
+#define TYPE_SIGNED_INTEGERS_START TYPE_I8
+#define TYPE_SIGNED_INTEGERS_END TYPE_ISIZE
+#define TYPE_UNSIGNED_INTEGERS_START TYPE_U8
+#define TYPE_UNSIGNED_INTEGERS_END TYPE_USIZE
 
 #define TYPE_X_CONCRETE_LIST \
 	TYPE_X_CONCRETE_LITERALS_LIST \

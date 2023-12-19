@@ -243,12 +243,6 @@ static ir_node_t *ir_sym_find_uses(ir_node_t *exprs, istr_t name) {
 	return NULL;
 }
 
-static ir_node_t *ir_memdup(ir_node_t node) {
-	ir_node_t *ptr = malloc(sizeof(ir_node_t));
-	*ptr = node;
-	return ptr;
-}
-
 static bool is_id_begin(u8 ch) {
     return isalpha(ch) || ch == '_' || ch == '\'';
 }
@@ -1373,6 +1367,8 @@ void _ir_tabs(void) {
 	printf(__VA_ARGS__);
 
 void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
+	printf("%s:", type_dbg_str(node.type));
+
 	switch (node.kind) {
 		case NODE_VAR: {
 			printf("%s:%u", sv_from(modp->vars[node.d_var].name), node.d_var);
@@ -1451,6 +1447,12 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_MUT: {
 			printf("(mut ");
 			_ir_dump_expr(modp, s, *node.d_mut);
+			printf(")");
+			break;
+		}
+		case NODE_CAST: {
+			printf("cast(");
+			_ir_dump_expr(modp, s, *node.d_cast);
 			printf(")");
 			break;
 		}

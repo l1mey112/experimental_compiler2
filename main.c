@@ -122,6 +122,7 @@ ret:
 	// TODO: register_root() etc for module system
 	
 
+	cmodule(0);
 	ir_dump_module(0); // main module
 
 	return rval;
