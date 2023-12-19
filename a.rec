@@ -1,6 +1,15 @@
-y = 20
+do
+	mut 'y = 20
 
-io main = do
-	x = y
+	io main = do
+		x = 'y
 
-	'y = x
+		'y = x
+
+do
+	y = 20
+
+	io main = do
+		y = x
+
+		x = y

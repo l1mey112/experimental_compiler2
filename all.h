@@ -100,7 +100,7 @@ static inline bool sv_cmp(u8 *a, size_t alen, u8 *b, size_t blen) {
 //#ifdef NDEBUG
 //	#define assert_not_reached()  __builtin_unreachable()
 //#else
-	#define assert_not_reached()  assert(0 && "assert_not_reached")
+	#define assert_not_reached()  assert(0 && "unreachable")
 //#endif
 
 static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
@@ -111,7 +111,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 #define TOK_X_KEYWORDS_LIST \
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
-	X(TOK_IO, "io")
+	X(TOK_IO, "io") \
+	X(TOK_MUT, "mut")
 
 // in specific order due to how operators are parsed
 #define TOK_X_OPERATOR_LIST \
@@ -289,7 +290,9 @@ struct ir_node_t {
 		NODE_CALL,
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
+		NODE_BREAK_UNIT,
 		NODE_BREAK_INFERRED,
+		NODE_MUT,
 	} kind;
 	
 	type_t type;
@@ -301,6 +304,7 @@ struct ir_node_t {
 	union {
 		ir_rvar_t d_var;
 		istr_t d_sym;
+		ir_node_t *d_mut;
 		struct {
 			ir_node_t *expr;
 			tok_t kind;
@@ -340,7 +344,7 @@ struct ir_node_t {
 		} d_tuple;
 		struct {
 			ir_node_t *expr;
-		} d_break_inferred;
+		} d_break;
 	};
 };
 

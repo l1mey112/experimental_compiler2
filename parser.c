@@ -96,7 +96,7 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t o
 // will search parent
 // TODO?: this searches the toplevel scope, which should only really
 //        be resolved at the end of parsing, so it doesn't really matter
-static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
+static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
 	bool is_toplevel = false;
 	if (scope == NULL) {
 		is_toplevel = true;
@@ -117,7 +117,7 @@ static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
 
 	// what an opportunity for tail recursion!
 	if (!is_toplevel) {
-		return ir_search_var(scope->parent, name, out);
+		return ir_var_resolve_name(scope->parent, name, out);
 	} else {
 		return false;
 	}
@@ -146,10 +146,17 @@ static ir_node_t *ir_find_decl(ir_node_t *exprs, istr_t name) {
 // don't recurse into deeper scopes
 // WILL ONLY FIND SYMBOLS
 // warning: possibly unstable pointer
+// WILL IGNORE EXISTING VARS RESOLVED FROM AN OLDER SCOPE, ITS JUST NAMES TO NAMES HERE
 static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 	switch (expr->kind) {
 		case NODE_SYM: {
 			if (expr->d_sym == name) {
+				return expr;
+			}
+			return NULL;
+		}
+		case NODE_VAR: {
+			if (VAR_PTR(expr->d_var)->name == name) {
 				return expr;
 			}
 			return NULL;
@@ -189,8 +196,8 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 		}
 		// even though this doesn't make sense, include for completeness
 		case NODE_BREAK_INFERRED: {
-			if (ir_sym_find_use(expr->d_break_inferred.expr, name)) {
-				return expr->d_break_inferred.expr;
+			if (ir_sym_find_use(expr->d_break.expr, name)) {
+				return expr->d_break.expr;
 			}
 			return NULL;
 		}
@@ -440,31 +447,24 @@ enum : u8 {
 	PREC_DEFAULT_CALL,
 	PREC_PREFIX,  // - * ! &
 	PREC_POSTFIX, // ++ --
-	PREC_INDEX,   // .x x[]
+	PREC_DOT,     // .x
+	PREC_MUT,     // mut x
+	PREC_INDEX,   // x[]
 };
 
-// v k + 20
-// v(k + 20)
-
-// add p 1
-//
-// - add(p)(1)
-// - add(p(1))
-
-// add 2 + 2 3
-//
-// ghci: add(2) + 2(3)
-
-// add 
+// mut x.thing    -> (mut x).thing
+// mut x[y].thing -> (mut x[y]).thing
 
 static u8 ptok_prec(tok_t kind) {
 	// PREC_PREFIX is determined elsewhere
+	// PREC_MUT : PREC_PREFIX
 
 	switch (kind) {
-		case TOK_DOT:
 		case TOK_OSQ:
 		case TOK_IDENT:
 			return PREC_INDEX;
+		case TOK_DOT:
+			return PREC_DOT;
 		case TOK_INC:
 		case TOK_DEC:
 			return PREC_POSTFIX;
@@ -505,7 +505,7 @@ static u8 ptok_prec(tok_t kind) {
 	}
 }
 
-bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs);
+bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs);
 
 // do
 //     ...
@@ -560,27 +560,46 @@ ir_node_t pdo(ir_scope_t *s) {
 
 	// wrap last expr in break
 	// TODO: don't do this unless the last expr is not a break
+
+	// some last expressions of a do block may possibly be assignments,
+	// which is okay, they're still expressions. our repr code chokes up though
+	// there isn't really a point to be breaking on those expressions.
+	//
+	// if the last expression is (), its most likely one of those expressions.
+
 	ir_node_t *last = &arrlast(block.d_do_block.exprs);
-	ir_node_t node = *last;
-	
-	*last = (ir_node_t){
-		.kind = NODE_BREAK_INFERRED,
-		.loc = node.loc,
-		.type = TYPE_INFER,
-		.d_break_inferred.expr = ir_memdup(node)
-	};
+	if (last->type == TYPE_UNIT) {
+		ir_node_t node = {
+			.kind = NODE_BREAK_UNIT, // unary shorthand
+			.loc = node.loc,
+			.type = TYPE_BOTTOM,
+		};
+		
+		arrpush(block.d_do_block.exprs, node);
+	} else {
+		ir_node_t node = *last;
+
+		*last = (ir_node_t){
+			.kind = NODE_BREAK_INFERRED,
+			.loc = node.loc,
+			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
+			.d_break.expr = ir_memdup(node)
+		};
+	}
 
 	return block;
 }
 
-// create variable if it doesn't exist
-// if it does exist in the current scope, update it's value
-// if it does exist in the current scope, and has uses in the current scope, raise error
-ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *multi_exprs) {	
+// do complex logic here, so that when typechecking all local variables are resolved
+// and it only has to deal with global symbols by resolving them
+// -- all variable definitions have been resolved to single assign statements by then
+// -- if the checker sees `mut 'v = 20` it's an error, as `mut 'v` means something
+ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *previous_exprs) {	
 	// during parsing, the lhs can be one of three things
 	// 1. NODE_SYM (could not resolve from scope)
 	// 2. NODE_VAR (could resolve variable)
-	// 3. NODE_*   (could be a valid lhs? could also not be? let the checker handle it)
+	// 3. NODE_MUT (could resolve variable, 'var creation)
+	// 4. NODE_*   (could be a valid lhs? could also not be? let the checker handle it)
 
 	// v = 20           ; var #1
 	// do               ;
@@ -595,11 +614,35 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	// remember: mutable identifiers need to be "declared" before they can be used
 	//           unlike immutable identifiers (which only have declarations)
 	// remember: a variable may possibly be a global one, which NODE_SYM is preferred
+	// remember: `mut 'v = ...` means create new variable
+
+	bool assign = false; // unrolled || chain
+
+	// if lhs: mut 'v
+	if (lhs.kind == NODE_MUT && lhs.d_mut->kind == NODE_VAR && VAR_PTR_IS_T(VAR_PTR(lhs.d_mut->d_var))) {
+		lhs = *lhs.d_mut; // leak
+	}
+	// if lhs: mut 'v*
+	else if (lhs.kind == NODE_MUT && lhs.d_mut->kind == NODE_SYM && ISTR_IS_T(lhs.d_mut->d_sym)) {
+		lhs = *lhs.d_mut; // leak
+	}
+	// is this not a symbol or var?
+	else if (lhs.kind != NODE_SYM && lhs.kind != NODE_VAR) {
+		assign = true;
+	}
+	// if it is a symbol, is it a mutable identifier?
+	else if (lhs.kind == NODE_SYM && ISTR_IS_T(lhs.d_sym)) {
+		assign = true;
+	}
+	// if it is a var, is it a mutable identifier?
+	else if (lhs.kind == NODE_VAR && VAR_PTR_IS_T(VAR_PTR(lhs.d_var))) {
+		assign = true;
+	}
 
 	// if lhs is NODE_SYM and mutable identifier, let it pass
 	// if lhs is NODE_VAR and mutable identifier, let it pass
 	// if lhs is NODE_*, let it pass
-	if ((lhs.kind != NODE_SYM && lhs.kind != NODE_VAR) || (lhs.kind == NODE_SYM && ISTR_IS_T(lhs.d_sym)) || (lhs.kind == NODE_VAR && VAR_PTR_IS_T(VAR_PTR(lhs.d_var)))) {
+	if (assign) {
 		return (ir_node_t){
 			.kind = NODE_INFIX,
 			.loc = loc,
@@ -608,36 +651,42 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 			.d_infix.rhs = ir_memdup(rhs),
 			.d_infix.kind = TOK_ASSIGN,
 		};
+	}
+
+	// --- EVERYTHING PAST HERE IS DECL OF NEW VARIABLE
+	// lhs is NODE_SYM or NODE_VAR
+	//
+	// it's okay to define a new variable, it just better not exist already in the scope
+	// it's also an error to use before decl in a scope
+
+	if (lhs.kind == NODE_VAR && ir_var_exists_in(s, lhs.d_var)) {
+		err_with_pos(lhs.loc, "variable `%s` already exists in scope", VAR_PTR(lhs.d_var)->name);
 	}
 	
-	// lhs is NODE_SYM or NODE_VAR, and immutable identifier
+	// we know the variable doesn't exist, but before declaring we need to make sure
+	// it hasn't been used yet in this scope.
 
-	// isn't var: no need to create vars or special logic
-	// var exists: update var
-	if (lhs.kind != NODE_SYM && (lhs.kind != NODE_VAR || ir_var_exists_in(s, lhs.d_var))) {
-		return (ir_node_t){
-			.kind = NODE_INFIX,
-			.loc = loc,
-			.type = TYPE_INFER,
-			.d_infix.lhs = ir_memdup(lhs),
-			.d_infix.rhs = ir_memdup(rhs),
-			.d_infix.kind = TOK_ASSIGN,
-		};
+	// decay into name to locate uses in scope
+	istr_t name;
+
+	if (lhs.kind == NODE_SYM) {
+		name = lhs.d_sym;
+	} else if (lhs.kind == NODE_VAR) {
+		name = VAR_PTR(lhs.d_var)->name;
+	} else {
+		assert_not_reached();
 	}
 
-	// var doesn't exist and lhs is NODE_SYM
-
-	// check if this var has been used before
 	ir_node_t *use;
-	if ((use = ir_sym_find_uses(multi_exprs, lhs.d_sym))) {
-		print_err_with_pos(use->loc, "use of variable `%s` before declaration in same scope", sv_from(lhs.d_sym));
-		print_hint_with_pos(lhs.loc, "variable `%s` declared here", sv_from(lhs.d_sym));
+	if ((use = ir_sym_find_uses(previous_exprs, name))) {
+		print_err_with_pos(use->loc, "use of variable `%s` before declaration in same scope", sv_from(name));
+		print_hint_with_pos(lhs.loc, "variable `%s` declared here", sv_from(name));
 		err_unwind();
 	}
 
-	// safe to create var
 	// TODO: no need for `onerror`, we know var doesn't exist
-	ir_rvar_t var = ir_new_var(s, lhs.d_sym, rhs.type, loc);
+	//       probably introduce INVALID_LOC macro ??
+	ir_rvar_t var = ir_new_var(s, name, rhs.type, lhs.loc);
 
 	lhs = (ir_node_t){
 		.kind = NODE_VAR,
@@ -658,36 +707,59 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	};
 }
 
+ir_node_t pident(ir_scope_t *s) {
+	ir_node_t node;
+
+	pcheck(TOK_IDENT);
+
+	// TODO: modules
+	ir_rvar_t var;
+	if (ir_var_resolve_name(s, p.token.lit, &var)) {
+		node = (ir_node_t){
+			.kind = NODE_VAR,
+			.loc = p.token.loc,
+			.type = TYPE_INFER,
+			.d_var = var,
+		};
+	} else {
+		node = (ir_node_t){
+			.kind = NODE_SYM,
+			.loc = p.token.loc,
+			.type = TYPE_INFER,
+			.d_sym = p.token.lit,
+		};
+	}
+	pnext();
+
+	return node;
+}
+
 enum : u8 {
 	PEXPR_ET_NONE,
 	PEXPR_ET_PAREN,
 };
 
-// end_tok as 0 means undefined
-ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok, ir_node_t *multi_exprs) {
+// (                           a b                          )
+// ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break 
+ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	ir_node_t node;
-	u32 line_nr = p.token.loc.line_nr;
+	token_t token = p.token;
+	u32 line_nr = token.loc.line_nr;
 
-	switch (p.token.kind) {
-		case TOK_IDENT: {
-			// TODO: modules
-			ir_rvar_t var;
-			if (ir_search_var(s, p.token.lit, &var)) {
-				node = (ir_node_t){
-					.kind = NODE_VAR,
-					.loc = p.token.loc,
-					.type = TYPE_INFER,
-					.d_var = var,
-				};
-			} else {
-				node = (ir_node_t){
-					.kind = NODE_SYM,
-					.loc = p.token.loc,
-					.type = TYPE_INFER,
-					.d_sym = p.token.lit,
-				};
-			}
+	switch (token.kind) {
+		case TOK_MUT: {
 			pnext();
+			ir_node_t rhs = pexpr(s, PREC_MUT, cfg, previous_exprs);
+			node = (ir_node_t){
+				.kind = NODE_MUT,
+				.loc = token.loc,
+				.type = TYPE_INFER,
+				.d_mut = ir_memdup(rhs),
+			};
+			break;
+		}
+		case TOK_IDENT: {
+			node = pident(s);
 			break;
 		}
 		case TOK_OPAR: {
@@ -706,12 +778,12 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok, ir_node_t *multi_exprs) {
 			ir_node_t *elems = NULL;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
-					node = pexpr(s, 0, PEXPR_ET_PAREN, multi_exprs);
+					node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
 				} else {
 					if (elems == NULL) {
 						arrpush(elems, node);
 					}
-					node = pexpr(s, 0, PEXPR_ET_PAREN, multi_exprs);
+					node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
 					arrpush(elems, node);					
 				}
 
@@ -752,8 +824,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok, ir_node_t *multi_exprs) {
 			return pdo(s); // isn't meant to be chained possibly?
 		}
 		default: {
-			token_t token = p.token;
-
 			if (TOK_IS_PREFIX(token.kind)) {
 				pnext();
 				if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
@@ -768,7 +838,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok, ir_node_t *multi_exprs) {
 					};
 					pnext();
 				} else {
-					ir_node_t rhs = pexpr(s, PREC_PREFIX, 0, multi_exprs);
+					ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
 					node = (ir_node_t){
 						.kind = NODE_PREFIX,
 						.loc = token.loc,
@@ -807,10 +877,10 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok, ir_node_t *multi_exprs) {
 				default: {
 					if (TOK_IS_INFIX(token.kind)) {
 						pnext();
-						ir_node_t rhs = pexpr(s, ptok_prec(token.kind), 0, multi_exprs);
+						ir_node_t rhs = pexpr(s, ptok_prec(token.kind), cfg, previous_exprs);
 
 						if (token.kind == TOK_ASSIGN) {
-							node = passign(s, node, rhs, token.loc, multi_exprs);
+							node = passign(s, node, rhs, token.loc, previous_exprs);
 							continue;
 						}
 
@@ -829,14 +899,14 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 end_tok, ir_node_t *multi_exprs) {
 		}
 
 		if (prec == 0 && token.loc.line_nr == line_nr) {
-			if (end_tok == PEXPR_ET_PAREN) {
+			if (cfg == PEXPR_ET_PAREN) {
 				if (token.kind == TOK_CPAR || token.kind == TOK_COMMA) {
 					break;
 				}
-			} else if (end_tok != PEXPR_ET_NONE) {
+			} else if (cfg != PEXPR_ET_NONE) {
 				assert_not_reached();
 			}
-			ir_node_t rhs = pexpr(s, PREC_DEFAULT_CALL, 0, multi_exprs);
+			ir_node_t rhs = pexpr(s, PREC_DEFAULT_CALL, 0, previous_exprs);
 			node = (ir_node_t){
 				.kind = NODE_CALL,
 				.loc = token.loc,
@@ -1003,7 +1073,7 @@ ir_pattern_t ppattern(ir_scope_t *s) {
 // function declarations:
 // - io <name>            = ...
 // - <name>:    <pattern> = ...
-bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
+bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	bool is_io = false;
 
 	if (p.token.kind == TOK_IO) {
@@ -1063,7 +1133,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 
 	pexpect(TOK_ASSIGN);
 
-	// `multi_exprs` doesn't share scope with `enclosing_scope`
+	// `previous_exprs` doesn't share scope with `enclosing_scope`
 	ir_node_t expr = pexpr(&enclosing_scope, 0, 0, NULL);
 
 	type_t type = TYPE_INFER;
@@ -1074,7 +1144,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 
 	if (!is_io && ir_name_exists_in(s, name)) {
 		// this will never be NULL
-		ir_node_t *other_def = ir_find_decl(multi_exprs, name);
+		ir_node_t *other_def = ir_find_decl(previous_exprs, name);
 
 		if (other_def->kind != NODE_PROC_DECL) {
 			err_with_pos(name_loc, "redefinition of `%s`", sv_from(name));
@@ -1146,10 +1216,10 @@ void pcheck_unused_typedecl(void) {
 	}
 }
 
-// `multi_exprs` is used when multiple function declarations are in the same scope
+// `previous_exprs` is used when multiple function declarations are in the same scope
 // can be null
-// IT IS VERY IMPORTANT THAT `multi_exprs` HAS SCOPE `s`
-bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
+// IT IS VERY IMPORTANT THAT `previous_exprs` HAS SCOPE `s`
+bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	bool set = false;
 	bool has_next_type = p.next_type.name != ISTR_NONE;
 	
@@ -1160,7 +1230,7 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 		}
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_COLON) {
-				set = pproc(expr, s, multi_exprs);
+				set = pproc(expr, s, previous_exprs);
 				break;
 			}
 			if (p.peek.kind == TOK_DOUBLE_COLON) {
@@ -1170,7 +1240,7 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 			// fall through
 		}
 		default: {
-			*expr = pexpr(s, 0, 0, multi_exprs);
+			*expr = pexpr(s, 0, 0, previous_exprs);
 			set = true;
 			break;
 		}
@@ -1288,7 +1358,7 @@ void _ir_tabs(void) {
 void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
 		case NODE_VAR: {
-			printf("%s", sv_from(modp->vars[node.d_var].name));
+			printf("%s:%u", sv_from(modp->vars[node.d_var].name), node.d_var);
 			break;
 		}
 		case NODE_SYM: {
@@ -1354,10 +1424,21 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		case NODE_BREAK_INFERRED: {
 			printf("ibrk ");
-			_ir_dump_expr(modp, s, *node.d_break_inferred.expr);
+			_ir_dump_expr(modp, s, *node.d_break.expr);
+			break;
+		}
+		case NODE_BREAK_UNIT: {
+			printf("brk ()");
+			break;
+		}
+		case NODE_MUT: {
+			printf("(mut ");
+			_ir_dump_expr(modp, s, *node.d_mut);
+			printf(")");
 			break;
 		}
 		default: {
+			printf("\nunknown expr kind %d\n", node.kind);
 			assert_not_reached();
 		}
 	}
@@ -1368,7 +1449,7 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
 		case NODE_PROC_DECL: {
 			ir_rvar_t var;
-			assert(ir_search_var(s, node.d_proc_decl.name, &var));
+			assert(ir_var_resolve_name(s, node.d_proc_decl.name, &var));
 			type_t fn_type = modp->vars[var].type;
 			
 			TAB_PRINTF("%s :: %s\n", sv_from(node.d_proc_decl.name), type_dbg_str(fn_type));
