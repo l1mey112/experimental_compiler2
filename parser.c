@@ -132,7 +132,7 @@ static ir_scope_t ir_new_scope(ir_scope_t *parent) {
 
 // find declaration in exprs, or NULL
 // warning: possibly unstable pointer
-static ir_node_t *ir_find_decl(ir_node_t *exprs, istr_t name) {
+static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
 	for (u32 i = 0; i < arrlen(exprs); i++) {
 		ir_node_t *expr = &exprs[i];
 		if (expr->kind == NODE_PROC_DECL && expr->d_proc_decl.name == name) {
@@ -688,22 +688,14 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	//       probably introduce INVALID_LOC macro ??
 	ir_rvar_t var = ir_new_var(s, name, rhs.type, lhs.loc);
 
-	lhs = (ir_node_t){
-		.kind = NODE_VAR,
-		.loc = lhs.loc,
-		.type = rhs.type,
-		.d_var = var,
-	};
-
 	// creation of a variable is ()
 	// should keep? i don't know
 	return (ir_node_t){
-		.kind = NODE_INFIX,
+		.kind = NODE_VAR_DECL,
 		.loc = loc,
 		.type = TYPE_UNIT,
-		.d_infix.lhs = ir_memdup(lhs),
-		.d_infix.rhs = ir_memdup(rhs),
-		.d_infix.kind = TOK_ASSIGN,
+		.d_var_decl.lhs = var,
+		.d_var_decl.rhs = ir_memdup(rhs),
 	};
 }
 
@@ -1142,10 +1134,8 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 		p.next_type.name = ISTR_NONE;
 	}
 
-	if (!is_io && ir_name_exists_in(s, name)) {
-		// this will never be NULL
-		ir_node_t *other_def = ir_find_decl(previous_exprs, name);
-
+	ir_node_t *other_def;
+	if (!is_io && (other_def = ir_find_proc_decl(previous_exprs, name))) {
 		if (other_def->kind != NODE_PROC_DECL) {
 			err_with_pos(name_loc, "redefinition of `%s`", sv_from(name));
 		}
@@ -1376,6 +1366,12 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_POSTFIX: {
 			_ir_dump_expr(modp, s, *node.d_postfix.expr);
 			printf("%s", node.d_postfix.kind == TOK_INC ? "++" : "--");
+			break;
+		}
+		case NODE_VAR_DECL: {
+			printf("%s:%u", sv_from(modp->vars[node.d_var_decl.lhs].name), node.d_var_decl.lhs);
+			printf(" = ");
+			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
 			break;
 		}
 		case NODE_INFIX: {

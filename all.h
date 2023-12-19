@@ -279,6 +279,7 @@ struct ir_pattern_t {
 struct ir_node_t {
 	enum node_kind_t {
 		NODE_PROC_DECL,
+		NODE_VAR_DECL,
 		NODE_DO_BLOCK,
 		NODE_INFIX,
 		NODE_POSTFIX,
@@ -335,6 +336,10 @@ struct ir_node_t {
 			ir_pattern_t *patterns; // NULL meaning single expr single scope
 			ir_node_t *exprs;
 		} d_proc_decl;
+		struct {
+			ir_rvar_t lhs;
+			ir_node_t *rhs;
+		} d_var_decl;
 		struct {
 			ir_node_t *f;
 			ir_node_t *arg;

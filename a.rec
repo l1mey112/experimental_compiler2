@@ -1,15 +1,3 @@
-do
-	mut 'y = 20
+v = 20
 
-	io main = do
-		x = 'y
-
-		'y = x
-
-do
-	y = 20
-
-	io main = do
-		y = x
-
-		x = y
+v: k = 30
