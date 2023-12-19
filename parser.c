@@ -155,7 +155,7 @@ static ir_scope_t ir_new_scope(ir_scope_t *parent) {
 static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
 	for (u32 i = 0; i < arrlen(exprs); i++) {
 		ir_node_t *expr = &exprs[i];
-		if (expr->kind == NODE_PROC_DECL && expr->d_proc_decl.name == name) {
+		if (expr->kind == NODE_PROC_DECL && VAR_PTR(expr->d_proc_decl.var)->name == name) {
 			return expr;
 		}
 	}
@@ -1174,7 +1174,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	}
 
 	// create new var before evaluation so it can be referenced recursively
-	(void)ir_new_var(s, name, type, name_loc);
+	ir_rvar_t var = ir_new_var(s, name, type, name_loc);
 
 	ir_node_t *exprs = NULL;
 	arrpush(exprs, expr);
@@ -1192,7 +1192,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 		.loc = name_loc,
 		.type = TYPE_UNIT,
 		.d_proc_decl = {
-			.name = name,
+			.var = var,
 			.exprs = exprs,
 			.patterns = patterns,
 			.scopes = scopes,
@@ -1410,7 +1410,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		case NODE_CALL: {
 			_ir_dump_expr(modp, s, *node.d_call.f);
-			printf("(");
+			printf(" (");
 			_ir_dump_expr(modp, s, *node.d_call.arg);
 			printf(")");
 			break;
@@ -1465,13 +1465,13 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	void *_ = alloc_scratch(0);
 	switch (node.kind) {
 		case NODE_PROC_DECL: {
-			ir_rvar_t var;
-			assert(ir_var_resolve_name(s, node.d_proc_decl.name, &var));
-			type_t fn_type = modp->vars[var].type;
+			ir_var_t var = modp->vars[node.d_proc_decl.var];
+			type_t fn_type = var.type;
+			istr_t name = var.name;
 			
-			TAB_PRINTF("%s :: %s\n", sv_from(node.d_proc_decl.name), type_dbg_str(fn_type));
+			TAB_PRINTF("%s :: %s\n", sv_from(name), type_dbg_str(fn_type));
 			if (node.d_proc_decl.patterns) {
-				TAB_PRINTF("%s _ = switch\n", sv_from(node.d_proc_decl.name));
+				TAB_PRINTF("%s:%u _ = switch\n", sv_from(name), node.d_proc_decl.var);
 				_ir_tabcnt++;
 				for (u32 i = 0, c = arrlenu(node.d_proc_decl.exprs); i < c; i++) {
 					// _ir_dump_scope(modp, &node.d_proc_decl.scopes[i]);
@@ -1483,7 +1483,7 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 				}
 				_ir_tabcnt--;
 			} else {
-				TAB_PRINTF("%s _ = ", sv_from(node.d_proc_decl.name));
+				TAB_PRINTF("%s _ = ", sv_from(name));
 				_ir_dump_expr(modp, &node.d_proc_decl.scopes[0], node.d_proc_decl.exprs[0]);
 				printf("\n");
 			}

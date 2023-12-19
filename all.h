@@ -330,7 +330,7 @@ struct ir_node_t {
 			bool negate;
 		} d_integer_lit;
 		struct {
-			istr_t name;
+			ir_rvar_t var;
 			ir_scope_t *scopes;
 			//
 			ir_pattern_t *patterns; // NULL meaning single expr single scope
