@@ -680,7 +680,7 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	// it's also an error to use before decl in a scope
 
 	if (lhs.kind == NODE_VAR && ir_var_exists_in(s, lhs.d_var)) {
-		err_with_pos(lhs.loc, "variable `%s` already exists in scope", VAR_PTR(lhs.d_var)->name);
+		err_with_pos(lhs.loc, "variable `%s` already exists in scope", sv_from(VAR_PTR(lhs.d_var)->name));
 	}
 	
 	// we know the variable doesn't exist, but before declaring we need to make sure
@@ -704,9 +704,16 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		err_unwind();
 	}
 
+
+	type_t type = TYPE_INFER;
+	if (p.next_type.name == name) {
+		type = p.next_type.type;
+		p.next_type.name = ISTR_NONE;
+	}
+
 	// TODO: no need for `onerror`, we know var doesn't exist
 	//       probably introduce INVALID_LOC macro ??
-	ir_rvar_t var = ir_new_var(s, name, rhs.type, lhs.loc);
+	ir_rvar_t var = ir_new_var(s, name, type, lhs.loc);
 
 	// creation of a variable is ()
 	// should keep? i don't know
@@ -1312,7 +1319,7 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 		}
 		case PATTERN_VAR: {
 			ir_var_t *varp = &modp->vars[pattern.d_var];
-			printf("%s", sv_from(varp->name));
+			printf("%s:%u", sv_from(varp->name), pattern.d_var);
 			break;
 		}
 		case PATTERN_TUPLE: {
@@ -1386,12 +1393,6 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_POSTFIX: {
 			_ir_dump_expr(modp, s, *node.d_postfix.expr);
 			printf("%s", node.d_postfix.kind == TOK_INC ? "++" : "--");
-			break;
-		}
-		case NODE_VAR_DECL: {
-			printf("%s:%u", sv_from(modp->vars[node.d_var_decl.lhs].name), node.d_var_decl.lhs);
-			printf(" = ");
-			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
 			break;
 		}
 		case NODE_INFIX: {
@@ -1486,6 +1487,17 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 				_ir_dump_expr(modp, &node.d_proc_decl.scopes[0], node.d_proc_decl.exprs[0]);
 				printf("\n");
 			}
+			printf("\n");
+			break;
+		}
+		case NODE_VAR_DECL: {
+			ir_var_t var = modp->vars[node.d_var_decl.lhs];
+			TAB_PRINTF("%s :: %s\n", sv_from(var.name), type_dbg_str(var.type));
+			TAB_PRINTF("%s:%u", sv_from(var.name), node.d_var_decl.lhs);
+			printf(" = ");
+			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
+			printf("\n");
+			printf("\n");
 			break;
 		}
 		default: {
