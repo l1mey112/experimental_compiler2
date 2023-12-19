@@ -94,8 +94,12 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t o
 // NULL meaning toplevel, but that doesn't make sense?
 // out can be NULL
 // will search parent
+// TODO?: this searches the toplevel scope, which should only really
+//        be resolved at the end of parsing, so it doesn't really matter
 static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
+	bool is_toplevel = false;
 	if (scope == NULL) {
+		is_toplevel = true;
 		scope = &p.modp->toplevel;
 	}
 
@@ -112,7 +116,7 @@ static bool ir_search_var(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
 	}
 
 	// what an opportunity for tail recursion!
-	if (scope->parent != NULL) {
+	if (!is_toplevel) {
 		return ir_search_var(scope->parent, name, out);
 	} else {
 		return false;
@@ -219,7 +223,7 @@ static ir_node_t *ir_memdup(ir_node_t node) {
 }
 
 static bool is_id_begin(u8 ch) {
-    return isalpha(ch) || ch == '_';
+    return isalpha(ch) || ch == '_' || ch == '\'';
 }
 
 static bool is_id(u8 ch) {
@@ -249,6 +253,7 @@ static token_t plex(void) {
 
 		if (is_id_begin(ch)) {
 			u8 *start = p.pc;
+			bool is_tack = *start == '\'';
 
 			token_t token = {
 				.loc.line_nr = p.line_nr,
@@ -261,11 +266,19 @@ static token_t plex(void) {
 				p.pc++;
 			} while (p.pc < p.pend && is_id(*p.pc));
 
+			if (is_tack && p.pc - start == 1) {
+				err_with_pos(token.loc, "invalid identifier `\'`");
+			}
+
 			// get length and id pointer
 			u32 len = p.pc - start;
 			token.loc.len = len;
 
 			// TODO: this should be optimised to a static hash table
+
+			if (is_tack) {
+				goto lit;
+			}
 
 			if (0);
 			#define X(val, lit) \
@@ -273,8 +286,13 @@ static token_t plex(void) {
 			TOK_X_KEYWORDS_LIST
 			#undef X
 			else {
+			lit:;
+				istr_t istr = sv_intern(start, len);
+				if (is_tack) {
+					istr = ISTR_SET_T(istr);
+				}				
 				token.kind = TOK_IDENT;
-				token.lit = sv_intern(start, len);
+				token.lit = istr;
 			}
 
 			return token;
@@ -355,11 +373,11 @@ const char *tok_dbg_str(token_t tok) {
 	// so you can do something like: "unexpected `x`, expected identifier"
 	//                             : "unexpected `x`, expected `+=`"
 
-	if (TOK_HAS_LIT(tok.kind) && tok.lit == (istr_t)-1) {
+	if (TOK_HAS_LIT(tok.kind) && tok.lit == ISTR_NONE) {
 		requires_quotes = false;
 	}
 	
-	if (TOK_HAS_LIT(tok.kind) && tok.lit != (istr_t)-1) {
+	if (TOK_HAS_LIT(tok.kind) && tok.lit != ISTR_NONE) {
 		str = sv_from(tok.lit);
 		len = strlen(str);
 	}
@@ -384,7 +402,7 @@ void pnext(void) {
 	p.peek = plex();
 }
 
-#define DEFAULT_DBG_TOK(expected) (token_t){.kind = expected, .lit = (istr_t)-1}
+#define DEFAULT_DBG_TOK(expected) (token_t){.kind = expected, .lit = ISTR_NONE}
 
 void pcheck(tok_t expected) {
 	if (p.token.kind == TOK_EOF) {
@@ -514,7 +532,7 @@ ir_node_t pdo(ir_scope_t *s) {
 		.d_do_block = {
 			.scope = ir_new_scope(s),
 			.exprs = NULL,
-			.label = (istr_t)-1,
+			.label = ISTR_NONE,
 		},
 	};
 
@@ -558,7 +576,42 @@ ir_node_t pdo(ir_scope_t *s) {
 // create variable if it doesn't exist
 // if it does exist in the current scope, update it's value
 // if it does exist in the current scope, and has uses in the current scope, raise error
-ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *multi_exprs) {
+ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *multi_exprs) {	
+	// during parsing, the lhs can be one of three things
+	// 1. NODE_SYM (could not resolve from scope)
+	// 2. NODE_VAR (could resolve variable)
+	// 3. NODE_*   (could be a valid lhs? could also not be? let the checker handle it)
+
+	// v = 20           ; var #1
+	// do               ;
+	//     v = 25       ; var #2  (create new var)
+
+	// 'v = 20          ; var #1
+	// do               ;
+	//     'v = 25      ; var #1  (assign var)
+
+	// remember: assigning to an immutable identifier will create a new one
+	//           assigning to a mutable identifier will update the existing one
+	// remember: mutable identifiers need to be "declared" before they can be used
+	//           unlike immutable identifiers (which only have declarations)
+	// remember: a variable may possibly be a global one, which NODE_SYM is preferred
+
+	// if lhs is NODE_SYM and mutable identifier, let it pass
+	// if lhs is NODE_VAR and mutable identifier, let it pass
+	// if lhs is NODE_*, let it pass
+	if ((lhs.kind != NODE_SYM && lhs.kind != NODE_VAR) || (lhs.kind == NODE_SYM && ISTR_IS_T(lhs.d_sym)) || (lhs.kind == NODE_VAR && VAR_PTR_IS_T(VAR_PTR(lhs.d_var)))) {
+		return (ir_node_t){
+			.kind = NODE_INFIX,
+			.loc = loc,
+			.type = TYPE_INFER,
+			.d_infix.lhs = ir_memdup(lhs),
+			.d_infix.rhs = ir_memdup(rhs),
+			.d_infix.kind = TOK_ASSIGN,
+		};
+	}
+	
+	// lhs is NODE_SYM or NODE_VAR, and immutable identifier
+
 	// isn't var: no need to create vars or special logic
 	// var exists: update var
 	if (lhs.kind != NODE_SYM && (lhs.kind != NODE_VAR || ir_var_exists_in(s, lhs.d_var))) {
@@ -962,6 +1015,10 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
+	if (ISTR_IS_T(name)) {
+		punexpected("expected a non-tack name");
+	}
+
 	// io name
 	//    ^^^^
 
@@ -1012,7 +1069,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 	type_t type = TYPE_INFER;
 	if (p.next_type.name == name) {
 		type = p.next_type.type;
-		p.next_type.name = (u32)-1;
+		p.next_type.name = ISTR_NONE;
 	}
 
 	if (!is_io && ir_name_exists_in(s, name)) {
@@ -1059,7 +1116,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 
 void ptypedecl(ir_scope_t *s) {
 	// guard in here and in `pstmt()`
-	if (p.next_type.name != (u32)-1) {
+	if (p.next_type.name != ISTR_NONE) {
 		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
 	}
 	
@@ -1084,7 +1141,7 @@ void ptypedecl(ir_scope_t *s) {
 }
 
 void pcheck_unused_typedecl(void) {
-	if (p.next_type.name != (u32)-1) {
+	if (p.next_type.name != ISTR_NONE) {
 		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
 	}
 }
@@ -1094,7 +1151,7 @@ void pcheck_unused_typedecl(void) {
 // IT IS VERY IMPORTANT THAT `multi_exprs` HAS SCOPE `s`
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *multi_exprs) {
 	bool set = false;
-	bool has_next_type = p.next_type.name != (u32)-1;
+	bool has_next_type = p.next_type.name != ISTR_NONE;
 	
 	switch (p.token.kind) {
 		case TOK_IO: {
@@ -1235,7 +1292,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_SYM: {
-			printf("%s", sv_from(node.d_sym));
+			printf("%s*", sv_from(node.d_sym));
 			break;
 		}
 		case NODE_INTEGER_LIT: {

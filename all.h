@@ -25,16 +25,22 @@ typedef struct loc_t loc_t;
 typedef struct err_diag_t err_diag_t;
 typedef struct token_t token_t;
 typedef u16 type_t;
-typedef u32 istr_t;
 typedef u16 rmod_t;
 typedef u16 rfile_t;
 typedef struct mod_t mod_t;
 typedef struct file_t file_t;
 
+// a handle to an interned string
+typedef u32 istr_t;
+
+#define ISTR_NONE ((istr_t)-1)
+#define ISTR_T_MASK 0x7fffffff
+#define ISTR_SET_T(v) ((v) | 0x80000000)
+#define ISTR_IS_T(v) ((v) & 0x80000000)
+
 istr_t sv_intern(u8 *sv, size_t len);
 istr_t sv_move(const char *p);
 const char *sv_from(istr_t str);
-ptrdiff_t sv_index(const char *p);
 u8 *alloc_scratch(size_t size);
 void alloc_reset(u8 *p);
 
@@ -233,6 +239,9 @@ typedef struct ir_pattern_t ir_pattern_t;
 // TODO: define helper function for invalid loc_t
 // TODO: fancy arena allocators? fuck that!
 //       we're going for a quick and dirty bootstrap
+
+#define VAR_IS_T(v) ISTR_IS_T((v).name)
+#define VAR_PTR_IS_T(v) ISTR_IS_T((v)->name)
 
 struct ir_var_t {
 	istr_t name;

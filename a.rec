@@ -1,4 +1,6 @@
+y = 20
+
 io main = do
 	x = y
 
-	y = x
+	'y = x

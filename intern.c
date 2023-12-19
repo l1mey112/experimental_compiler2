@@ -38,11 +38,6 @@ static istr_t _sv_intern(char *str) {
 	return (u32)result;
 }
 
-// -1 for error
-ptrdiff_t sv_index(const char *p) {
-	return shgeti(interns, (char *)p);
-}
-
 istr_t sv_move(const char *p) {
 	return _sv_intern((char *)p);
 }
@@ -53,6 +48,8 @@ istr_t sv_intern(u8 *sv, size_t len) {
 }
 
 const char *sv_from(istr_t str) {
+	assert(str != ISTR_NONE);
+	str &= ISTR_T_MASK;
 	assert(str >= 0 && str < shlen(interns));
 	return interns[str].key;
 }

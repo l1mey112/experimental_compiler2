@@ -208,7 +208,7 @@ const char *fs_module_symbol_str(rmod_t mod, istr_t symbol) {
 	u8 *p = alloc_scratch(0);
 
 	u32 nwritten = _fs_module_symbol_str_conv(mod, p);
-	if (symbol != (istr_t)-1) {
+	if (symbol != ISTR_NONE) {
 		p[nwritten++] = '.';
 		const char *sv = sv_from(symbol);
 		nwritten += ptrcpy(p + nwritten, (u8 *)sv, strlen(sv));
