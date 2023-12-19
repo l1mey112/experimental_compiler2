@@ -68,10 +68,30 @@ static bool ir_var_exists_in(ir_scope_t *scope, ir_rvar_t var) {
 	return false;
 }
 
+static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
+	if (scope == NULL) {
+		scope = &p.modp->toplevel;
+	}
+
+	for (u32 i = 0; i < arrlen(scope->locals); i++) {
+		ir_rvar_t id = scope->locals[i];
+		ir_var_t *var = &p.modp->vars[id];
+
+		if (var->name == name) {
+			return var;
+		}
+	}
+
+	return NULL;
+}
+
 // NULL meaning toplevel
 static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t onerror) {
-	if (ir_name_exists_in(scope, name)) {
-		err_with_pos(onerror, "variable `%s` already exists in scope", sv_from(name));
+	ir_var_t *ex_var;
+	if ((ex_var = ir_name_in(scope, name))) {
+		print_err_with_pos(onerror, "variable `%s` already exists in scope", sv_from(name));
+		print_hint_with_pos(ex_var->loc, "variable `%s` declared here", sv_from(name));
+		err_unwind();
 	}
 	
 	ir_rvar_t id = arrlen(p.modp->vars);
