@@ -281,7 +281,6 @@ static rmod_t _fs_locate_node(rmod_t mod, istr_t *path, u32 path_len, loc_t oner
 		for (u32 j = 0; j < modp->on_disk.children_len; j++) {
 			rmod_t child = modp->on_disk.children[j];
 			mod_t *childp = MOD_PTR(child);
-			printf("child: %s\n", sv_from(childp->on_disk.name));
 			if (childp->on_disk.name == name) {
 				mod = child;
 				found = true;

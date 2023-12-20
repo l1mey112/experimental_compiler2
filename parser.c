@@ -181,8 +181,8 @@ static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
 static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 	ir_node_t *r;
 	switch (expr->kind) {
-		case NODE_SYM: {
-			if (expr->d_sym == name) {
+		case NODE_GLOBAL_UNRESOLVED: {
+			if (expr->d_global_unresolved == name) {
 				return expr;
 			}
 			return NULL;
@@ -754,7 +754,7 @@ ir_node_t pdo(ir_scope_t *s) {
 // -- if the checker sees `mut 'v = 20` it's an error, as `mut 'v` means something
 ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *previous_exprs) {	
 	// during parsing, the lhs can be one of three things
-	// 1. NODE_SYM (could not resolve from scope)
+	// 1. NODE_GLOBAL_UNRESOLVED (could not resolve from scope)
 	// 2. NODE_VAR (could resolve variable)
 	// 3. NODE_MUT (could resolve variable, 'var creation)
 	// 4. NODE_*   (could be a valid lhs? could also not be? let the checker handle it)
@@ -771,7 +771,7 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	//           assigning to a mutable identifier will update the existing one
 	// remember: mutable identifiers need to be "declared" before they can be used
 	//           unlike immutable identifiers (which only have declarations)
-	// remember: a variable may possibly be a global one, which NODE_SYM is preferred
+	// remember: a variable may possibly be a global one, which NODE_GLOBAL_UNRESOLVED is preferred
 	// remember: `mut 'v = ...` means create new variable
 
 	bool assign = false; // unrolled || chain
@@ -781,15 +781,15 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		lhs = *lhs.d_mut; // leak
 	}
 	// if lhs: mut 'v*
-	else if (lhs.kind == NODE_MUT && lhs.d_mut->kind == NODE_SYM && ISTR_IS_T(lhs.d_mut->d_sym)) {
+	else if (lhs.kind == NODE_MUT && lhs.d_mut->kind == NODE_GLOBAL_UNRESOLVED && ISTR_IS_T(lhs.d_mut->d_global_unresolved)) {
 		lhs = *lhs.d_mut; // leak
 	}
 	// is this not a symbol or var?
-	else if (lhs.kind != NODE_SYM && lhs.kind != NODE_VAR) {
+	else if (lhs.kind != NODE_GLOBAL_UNRESOLVED && lhs.kind != NODE_VAR) {
 		assign = true;
 	}
 	// if it is a symbol, is it a mutable identifier?
-	else if (lhs.kind == NODE_SYM && ISTR_IS_T(lhs.d_sym)) {
+	else if (lhs.kind == NODE_GLOBAL_UNRESOLVED && ISTR_IS_T(lhs.d_global_unresolved)) {
 		assign = true;
 	}
 	// if it is a var, is it a mutable identifier?
@@ -797,7 +797,7 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		assign = true;
 	}
 
-	// if lhs is NODE_SYM and mutable identifier, let it assign
+	// if lhs is NODE_GLOBAL_UNRESOLVED and mutable identifier, let it assign
 	// if lhs is NODE_VAR and mutable identifier, let it assign
 	// if lhs is NODE_*, let it assign
 	if (assign) {
@@ -812,7 +812,7 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	}
 
 	// --- EVERYTHING PAST HERE IS DECL OF NEW VARIABLE
-	// lhs is NODE_SYM or NODE_VAR
+	// lhs is NODE_GLOBAL_UNRESOLVED or NODE_VAR
 	//
 	// it's okay to define a new variable, it just better not exist already in the scope
 	// it's also an error to use before decl in a scope
@@ -831,8 +831,8 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	// decay into name to locate uses in scope
 	istr_t name;
 
-	if (lhs.kind == NODE_SYM) {
-		name = lhs.d_sym;
+	if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
+		name = lhs.d_global_unresolved;
 	} else if (lhs.kind == NODE_VAR) {
 		name = VAR_PTR(lhs.d_var)->name;
 	} else {
@@ -868,25 +868,45 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 }
 
 ir_node_t pident(ir_scope_t *s) {
-	ir_node_t node;
 
 	pcheck(TOK_IDENT);
 
-	// TODO: modules
+	int id;
+	if ((id = pimport_ident(p.token.lit)) != -1) {
+		loc_t oloc = p.token.loc;
+		pnext();
+		pexpect(TOK_DOT);
+		pcheck(TOK_IDENT);
+		istr_t lit = p.token.lit;
+		pnext();
+
+		return (ir_node_t){
+			.kind = NODE_SYM_UNRESOLVED,
+			.type = TYPE_INFER,
+			.loc = oloc,
+			.d_sym_unresolved = {
+				.mod = p.is[id].mod,
+				.name = lit,
+			},
+		};
+	}
+
+	ir_node_t node;
+
 	ir_rvar_t var;
 	if (ir_var_resolve_name(s, p.token.lit, &var)) {
 		node = (ir_node_t){
 			.kind = NODE_VAR,
-			.loc = p.token.loc,
 			.type = TYPE_INFER,
+			.loc = p.token.loc,
 			.d_var = var,
 		};
 	} else {
 		node = (ir_node_t){
-			.kind = NODE_SYM,
-			.loc = p.token.loc,
+			.kind = NODE_GLOBAL_UNRESOLVED,
 			.type = TYPE_INFER,
-			.d_sym = p.token.lit,
+			.loc = p.token.loc,
+			.d_global_unresolved = p.token.lit,
 		};
 	}
 	pnext();
@@ -1499,8 +1519,8 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf("%s:%u", sv_from(modp->vars[node.d_var].name), node.d_var);
 			break;
 		}
-		case NODE_SYM: {
-			printf("%s*", sv_from(node.d_sym));
+		case NODE_GLOBAL_UNRESOLVED: {
+			printf("%s*", sv_from(node.d_global_unresolved));
 			break;
 		}
 		case NODE_INTEGER_LIT: {
@@ -1581,6 +1601,10 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf(")");
 			break;
 		}
+		case NODE_SYM_UNRESOLVED: {
+			printf("%s*", fs_module_symbol_str(node.d_sym_unresolved.mod, node.d_sym_unresolved.name));
+			break;
+		}
 		default: {
 			printf("\nunknown expr kind %d\n", node.kind);
 			assert_not_reached();
@@ -1589,7 +1613,6 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 }
 
 void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
-	void *_ = alloc_scratch(0);
 	switch (node.kind) {
 		case NODE_PROC_DECL: {
 			ir_var_t var = modp->vars[node.d_proc_decl.var];
@@ -1632,16 +1655,19 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 	}
-	alloc_reset(_);
 }
 
 void ir_dump_module(rmod_t mod) {
+	void *_ = alloc_scratch(0);
+
 	mod_t *modp = MOD_PTR(mod);
-	printf("module %s\n\n", sv_from(modp->on_disk.name));
+	printf("module %s\n\n", fs_module_symbol_str(mod, ISTR_NONE));
 	for (u32 i = 0, c = arrlenu(modp->exprs); i < c; i++) {
 		_ir_dump_stmt(modp, NULL, modp->exprs[i]);
 		if (i != c - 1) {
 			printf("\n");
 		}
 	}
+
+	alloc_reset(_);
 }

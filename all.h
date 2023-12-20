@@ -353,7 +353,9 @@ struct ir_node_t {
 		NODE_PREFIX,
 		NODE_INTEGER_LIT,
 		NODE_VAR,
+		NODE_GLOBAL_UNRESOLVED,
 		NODE_SYM,
+		NODE_SYM_UNRESOLVED,
 		NODE_CAST,
 		NODE_CALL,
 		NODE_TUPLE_UNIT,
@@ -371,8 +373,16 @@ struct ir_node_t {
 
 	union {
 		ir_rvar_t d_var;
-		istr_t d_sym;
+		istr_t d_global_unresolved;
 		ir_node_t *d_mut;
+		struct {
+			rmod_t mod;
+			istr_t name;
+		} d_sym_unresolved;
+		struct {
+			rmod_t mod;
+			ir_rvar_t var;
+		} d_sym;
 		struct {
 			ir_node_t *expr;
 			tok_t kind;

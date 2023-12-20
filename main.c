@@ -12,9 +12,10 @@ const char* __asan_default_options(void) { return "detect_leaks=0"; }
 
 err_diag_t err_diag;
 
-#ifndef __linux__ 
+// we aren't using the /proc filesystem, yet...
+/* #ifndef __linux__ 
 	#error "not portable to places other than linux"
-#endif
+#endif */
 
 void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
 	char err_string[256];
