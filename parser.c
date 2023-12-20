@@ -168,6 +168,7 @@ static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
 // warning: possibly unstable pointer
 // WILL IGNORE EXISTING VARS RESOLVED FROM AN OLDER SCOPE, ITS JUST NAMES TO NAMES HERE
 static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
+	ir_node_t *r;
 	switch (expr->kind) {
 		case NODE_SYM: {
 			if (expr->d_sym == name) {
@@ -188,42 +189,48 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 			return ir_sym_find_use(expr->d_prefix.expr, name);
 		}
 		case NODE_INFIX: {
-			if (ir_sym_find_use(expr->d_infix.lhs, name)) {
-				return expr->d_infix.lhs;
+			if ((r = ir_sym_find_use(expr->d_infix.lhs, name))) {
+				return r;
 			}
-			if (ir_sym_find_use(expr->d_infix.rhs, name)) {
-				return expr->d_infix.rhs;
+			if ((r = ir_sym_find_use(expr->d_infix.rhs, name))) {
+				return r;
 			}
 			return NULL;
 		}
 		case NODE_CALL: {
-			if (ir_sym_find_use(expr->d_call.f, name)) {
-				return expr->d_call.f;
+			if ((r = ir_sym_find_use(expr->d_call.f, name))) {
+				return r;
 			}
-			if (ir_sym_find_use(expr->d_call.arg, name)) {
-				return expr->d_call.arg;
+			if ((r = ir_sym_find_use(expr->d_call.arg, name))) {
+				return r;
 			}
 			return NULL;
 		}
 		case NODE_TUPLE: {
 			for (u32 i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
 				ir_node_t *exprp = &expr->d_tuple.elems[i];
-				if (ir_sym_find_use(exprp, name)) {
-					return exprp;
+				if ((r = ir_sym_find_use(exprp, name))) {
+					return r;
 				}
 			}
 			return NULL;
 		}
 		// even though this doesn't make sense, include for completeness
 		case NODE_BREAK_INFERRED: {
-			if (ir_sym_find_use(expr->d_break.expr, name)) {
-				return expr->d_break.expr;
+			if ((r = ir_sym_find_use(expr->d_break.expr, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_VAR_DECL: {
+			if ((r = ir_sym_find_use(expr->d_var_decl.rhs, name))) {
+				return r;
 			}
 			return NULL;
 		}
 		default: {
 			// TODO: be sure to be exhaustive
-			return NULL;
+			assert_not_reached();
 		}
 	}
 }
@@ -653,9 +660,9 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		assign = true;
 	}
 
-	// if lhs is NODE_SYM and mutable identifier, let it pass
-	// if lhs is NODE_VAR and mutable identifier, let it pass
-	// if lhs is NODE_*, let it pass
+	// if lhs is NODE_SYM and mutable identifier, let it assign
+	// if lhs is NODE_VAR and mutable identifier, let it assign
+	// if lhs is NODE_*, let it assign
 	if (assign) {
 		return (ir_node_t){
 			.kind = NODE_INFIX,
@@ -697,7 +704,6 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		print_hint_with_pos(lhs.loc, "variable `%s` declared here", sv_from(name));
 		err_unwind();
 	}
-
 
 	type_t type = TYPE_INFER;
 	if (p.next_type.name == name) {
@@ -1489,7 +1495,6 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 				_ir_dump_expr(modp, &node.d_proc_decl.scopes[0], node.d_proc_decl.exprs[0]);
 				printf("\n");
 			}
-			printf("\n");
 			break;
 		}
 		case NODE_VAR_DECL: {
@@ -1498,7 +1503,6 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			TAB_PRINTF("%s:%u", sv_from(var.name), node.d_var_decl.lhs);
 			printf(" = ");
 			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
-			printf("\n");
 			printf("\n");
 			break;
 		}
@@ -1517,5 +1521,8 @@ void ir_dump_module(rmod_t mod) {
 	printf("module %s\n\n", sv_from(modp->on_disk.name));
 	for (u32 i = 0, c = arrlenu(modp->exprs); i < c; i++) {
 		_ir_dump_stmt(modp, NULL, modp->exprs[i]);
+		if (i != c - 1) {
+			printf("\n");
+		}
 	}
 }

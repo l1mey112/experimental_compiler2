@@ -121,11 +121,11 @@ int main(int argc, const char *argv[]) {
 ret:
 	// TODO: register_root() etc for module system
 	
-	if (!err) {
+	/* if (!err) {
 		if (!setjmp(err_diag.unwind)) {
 			cmodule(0);
 		}
-	}
+	} */
 	ir_dump_module(0); // main module
 
 	return err;
