@@ -110,12 +110,16 @@ int main(int argc, const char *argv[]) {
 ret:
 	// TODO: register_root() etc for module system
 	
-	if (!err) {
+	/* if (!err) {
 		if (!setjmp(err_diag.unwind)) {
 			cmodule(0);
 		}
+	} */
+	for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
+		ir_dump_module(i); // main module
 	}
-	ir_dump_module(0); // main module
+	printf("\n");
+	fs_dump_tree();
 
 	return err;
 }

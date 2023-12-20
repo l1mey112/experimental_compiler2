@@ -7,7 +7,8 @@ typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
 
 struct pimport_t {
-
+	rmod_t mod;
+	istr_t name;
 };
 
 struct pctx_t {
@@ -18,8 +19,8 @@ struct pctx_t {
 	u32 line_nr;
 	token_t token;
 	token_t peek;
-	// pimport_t is[64]; // import stack
-	// u32 is_len;
+	pimport_t is[64]; // import stack
+	u32 is_len;
 	rfile_t file;
 	rmod_t mod;
 	mod_t *modp;
@@ -33,6 +34,16 @@ struct pctx_t {
 };
 
 pctx_t p;
+
+// -1 for not found
+int pimport_ident(istr_t name) {
+	for (u32 i = 0; i < p.is_len; i++) {
+		if (p.is[i].name == name) {
+			return i;
+		}
+	}
+	return -1;
+}
 
 #define VAR_PTR(id) (&p.modp->vars[id])
 
@@ -1304,8 +1315,38 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	return set;
 }
 
+void pimport(void) {
+	if (p.has_done_imports) {
+		punexpected("import declaration must come before code");
+	}
+	
+	loc_t oloc = p.token.loc;
+	istr_t fields[64]; // no one is gonna do this... right?
+	u32 fields_len = 0;
+
+	// import a.b.c
+	do {
+		pnext();
+		istr_t field = p.token.lit;
+		pexpect(TOK_IDENT);
+		fields[fields_len++] = field;
+	} while(p.token.kind == TOK_DOT);
+
+	rmod_t mod = fs_register_import(p.mod, fields, fields_len, oloc);
+	mod_t *modp = MOD_PTR(mod);
+	printf("imported %s\n", sv_from(modp->on_disk.name));
+}
+
 void ptop_stmt(void) {
+	if (p.token.kind != TOK_IMPORT) {
+		p.has_done_imports = true;
+	}
+
 	switch (p.token.kind) {
+		case TOK_IMPORT: {
+			pimport();
+			break;
+		}
 		default: {
 			ir_node_t expr;
 			bool set = pstmt(&expr, NULL, p.modp->exprs);

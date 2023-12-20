@@ -32,11 +32,13 @@ mod_t fs_mod_arena[128];
 u32 fs_roots_len;
 rmod_t fs_roots[8];
 
-static rmod_t _fs_make_stub(const char *dp, rmod_t parent) {
+static rmod_t _fs_new_stub(const char *dp, rmod_t parent) {
 	rmod_t id = fs_mod_arena_len++;
 	mod_t *mod = MOD_PTR(id);
 	mod->on_disk.is_stub = true;
 	mod->on_disk.path = dp;
+	mod->on_disk.parent = parent;
+	mod->on_disk.name = sv_move(last_path(dp));
 	return id;
 }
 
@@ -60,11 +62,22 @@ static void _fs_slurp_file_with_size(const char *fp, rmod_t mod, size_t size) {
 	file->mod = mod;
 }
 
-// ./compiler file.ext -> is_main: true, slurp: false
-// ./compiler .        -> is_main: true, slurp: true
-static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bool slurp) {
-	rmod_t ref = fs_mod_arena_len++;
+// assumes that the ptr from `ref` is zero initialised or already initialised
+// god this needs a redo to make it truly fs lazy
+static rmod_t _fs_make_directory_real(rmod_t ref, const char *dp, rmod_t parent, bool is_main, bool slurp) {
 	mod_t *mod = MOD_PTR(ref);
+
+	mod->on_disk.is_stub = false;
+
+	if (mod->on_disk.is_files_read) {
+		slurp = false;
+	}
+	
+	// 1. stub
+	// 2. dir
+	// 3. dir + files
+
+	bool read_dirs = mod->on_disk.children == NULL;
 
 	mod->on_disk.path = dp;
 	mod->on_disk.parent = parent;
@@ -101,11 +114,11 @@ static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bo
 			err_without_pos("failed to stat '%s' (errno: %s)", concat_name, strerror(errno));
 		}
 
-		if (S_ISDIR(statbuf.st_mode)) {
+		if (read_dirs && S_ISDIR(statbuf.st_mode)) {
 			// lazily load folders and source files
-			rmod_t child = _fs_make_stub(concat_name, ref);
+			rmod_t child = _fs_new_stub(concat_name, ref);
 			arrpush(children, child);
-		} else if (S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name)) {
+		} else if (slurp && S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name)) {
 			files_count++;
 			if (slurp) {
 				_fs_slurp_file_with_size(concat_name, ref, statbuf.st_size);
@@ -113,15 +126,32 @@ static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bo
 		}
 	}
 
+	mod->on_disk.is_files_read = slurp;
 	mod->on_disk.files_count = files_count;
 	mod->on_disk.children = children;
 	mod->on_disk.children_len = arrlen(children);
 
 	if (closedir(dir)) {
-		err_without_pos("failed to close directory '%s' (errno: %s)", mod->on_disk.path, strerror(errno));
+		// why the fuck Bad file descriptor
+		// err_without_pos("failed to close directory '%s' (errno: %s)", mod->on_disk.path, strerror(errno));
 	}
 
 	return ref;
+}
+
+// ./compiler file.ext -> is_main: true, slurp: false
+// ./compiler .        -> is_main: true, slurp: true
+static rmod_t _fs_make_directory(const char *dp, rmod_t parent, bool is_main, bool slurp) {
+	rmod_t ref = fs_mod_arena_len++;
+	return _fs_make_directory_real(ref, dp, parent, is_main, slurp);
+}
+
+static void _fs_make_stub(rmod_t stub, bool slurp) {
+	mod_t *mod = MOD_PTR(stub);
+	if (!mod->on_disk.is_stub) {
+		return;
+	}
+	_fs_make_directory_real(stub, mod->on_disk.path, mod->on_disk.parent, false, slurp);
 }
 
 static void _fs_slurp_file(const char *p, rmod_t mod) {
@@ -130,7 +160,6 @@ static void _fs_slurp_file(const char *p, rmod_t mod) {
 		err_without_pos("failed to stat '%s' (errno: %s)", p, strerror(errno));
 	}
 	_fs_slurp_file_with_size(p, mod, statbuf.st_size);
-	fs_mod_arena[mod].on_disk.files_count++;
 }
 
 static rmod_t _fs_set_entry_root(const char *dp) {
@@ -144,6 +173,7 @@ static rmod_t _fs_set_entry_file(const char *fp) {
 	rmod_t mod = _fs_make_directory(bp, -1, true, false);
 	fs_roots[fs_roots_len++] = mod; // assign root
 	_fs_slurp_file(fp, mod);
+	fs_mod_arena[mod].on_disk.files_count++;
 	return mod;
 }
 
@@ -157,14 +187,14 @@ void fs_set_entry_argp(const char *argp) {
 
 // roots are searched left to right, for their enclosing directories
 rmod_t fs_register_root(const char *dp) {
-	rmod_t mod = _fs_make_directory(dp, (rmod_t)-1, false, false);
+	rmod_t mod = _fs_make_directory(dp, RMOD_NONE, false, false);
 	fs_roots[fs_roots_len++] = mod; // assign root
 	return mod;
 }
 
 rfile_t fs_set_entry_repl(void) {
 	const char *dp = get_current_dir_name();
-	rmod_t mod = _fs_make_directory(dp, (rmod_t)-1, true, false);
+	rmod_t mod = _fs_make_directory(dp, RMOD_NONE, true, false);
 	mod_t *modp = MOD_PTR(mod);
 
 	modp->on_disk.files_count++;
@@ -189,7 +219,7 @@ static bool _fs_is_root(rmod_t mod) {
 static u32 _fs_module_symbol_str_conv(rmod_t mod, u8 *p) {
 	u32 nwritten = 0;
 	mod_t *node = MOD_PTR(mod);
-	if (node->on_disk.parent != (rmod_t)-1 && !_fs_is_root(node->on_disk.parent)) {
+	if (node->on_disk.parent != RMOD_NONE && !_fs_is_root(node->on_disk.parent)) {
 		nwritten = _fs_module_symbol_str_conv(node->on_disk.parent, p);
 		p += nwritten;
 		*p++ = '.', nwritten++;
@@ -224,6 +254,113 @@ istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol) {
 	istr_t intern = sv_intern((u8*)p, strlen(p));
 	alloc_reset((u8*)p);
 	return intern;
+}
+
+static const char *_fs_path_to_str(istr_t *path, u32 path_len) {
+	u8 *p = alloc_scratch(0);
+	u8 *po = p;
+	for (u32 i = 0; i < path_len; i++) {
+		const char *sv = sv_from(path[i]);
+		p += ptrcpy(p, (u8 *)sv, strlen(sv));
+		if (i + 1 < path_len) {
+			*p++ = '.';
+		}
+	}
+	*p = '\0';
+	alloc_scratch(p - po + 1);
+	return (const char *)po;
+}
+
+// the final path is the target module
+static rmod_t _fs_locate_node(rmod_t mod, istr_t *path, u32 path_len, loc_t onerror) {
+	for (u32 i = 0; i < path_len; i++) {
+		istr_t name = path[i];
+		mod_t *modp = MOD_PTR(mod);
+
+		bool found = false;
+		for (u32 j = 0; j < modp->on_disk.children_len; j++) {
+			rmod_t child = modp->on_disk.children[j];
+			mod_t *childp = MOD_PTR(child);
+			printf("child: %s\n", sv_from(childp->on_disk.name));
+			if (childp->on_disk.name == name) {
+				mod = child;
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			return RMOD_NONE;
+		}
+
+		bool is_last = i + 1 == path_len;
+		_fs_make_stub(mod, is_last);
+	}
+
+	return mod;
+}
+
+rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror) {
+	// case 1:
+	//   find the module relative to `src`
+	// case 2:
+	//   find the module relative to roots
+	// case 3:
+	//   error!
+
+	assert(path_len > 0);
+
+	// case 1:
+	rmod_t found = _fs_locate_node(src, path, path_len, onerror);
+
+	assert(found != src); // i don't know how this could happen
+	if (found != RMOD_NONE) {
+		goto found;
+	}
+
+	// case 2:
+	for (u32 i = 0; i < fs_roots_len; i++) {
+		found = _fs_locate_node(fs_roots[i], path, path_len, onerror);
+		if (found != RMOD_NONE) {
+			goto found;
+		}
+	}
+
+	// case 3:
+	err_with_pos(onerror, "could not find module `%s`", _fs_path_to_str(path, path_len));
+found:
+	if (fs_mod_arena[found].on_disk.files_count == 0) {
+		err_with_pos(onerror, "module `%s` has no files", _fs_path_to_str(path, path_len));
+	}
+	return found;
+}
+
+u32 _fs_dt_tabs;
+
+#define TPRINTF(...) do { for (u32 i = 0; i < _fs_dt_tabs; i++) { printf("  "); } printf(__VA_ARGS__); } while (0)
+
+static void _fs_dump_tree(rmod_t i) {
+	TPRINTF("");
+	mod_t *mod = MOD_PTR(i);
+	if (mod->on_disk.is_stub) {
+		printf("mod %d: (stub) %s\n", i, mod->on_disk.path);
+		return;
+	} else {
+		printf("mod %d: %s\n", i, sv_from(mod->on_disk.name));
+	}
+	_fs_dt_tabs++;
+	TPRINTF("files: %d\n", mod->on_disk.files_count);
+	for (u32 j = 0; j < mod->on_disk.children_len; j++) {
+		_fs_dump_tree(mod->on_disk.children[j]);
+	}
+	_fs_dt_tabs--;
+}
+
+void fs_dump_tree(void) {
+	_fs_dt_tabs = 0;
+	for (u32 i = 0; i < fs_roots_len; i++) {
+		_fs_dump_tree(fs_roots[i]);
+	}
 }
 
 const char *last_path(const char* path) {

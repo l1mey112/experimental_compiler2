@@ -33,6 +33,8 @@ typedef struct file_t file_t;
 // a handle to an interned string
 typedef u32 istr_t;
 
+#define RMOD_NONE ((rmod_t)-1)
+
 #define ISTR_NONE ((istr_t)-1)
 #define ISTR_T_MASK 0x7fffffff
 #define ISTR_SET_T(v) ((v) | 0x80000000)
@@ -153,7 +155,9 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
-	X(TOK_MUT, "mut")
+	X(TOK_MUT, "mut") \
+	X(TOK_IMPORT, "import") \
+	X(TOK_PUB, "pub")
 
 // in specific order due to how operators are parsed
 #define TOK_X_OPERATOR_LIST \
@@ -418,6 +422,7 @@ struct ir_node_t {
 struct mod_t {
 	struct disk_t {
 		bool is_stub;
+		bool is_files_read;
 		const char *path;
 		//
 		rmod_t parent;
@@ -450,10 +455,11 @@ extern mod_t fs_mod_arena[128];
 void fs_set_entry_argp(const char *argp);
 rfile_t fs_set_entry_repl(void); // will register current directory
 rmod_t fs_register_root(const char *dp);
-rmod_t fs_register_import(rmod_t src, const char *fp, loc_t onerror_loc);
+rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
 //
 istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
+void fs_dump_tree(void);
 
 void cmodule(rmod_t mod);
 void pentry(rfile_t f);
