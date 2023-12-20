@@ -116,7 +116,11 @@ ret:
 		}
 	} */
 	for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
-		ir_dump_module(i); // main module
+		printf("\n");
+		mod_t *modp = MOD_PTR(i);
+		if (modp->exprs) {
+			ir_dump_module(i); // main module
+		}
 	}
 	printf("\n");
 	fs_dump_tree();

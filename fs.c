@@ -349,7 +349,9 @@ static void _fs_dump_tree(rmod_t i) {
 		printf("mod %d: %s\n", i, sv_from(mod->on_disk.name));
 	}
 	_fs_dt_tabs++;
-	TPRINTF("files: %d\n", mod->on_disk.files_count);
+	if (mod->on_disk.is_files_read) {
+		TPRINTF("files: %d\n", mod->on_disk.files_count);
+	}
 	for (u32 j = 0; j < mod->on_disk.children_len; j++) {
 		_fs_dump_tree(mod->on_disk.children[j]);
 	}

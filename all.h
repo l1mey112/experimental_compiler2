@@ -314,6 +314,7 @@ struct ir_var_t {
 	istr_t name;
 	loc_t loc;
 	type_t type;
+	bool is_pub;
 };
 
 struct ir_scope_t {

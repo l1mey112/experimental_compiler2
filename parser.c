@@ -1332,9 +1332,41 @@ void pimport(void) {
 		fields[fields_len++] = field;
 	} while(p.token.kind == TOK_DOT);
 
+	// TODO: import k as v
+
 	rmod_t mod = fs_register_import(p.mod, fields, fields_len, oloc);
-	mod_t *modp = MOD_PTR(mod);
-	printf("imported %s\n", sv_from(modp->on_disk.name));
+	istr_t module_ident = fields[fields_len - 1];
+
+	for (u32 i = 0; i < p.is_len; i++) {
+		pimport_t *is = &p.is[i];
+		if (is->mod == mod) {
+			err_with_pos(oloc, "import `%s` already imported", fs_module_symbol_str(is->mod, module_ident));
+		} else if (is->name == module_ident) {
+			err_with_pos(oloc, "import name `%s` already used", sv_from(module_ident));
+		}
+	}
+
+	p.is[p.is_len++] = (pimport_t){
+		.mod = mod,
+		.name = module_ident,
+	};
+}
+
+void pmake_pub(ir_node_t *node) {
+	switch (node->kind) {
+		case NODE_PROC_DECL: {
+			VAR_PTR(node->d_proc_decl.var)->is_pub = true;
+			break;
+		}
+		case NODE_VAR_DECL: {
+			VAR_PTR(node->d_var)->is_pub = true;
+			break;
+		}
+		default: {
+			err_with_pos(node->loc, "cannot make this expression public");
+		}
+	}
+
 }
 
 void ptop_stmt(void) {
@@ -1342,16 +1374,29 @@ void ptop_stmt(void) {
 		p.has_done_imports = true;
 	}
 
+	loc_t oloc = p.token.loc;
+	bool is_pub = p.token.kind == TOK_PUB;
+
 	switch (p.token.kind) {
 		case TOK_IMPORT: {
 			pimport();
 			break;
+		}
+		case TOK_PUB: {
+			is_pub = true;
+			pnext();
+			// fall through
 		}
 		default: {
 			ir_node_t expr;
 			bool set = pstmt(&expr, NULL, p.modp->exprs);
 			if (set) {
 				arrpush(p.modp->exprs, expr);
+			}
+			if (is_pub && set) {
+				pmake_pub(&arrlast(p.modp->exprs));
+			} else if (is_pub) {
+				err_with_pos(oloc, "cannot make this expression public");
 			}
 			break;
 		}
