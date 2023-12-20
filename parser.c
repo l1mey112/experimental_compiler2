@@ -9,6 +9,7 @@ typedef struct pimport_t pimport_t;
 struct pimport_t {
 	rmod_t mod;
 	istr_t name;
+	loc_t loc;
 };
 
 struct pctx_t {
@@ -98,6 +99,13 @@ static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
 
 // NULL meaning toplevel
 static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t onerror) {
+	int idx;
+	if ((idx = pimport_ident(name)) != -1) {
+		print_err_with_pos(onerror, "variable `%s` cannot shadow import `%s`", sv_from(name), sv_from(name));
+		print_hint_with_pos(p.is[idx].loc, "import declared here");
+		err_unwind();
+	}
+	
 	ir_var_t *ex_var;
 	if ((ex_var = ir_name_in(scope, name))) {
 		print_err_with_pos(onerror, "variable `%s` already exists in scope", sv_from(name));
@@ -875,7 +883,12 @@ ir_node_t pident(ir_scope_t *s) {
 	if ((id = pimport_ident(p.token.lit)) != -1) {
 		loc_t oloc = p.token.loc;
 		pnext();
-		pexpect(TOK_DOT);
+		if (p.token.kind != TOK_DOT) {
+			print_err_with_pos(p.token.loc, "expected `.` after import name `%s`", sv_from(p.is[id].name));
+			print_hint_with_pos(oloc, "import name `%s` used here", sv_from(p.is[id].name));
+			err_unwind();
+		}
+		pnext();
 		pcheck(TOK_IDENT);
 		istr_t lit = p.token.lit;
 		pnext();
@@ -1369,6 +1382,7 @@ void pimport(void) {
 	p.is[p.is_len++] = (pimport_t){
 		.mod = mod,
 		.name = module_ident,
+		.loc = oloc,
 	};
 }
 
