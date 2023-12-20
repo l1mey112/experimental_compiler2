@@ -195,7 +195,15 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			return expr->type;
 		}
+		case NODE_CAST: {
+			type_t t = cexpr(s, expr->type, expr->d_cast);
+			// TODO: check if this cast is even possible
+			// if (cconvert_implicit(expr->type, t) == TYPE_INFER)
+			(void)t;
+			return expr->type;
+		}
 		default: {
+			printf("unhandled expression kind: %d\n", expr->kind); 
 			assert_not_reached();
 		}
 	}

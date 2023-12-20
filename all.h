@@ -108,7 +108,48 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	return len;
 }
 
+// TYPE_UNKNOWN is something else and non concrete
+#define TYPE_INFER ((type_t)-1)
+
+#define TYPE_X_CONCRETE_LITERALS_LIST \
+	X(TYPE_I8, "i8") \
+	X(TYPE_I16, "i16") \
+	X(TYPE_I32, "i32") \
+	X(TYPE_I64, "i64") \
+	X(TYPE_ISIZE, "isize") \
+	X(TYPE_U8, "u8") \
+	X(TYPE_U16, "u16") \
+	X(TYPE_U32, "u32") \
+	X(TYPE_U64, "u64") \
+	X(TYPE_USIZE, "usize") \
+	X(TYPE_F32, "f32") \
+	X(TYPE_F64, "f64") \
+	X(TYPE_BOOL, "bool")
+
+#define TYPE_SIGNED_INTEGERS_START TYPE_I8
+#define TYPE_SIGNED_INTEGERS_END TYPE_ISIZE
+#define TYPE_UNSIGNED_INTEGERS_START TYPE_U8
+#define TYPE_UNSIGNED_INTEGERS_END TYPE_USIZE
+
+#define TYPE_X_CONCRETE_LIST \
+	TYPE_X_CONCRETE_LITERALS_LIST \
+	X(TYPE_UNIT, "()") \
+	X(TYPE_BOTTOM, "!")
+
 #define TOK_X_KEYWORDS_LIST \
+	X(TOK_I8, "i8") \
+	X(TOK_I16, "i16") \
+	X(TOK_I32, "i32") \
+	X(TOK_I64, "i64") \
+	X(TOK_ISIZE, "isize") \
+	X(TOK_U8, "u8") \
+	X(TOK_U16, "u16") \
+	X(TOK_U32, "u32") \
+	X(TOK_U64, "u64") \
+	X(TOK_USIZE, "usize") \
+	X(TOK_F32, "f32") \
+	X(TOK_F64, "f64") \
+	X(TOK_BOOL, "bool") \
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
@@ -194,7 +235,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	(t) == TOK_LSHIFT || \
 	(t) == TOK_RSHIFT || \
 	(t) == TOK_RUSHIFT || \
-	(t) == TOK_DOT)
+	(t) == TOK_DOT || \
+	(t) == TOK_COLON)
 
 // TODO: impl pipe
 // (t) == TOK_BAND || \
@@ -215,6 +257,26 @@ enum tok_t {
     #undef X
 };
 
+// types
+enum ti_kind {
+	#define X(name, _) name,
+    TYPE_X_CONCRETE_LIST
+    #undef X
+	_TYPE_CONCRETE_MAX,
+	//
+	TYPE_UNKNOWN, // reference to be filled in later
+	TYPE_TUPLE,
+	TYPE_FN,
+	// TYPE_PTR,
+	// TYPE_OPTION,
+	// TYPE_ARRAY,
+	// TYPE_ENUM,
+	// TYPE_FN_PTR,
+	// TYPE_STRUCT,
+	// TYPE_FIXEDARRAY,
+};
+
+typedef enum ti_kind ti_kind;
 typedef enum tok_t tok_t;
 
 struct loc_t {
@@ -399,54 +461,6 @@ void ir_dump_module(rmod_t mod);
 
 ir_node_t *ir_memdup(ir_node_t node);
 
-// TYPE_UNKNOWN is something else and non concrete
-#define TYPE_INFER ((type_t)-1)
-
-#define TYPE_X_CONCRETE_LITERALS_LIST \
-	X(TYPE_I8, "i8") \
-	X(TYPE_I16, "i16") \
-	X(TYPE_I32, "i32") \
-	X(TYPE_I64, "i64") \
-	X(TYPE_ISIZE, "isize") \
-	X(TYPE_U8, "u8") \
-	X(TYPE_U16, "u16") \
-	X(TYPE_U32, "u32") \
-	X(TYPE_U64, "u64") \
-	X(TYPE_USIZE, "usize") \
-	X(TYPE_F32, "f32") \
-	X(TYPE_F64, "f64") \
-	X(TYPE_BOOL, "bool")
-
-#define TYPE_SIGNED_INTEGERS_START TYPE_I8
-#define TYPE_SIGNED_INTEGERS_END TYPE_ISIZE
-#define TYPE_UNSIGNED_INTEGERS_START TYPE_U8
-#define TYPE_UNSIGNED_INTEGERS_END TYPE_USIZE
-
-#define TYPE_X_CONCRETE_LIST \
-	TYPE_X_CONCRETE_LITERALS_LIST \
-	X(TYPE_UNIT, "()") \
-	X(TYPE_BOTTOM, "!")
-
-// types
-enum ti_kind {
-	#define X(name, _) name,
-    TYPE_X_CONCRETE_LIST
-    #undef X
-	_TYPE_CONCRETE_MAX,
-	//
-	TYPE_UNKNOWN, // reference to be filled in later
-	TYPE_TUPLE,
-	TYPE_FN,
-	// TYPE_PTR,
-	// TYPE_OPTION,
-	// TYPE_ARRAY,
-	// TYPE_ENUM,
-	// TYPE_FN_PTR,
-	// TYPE_STRUCT,
-	// TYPE_FIXEDARRAY,
-};
-
-typedef enum ti_kind ti_kind;
 typedef struct tinfo_t tinfo_t;
 
 struct tinfo_t {

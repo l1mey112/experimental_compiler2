@@ -51,17 +51,6 @@ void print_diag_without_pos(const char *type, const char *fmt, ...) {
 int main(int argc, const char *argv[]) {
 	char inp[1024];
 
-	// used for quick concrete type lookups
-	{
-		extern istr_t typeinfo_concrete_istr[_TYPE_CONCRETE_MAX];
-		extern u32 typeinfo_concrete_istr_size;
-		u32 i = 0;
-		#define X(_, lit) typeinfo_concrete_istr[i++] = sv_intern((u8*)lit, strlen(lit));
-		TYPE_X_CONCRETE_LITERALS_LIST
-		#undef X
-		typeinfo_concrete_istr_size = i;
-	}
-
 	// TODO: register `lib/`
 
 	bool err = 0;
@@ -121,11 +110,11 @@ int main(int argc, const char *argv[]) {
 ret:
 	// TODO: register_root() etc for module system
 	
-	/* if (!err) {
+	if (!err) {
 		if (!setjmp(err_diag.unwind)) {
 			cmodule(0);
 		}
-	} */
+	}
 	ir_dump_module(0); // main module
 
 	return err;

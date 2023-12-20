@@ -454,6 +454,132 @@ void NORETURN punexpected(const char *err) {
 	err_with_pos(p.token.loc, "unexpected %s, %s", tok_dbg_str(p.token), err);
 }
 
+
+// TYPE_INFER on error
+type_t ptok_to_type(tok_t kind) {
+	switch (kind) {
+		case TOK_I8:    return TYPE_I8;
+		case TOK_I16:   return TYPE_I16;
+		case TOK_I32:   return TYPE_I32;
+		case TOK_I64:   return TYPE_I64;
+		case TOK_ISIZE: return TYPE_ISIZE;
+		case TOK_U8:    return TYPE_U8;
+		case TOK_U16:   return TYPE_U16;
+		case TOK_U32:   return TYPE_U32;
+		case TOK_U64:   return TYPE_U64;
+		case TOK_USIZE: return TYPE_USIZE;
+		case TOK_F32:   return TYPE_F32;
+		case TOK_F64:   return TYPE_F64;
+		case TOK_BOOL:  return TYPE_BOOL;
+		default:
+			return TYPE_INFER;
+	}
+}
+
+// will always parse into a type
+type_t ptype(void) {
+	// loc_t initial_pos = p.token.loc;
+	type_t type;
+	
+	// TODO: support parsing of function types in parentheses
+
+	switch (p.token.kind) {
+		case TOK_IDENT: {
+			istr_t initial = p.token.lit;
+			pnext();
+			if (p.token.kind == TOK_DOT) {
+				// TODO: integrate module system later
+				assert_not_reached();
+			} else {
+				assert_not_reached();
+			}
+			// terminating condition
+			break;
+		}
+		case TOK_NOT: {
+			pnext();
+			type = TYPE_BOTTOM;
+			// terminating condition
+			break;
+		}
+		case TOK_OPAR: {
+			type_t *elems = NULL;
+			type_t single = (type_t)-1;
+			bool first = true;
+			pnext();
+			// (...)
+			//  ^^^
+			while (p.token.kind != TOK_CPAR) {
+				type_t type = ptype();
+				// (i32, ...)
+				//     ^
+				
+				if (first) {
+					single = type;
+				} else {
+					if (elems == NULL) {
+						arrpush(elems, single);
+						single = (type_t)-1;
+					}
+					arrpush(elems, type);					
+				}
+
+				if (p.token.kind == TOK_COMMA) {
+					pnext();
+				} else if (p.token.kind != TOK_CPAR) {
+					punexpected("expected `,` or `)`");
+				}
+
+				first = false;
+			}
+			pnext();
+
+			if (single != (type_t)-1) {
+				return single;
+			} else if (elems == NULL) {
+				return TYPE_UNIT;
+			}
+
+			type = type_new((tinfo_t){
+				.kind = TYPE_TUPLE,
+				.d_tuple.elems = elems,
+				.d_tuple.len = arrlen(elems),
+			}, NULL);
+			// terminating condition
+			break;
+		}
+		default: {
+			if ((type = ptok_to_type(p.token.kind)) != TYPE_INFER) {
+				pnext();
+				break;
+			}
+			punexpected("expected type in definition");
+		}
+	}
+
+	// parse curried form
+	// essentially a precedence climber, with only one operation which is ->
+	// i32 -> i32 -> i32
+	// i32 -> (i32 -> i32)
+	//
+	// TODO: currently a recursive impl when should be using while(not TYPE_FN)
+	//       to make it work basically like a pexpr()
+	//
+	if (p.token.kind == TOK_ARROW) {
+		// i32 -> ...
+		//     ^^
+		pnext();
+		type_t ret = ptype();
+		type = type_new((tinfo_t){
+			.kind = TYPE_FN,
+			.d_fn.arg = type,
+			.d_fn.ret = ret,
+		}, NULL);
+	}
+
+	return type;
+}
+
 enum : u8 {
 	PREC_UNKNOWN, // default
 	PREC_ASSIGN,  // = += -= *= /= %=
@@ -900,13 +1026,28 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				default: {
 					if (TOK_IS_INFIX(token.kind)) {
 						pnext();
+
+						// cast
+						if (token.kind == TOK_COLON) {
+							type_t type = ptype();
+							node = (ir_node_t){
+								.kind = NODE_CAST,
+								.loc = token.loc,
+								.type = type,
+								.d_cast = ir_memdup(node),
+							};
+							continue;
+						}
+
 						ir_node_t rhs = pexpr(s, ptok_prec(token.kind), cfg, previous_exprs);
 
+						// assign
 						if (token.kind == TOK_ASSIGN) {
 							node = passign(s, node, rhs, token.loc, previous_exprs);
 							continue;
 						}
 
+						// random infix
 						node = (ir_node_t){
 							.kind = NODE_INFIX,
 							.loc = token.loc,
@@ -943,118 +1084,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	}
 
 	return node;
-}
-
-// will be filled from main()
-istr_t typeinfo_concrete_istr[_TYPE_CONCRETE_MAX];
-u32 typeinfo_concrete_istr_size;
-
-type_t ptype_id(istr_t lit) {
-	for (u32 i = 0; i < typeinfo_concrete_istr_size; i++) {
-		if (typeinfo_concrete_istr[i] == lit) {
-			return (type_t)i;
-		}
-	}
-
-	assert_not_reached();
-}
-
-type_t ptype(void) {
-	// loc_t initial_pos = p.token.loc;
-	type_t type;
-	
-	// TODO: support parsing of function types in parentheses
-
-	switch (p.token.kind) {
-		case TOK_IDENT: {
-			istr_t initial = p.token.lit;
-			pnext();
-			if (p.token.kind == TOK_DOT) {
-				// TODO: integrate module system later
-				assert_not_reached();
-			} else {
-				type = ptype_id(initial);
-			}
-			// terminating condition
-			break;
-		}
-		case TOK_NOT: {
-			pnext();
-			type = TYPE_BOTTOM;
-			// terminating condition
-			break;
-		}
-		case TOK_OPAR: {
-			type_t *elems = NULL;
-			type_t single = (type_t)-1;
-			bool first = true;
-			pnext();
-			// (...)
-			//  ^^^
-			while (p.token.kind != TOK_CPAR) {
-				type_t type = ptype();
-				// (i32, ...)
-				//     ^
-				
-				if (first) {
-					single = type;
-				} else {
-					if (elems == NULL) {
-						arrpush(elems, single);
-						single = (type_t)-1;
-					}
-					arrpush(elems, type);					
-				}
-
-				if (p.token.kind == TOK_COMMA) {
-					pnext();
-				} else if (p.token.kind != TOK_CPAR) {
-					punexpected("expected `,` or `)`");
-				}
-
-				first = false;
-			}
-			pnext();
-
-			if (single != (type_t)-1) {
-				return single;
-			} else if (elems == NULL) {
-				return TYPE_UNIT;
-			}
-
-			type = type_new((tinfo_t){
-				.kind = TYPE_TUPLE,
-				.d_tuple.elems = elems,
-				.d_tuple.len = arrlen(elems),
-			}, NULL);
-			// terminating condition
-			break;
-		}
-		default:
-			punexpected("expected type in definition");
-	}
-
-	// parse curried form
-	// essentially a precedence climber, with only one operation which is ->
-	// i32 -> i32 -> i32
-	// i32 -> (i32 -> i32)
-	//
-	// TODO: currently a recursive impl when should be using while(not TYPE_FN)
-	//       to make it work basically like a pexpr()
-	//
-	if (p.token.kind == TOK_ARROW) {
-		// i32 -> ...
-		//     ^^
-		pnext();
-		type_t ret = ptype();
-		type = type_new((tinfo_t){
-			.kind = TYPE_FN,
-			.d_fn.arg = type,
-			.d_fn.ret = ret,
-		}, NULL);
-	}
-
-	return type;
 }
 
 // will create vars it cannot find
