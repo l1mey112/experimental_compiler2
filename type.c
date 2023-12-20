@@ -144,12 +144,14 @@ const char *type_dbg_str(type_t type) {
 
 	
 	// ARGHHHHH
-	p = alloc_scratch(1024);
+	p = alloc_scratch(256);
 	u8 *oldp = p;
 
 	_type_dbg_str(type);
 
 	u32 nwritten = p - oldp;
+
+	assert(nwritten < 256);
 
 	p[nwritten] = '\0';
 

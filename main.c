@@ -64,7 +64,7 @@ int main(int argc, const char *argv[]) {
 
 	// TODO: register `lib/`
 
-	int rval = 0;
+	bool err = 0;
 
 	if (argc == 1) {
 		// TODO: repl shoudln't tear down the parsing context every SINGLE time
@@ -99,7 +99,7 @@ int main(int argc, const char *argv[]) {
 		eprintf("exiting repl\n");
 	} else if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
-			rval = 1;
+			err = true;
 			goto ret;
 		}
 
@@ -121,9 +121,12 @@ int main(int argc, const char *argv[]) {
 ret:
 	// TODO: register_root() etc for module system
 	
-
-	cmodule(0);
+	if (!err) {
+		if (!setjmp(err_diag.unwind)) {
+			cmodule(0);
+		}
+	}
 	ir_dump_module(0); // main module
 
-	return rval;
+	return err;
 }

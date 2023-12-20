@@ -13,129 +13,131 @@ cctx_t c;
 
 #define VAR_PTR(id) (&c.modp->vars[id])
 
-void ctype_assert(type_t src, type_t of, loc_t loc) {
+void ctype_assert(type_t src, type_t of, loc_t onerror) {
 	if (src != of) {
-		err_with_pos(loc, "type mismatch: expected %s, got %s", type_dbg_str(of), type_dbg_str(src));
+		err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(of), type_dbg_str(src));
 	}
 }
-type_t cinfix_promotion(ir_node_t *lhs, ir_node_t *rhs) {
-	// -- what V does: (use as basic reference)
-	//   i8 → i16 → int → i64
-	//                  ↘     ↘
-	//                    f32 → f64
-	//                  ↗     ↗
-	//   u8 → u16 → u32 → u64 ⬎
-	//      ↘     ↘     ↘      ptr
-	//   i8 → i16 → int → i64 ⬏
 
+void cir_unchecked_cast(type_t to, ir_node_t *node, loc_t loc) {
+	ir_node_t *dup = ir_memdup(*node);
+
+	*node = (ir_node_t) {
+		.kind = NODE_CAST,
+		.loc = loc,
+		.type = to,
+		.d_cast = dup,
+	};
+}
+
+// TYPE_INFER on fail to convert
+type_t cconvert_implicit(type_t to, type_t from) {
 	type_t ret;
-	type_t lt = lhs->type;
-	type_t rt = rhs->type;
 
-	// promote based on integer order
+	if (to == from) {
+		return to;
+	}
 
-	bool l_si = lt >= TYPE_SIGNED_INTEGERS_START && lt <= TYPE_SIGNED_INTEGERS_END;
-	bool r_si = rt >= TYPE_SIGNED_INTEGERS_START && rt <= TYPE_SIGNED_INTEGERS_END;
-	bool l_ui = lt >= TYPE_UNSIGNED_INTEGERS_START && lt <= TYPE_UNSIGNED_INTEGERS_END;
-	bool r_ui = rt >= TYPE_UNSIGNED_INTEGERS_START && rt <= TYPE_UNSIGNED_INTEGERS_END;
+	bool t_si = to >= TYPE_SIGNED_INTEGERS_START && to <= TYPE_SIGNED_INTEGERS_END;
+	bool f_si = from >= TYPE_SIGNED_INTEGERS_START && from <= TYPE_SIGNED_INTEGERS_END;
+	bool t_ui = to >= TYPE_UNSIGNED_INTEGERS_START && to <= TYPE_UNSIGNED_INTEGERS_END;
+	bool f_ui = from >= TYPE_UNSIGNED_INTEGERS_START && from <= TYPE_UNSIGNED_INTEGERS_END;
 
 	// signed type to signed type
-	if (l_si && r_si) {
-		if (lt > rt) {
-			ret = lt;
-			goto end;
-		} else {
-			ret = rt;
+	if (t_si && f_si) {
+		if (to > from) {
+			ret = to;
 			goto end;
 		}
 	}
 
 	// unsigned type to unsigned type
-	if (l_ui && r_ui) {
-		if (lt > rt) {	
-			ret = lt;
-			goto end;
-		} else {
-			ret = rt;
+	if (t_ui && f_ui) {
+		if (to > from) {
+			ret = to;
 			goto end;
 		}
 	}
 
-	//   u8 → u16 → u32 → u64
-	//      ↘     ↘     ↘
-	//   i8 → i16 → int → i64
+	// from:   u8 → u16 → u32 → u64
+	//            ↘     ↘     ↘
+	// to:     i8 → i16 → int → i64
 
-	// signed to unsigned and unsigned to signed
-	if ((l_ui && lt < TYPE_U64) && r_si) {
-		ret = rt;
+	// unsigned to signed, if possible
+	if ((f_ui && from < TYPE_U64) && (t_si && to > TYPE_I8)) {
+		ret = to;
 		goto end;
-	}
+	} 
 
-	if ((r_ui && rt < TYPE_U64) && l_si) {
-		ret = lt;
-		goto end;
-	}
+	// from: f32 → to: f64
 
 	// floats to floats
-	if ((lt == TYPE_F32 && rt == TYPE_F64) || (lt == TYPE_F64 && rt == TYPE_F32)) {
-		ret = TYPE_F64;
+	if (from == TYPE_F32 && to == TYPE_F64) {
+		ret = to;
 		goto end;
 	}
 
-	// integers to floats
-	
+	// from:   i8 → i16 → int → i64
+	//                        ↘     ↘
+	//                          f32 → f64
+	//                        ↗     ↗
+	// to:     u8 → u16 → u32 → u64
+
 	// a u32 can go into an f32
-	if ((lt == TYPE_F32 && (r_si && rt <= TYPE_U32)) || (rt == TYPE_F32 && (l_si && lt <= TYPE_U32))) {
-		ret = TYPE_F32;
-		goto end;
-	}
-
-	// a u64 can go into an f64
-	if ((lt == TYPE_F64 && (r_si && rt <= TYPE_U64)) || (rt == TYPE_F64 && (l_si && lt <= TYPE_U64))) {
-		ret = TYPE_F64;
+	if (to == TYPE_F32 && (f_ui && from <= TYPE_U32)) {
+		ret = to;
 		goto end;
 	}
 
 	// a i32 can go into an f32
-	if ((lt == TYPE_F32 && (r_si && rt <= TYPE_I32)) || (rt == TYPE_F32 && (l_si && lt <= TYPE_I32))) {
-		ret = TYPE_F32;
+	if (to == TYPE_F32 && (f_si && from <= TYPE_I32)) {
+		ret = to;
+		goto end;
+	}
+
+	// a u64 can go into an f64
+	if (to == TYPE_F64 && (f_ui && from <= TYPE_USIZE)) {
+		ret = to;
 		goto end;
 	}
 
 	// a i64 can go into an f64
-	if ((lt == TYPE_F64 && (r_si && rt <= TYPE_I64)) || (rt == TYPE_F64 && (l_si && lt <= TYPE_I64))) {
-		ret = TYPE_F64;
+	if (to == TYPE_F64 && (f_si && from <= TYPE_ISIZE)) {
+		ret = to;
 		goto end;
 	}
 
-	assert_not_reached();
+	return TYPE_INFER;
 end:
+	return ret;
+}
+
+type_t cinfix_promotion(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
+	type_t ret;
+	type_t rt = cconvert_implicit(lhs->type, rhs->type);
+	type_t lt = cconvert_implicit(rhs->type, lhs->type);
+
+	if (lt == TYPE_INFER && rt == TYPE_INFER) {
+		err_with_pos(onerror, "type mismatch: cannot implicitly promote `%s` and `%s`", type_dbg_str(lt), type_dbg_str(rt));
+	}
+
+	if (lt == TYPE_INFER) {
+		ret = rt;
+	} else if (rt == TYPE_INFER) {
+		ret = lt;
+	}
 
 	// insert explicit casts
 
-	if (lt != ret) {
-		ir_node_t *lhs_dup = ir_memdup(*lhs);
-		
-		*lhs = (ir_node_t) {
-			.kind = NODE_CAST,
-			.loc = lhs->loc,
-			.type = ret,
-			.d_cast = lhs_dup,
-		};
-		return ret;
-	} else if (rt != ret) {
-		ir_node_t *rhs_dup = ir_memdup(*rhs);
-		
-		*rhs = (ir_node_t) {
-			.kind = NODE_CAST,
-			.loc = rhs->loc,
-			.type = ret,
-			.d_cast = rhs_dup,
-		};
-		return ret;
+	if (lhs->type != ret) {
+		cir_unchecked_cast(ret, lhs, lhs->loc);
+	} else if (rhs->type != ret) {
+		cir_unchecked_cast(ret, rhs, rhs->loc);
 	} else {
 		assert_not_reached();
 	}
+
+	return ret;
 }
 
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
@@ -145,8 +147,18 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (var->type == TYPE_INFER) {
 				var->type = cexpr(s, upvalue, expr->d_var_decl.rhs);
 			} else {
-				type_t rhs_type = cexpr(s, var->type, expr->d_var_decl.rhs);
-				ctype_assert(rhs_type, var->type, expr->loc);
+				type_t ret = cexpr(s, var->type, expr->d_var_decl.rhs);
+
+				// need to convert expression to variable type
+				if (ret != var->type) {
+					// implicitly convert
+					ret = cconvert_implicit(var->type, ret);
+					if (ret == TYPE_INFER) {
+						err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(var->type), type_dbg_str(ret));
+					}
+					// ret == var->type
+					cir_unchecked_cast(var->type, expr->d_var_decl.rhs, expr->loc);
+				}
 			}
 			return TYPE_UNIT;
 		}
@@ -160,7 +172,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (lhs_type == rhs_type) {
 				expr->type = lhs_type;
 			} else {
-				expr->type = cinfix_promotion(expr->d_infix.lhs, expr->d_infix.rhs);
+				expr->type = cinfix_promotion(expr->d_infix.lhs, expr->d_infix.rhs, expr->loc);
 			}
 			return expr->type;
 		}
