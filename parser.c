@@ -681,7 +681,11 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 	// it's also an error to use before decl in a scope
 
 	if (lhs.kind == NODE_VAR && ir_var_exists_in(s, lhs.d_var)) {
-		err_with_pos(lhs.loc, "variable `%s` already exists in scope", sv_from(VAR_PTR(lhs.d_var)->name));
+		const char *name = sv_from(VAR_PTR(lhs.d_var)->name);
+		loc_t oloc = VAR_PTR(lhs.d_var)->loc;
+		print_err_with_pos(lhs.loc, "variable `%s` already exists in scope", name);
+		print_hint_with_pos(oloc, "variable `%s` declared here", name);
+		err_unwind();
 	}
 	
 	// we know the variable doesn't exist, but before declaring we need to make sure
