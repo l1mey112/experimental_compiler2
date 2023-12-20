@@ -202,6 +202,27 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			(void)t;
 			return expr->type;
 		}
+		case NODE_SYM_UNRESOLVED: {
+			rmod_t sym_mod = expr->d_sym_unresolved.mod;
+			mod_t *sym_modp = MOD_PTR(sym_mod);
+			for (u32 i = 0, c = arrlenu(sym_modp->vars); i < c; i++) {
+				ir_var_t *var = &sym_modp->vars[i];
+				if (var->name == expr->d_sym_unresolved.name) {
+					*expr = (ir_node_t){
+						.kind = NODE_SYM,
+						.loc = expr->loc,
+						.type = var->type,
+						.d_sym = {
+							.mod = sym_mod,
+							.var = i,
+						}
+					};
+					
+					return expr->type;
+				}
+			}
+			err_with_pos(expr->loc, "unresolved symbol `%s`", expr->d_sym_unresolved.name);
+		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 
 			assert_not_reached();

@@ -1373,13 +1373,15 @@ void pimport(void) {
 }
 
 void pmake_pub(ir_node_t *node) {
+	ir_var_t *varp;
+	
 	switch (node->kind) {
 		case NODE_PROC_DECL: {
-			VAR_PTR(node->d_proc_decl.var)->is_pub = true;
+			varp = VAR_PTR(node->d_proc_decl.var);
 			break;
 		}
 		case NODE_VAR_DECL: {
-			VAR_PTR(node->d_var)->is_pub = true;
+			varp = VAR_PTR(node->d_var);
 			break;
 		}
 		default: {
@@ -1387,6 +1389,11 @@ void pmake_pub(ir_node_t *node) {
 		}
 	}
 
+	assert(!varp->is_pub);
+	varp->is_pub = true;
+	if (varp->type == TYPE_INFER) {
+		err_with_pos(varp->loc, "cannot make expression with inferred type public");
+	}
 }
 
 void ptop_stmt(void) {
@@ -1603,6 +1610,11 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		case NODE_SYM_UNRESOLVED: {
 			printf("%s*", fs_module_symbol_str(node.d_sym_unresolved.mod, node.d_sym_unresolved.name));
+			break;
+		}
+		case NODE_SYM: {
+			ir_var_t *var = MOD_VAR_PTR(node.d_sym.mod, node.d_sym.var);
+			printf("%s", fs_module_symbol_str(node.d_sym.mod, var->name));
 			break;
 		}
 		default: {

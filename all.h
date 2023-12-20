@@ -461,6 +461,7 @@ extern u32 fs_mod_arena_len;
 extern mod_t fs_mod_arena[128];
 
 #define MOD_PTR(mod) (&fs_mod_arena[mod])
+#define MOD_VAR_PTR(mod, var) (&fs_mod_arena[mod].vars[var])
 #define FILE_PTR(file) (&fs_files_queue[file])
 
 void fs_set_entry_argp(const char *argp);
