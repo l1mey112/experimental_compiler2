@@ -5,10 +5,18 @@
 
 typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
+typedef struct ptypedecl_t ptypedecl_t;
 
 struct pimport_t {
 	rmod_t mod;
 	istr_t name;
+	loc_t loc;
+};
+
+struct ptypedecl_t {
+	ir_scope_t *scope;
+	istr_t name;
+	type_t type;
 	loc_t loc;
 };
 
@@ -22,16 +30,12 @@ struct pctx_t {
 	token_t peek;
 	pimport_t is[64]; // import stack
 	u32 is_len;
+	ptypedecl_t tds[128]; // type decl stack
+	u32 tds_len;
 	rfile_t file;
 	rmod_t mod;
 	mod_t *modp;
 	bool has_done_imports;
-	//
-	struct {
-		istr_t name; // -1 for none
-		type_t type;
-		loc_t loc;
-	} next_type;
 };
 
 pctx_t p;
@@ -162,6 +166,14 @@ static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) 
 	}
 }
 
+static ir_scope_t *ir_new_scope_ptr(ir_scope_t *parent) {
+	ir_scope_t *ptr = malloc(sizeof(ir_scope_t));
+	*ptr = (ir_scope_t){
+		.parent = parent,
+	};
+	return ptr;
+}
+
 static ir_scope_t ir_new_scope(ir_scope_t *parent) {
 	ir_scope_t scope = {
 		.parent = parent,
@@ -235,7 +247,7 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 			return NULL;
 		}
 		// even though this doesn't make sense, include for completeness
-		case NODE_BREAK_INFERRED: {
+		case NODE_BREAK: {
 			if ((r = ir_sym_find_use(expr->d_break.expr, name))) {
 				return r;
 			}
@@ -751,10 +763,11 @@ ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
 		ir_node_t node = *last;
 
 		*last = (ir_node_t){
-			.kind = NODE_BREAK_INFERRED,
+			.kind = NODE_BREAK,
 			.loc = node.loc,
 			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
-			.d_break.expr = ir_memdup(node)
+			.d_break.expr = ir_memdup(node),
+			.d_break.label = ISTR_NONE,
 		};
 	}
 
@@ -955,15 +968,9 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		err_unwind();
 	}
 
-	type_t type = TYPE_INFER;
-	if (p.next_type.name == name) {
-		type = p.next_type.type;
-		p.next_type.name = ISTR_NONE;
-	}
-
 	// TODO: no need for `onerror`, we know var doesn't exist
 	//       probably introduce INVALID_LOC macro ??
-	ir_rvar_t var = ir_new_var(s, name, type, lhs.loc);
+	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, lhs.loc);
 
 	// creation of a variable is ()
 	// should keep? i don't know
@@ -1356,12 +1363,6 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	// `previous_exprs` doesn't share scope with `enclosing_scope`
 	ir_node_t expr = pexpr(&enclosing_scope, 0, 0, NULL);
 
-	type_t type = TYPE_INFER;
-	if (p.next_type.name == name) {
-		type = p.next_type.type;
-		p.next_type.name = ISTR_NONE;
-	}
-
 	ir_node_t *other_def;
 	if (!is_io && (other_def = ir_find_proc_decl(previous_exprs, name))) {
 		if (other_def->kind != NODE_PROC_DECL) {
@@ -1375,7 +1376,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	}
 
 	// create new var before evaluation so it can be referenced recursively
-	ir_rvar_t var = ir_new_var(s, name, type, name_loc);
+	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc);
 
 	ir_node_t *exprs = NULL;
 	arrpush(exprs, expr);
@@ -1403,11 +1404,6 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 }
 
 void ptypedecl(ir_scope_t *s) {
-	// guard in here and in `pstmt()`
-	if (p.next_type.name != ISTR_NONE) {
-		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
-	}
-	
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
@@ -1421,17 +1417,24 @@ void ptypedecl(ir_scope_t *s) {
 		err_with_pos(name_loc, "type decl must come before definition `%s`", sv_from(name));
 	}
 
+	// check if duplicate exists already in stack
+	for (u32 i = 0; i < p.tds_len; i++) {
+		if (p.tds[i].name == name && p.tds[i].scope == s) {
+			print_err_with_pos(name_loc, "duplicate type decl `%s`", sv_from(name));
+			print_hint_with_pos(p.tds[i].loc, "previous type decl was here");
+			err_unwind();
+		}
+	}
+
 	type_t type = ptype();
 
-	p.next_type.type = type;
-	p.next_type.name = name;
-	p.next_type.loc = name_loc;
-}
-
-void pcheck_unused_typedecl(void) {
-	if (p.next_type.name != ISTR_NONE) {
-		err_with_pos(p.next_type.loc, "unused type decl `%s`", sv_from(p.next_type.name));
-	}
+	// add to stack
+	p.tds[p.tds_len++] = (ptypedecl_t){
+		.name = name,
+		.scope = s,
+		.loc = name_loc,
+		.type = type,
+	};
 }
 
 // `previous_exprs` is used when multiple function declarations are in the same scope
@@ -1439,8 +1442,7 @@ void pcheck_unused_typedecl(void) {
 // IT IS VERY IMPORTANT THAT `previous_exprs` HAS SCOPE `s`
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	bool set = false;
-	bool has_next_type = p.next_type.name != ISTR_NONE;
-	
+
 	switch (p.token.kind) {
 		case TOK_IO: {
 			set = pproc(expr, s, NULL);
@@ -1462,11 +1464,6 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 			set = true;
 			break;
 		}
-	}
-
-	// error if type decl not used
-	if (has_next_type) {
-		pcheck_unused_typedecl();
 	}
 
 	return set;
@@ -1529,9 +1526,6 @@ void pmake_pub(ir_node_t *node) {
 
 	assert(!varp->is_pub);
 	varp->is_pub = true;
-	if (varp->type == TYPE_INFER) {
-		err_with_pos(varp->loc, "cannot make expression with inferred type public");
-	}
 }
 
 void ptop_stmt(void) {
@@ -1568,6 +1562,30 @@ void ptop_stmt(void) {
 	}
 }
 
+void papply_typedecls(void) {
+	for (u32 i = 0; i < p.tds_len; i++) {
+		ptypedecl_t *td = &p.tds[i];
+		ir_var_t *varp = ir_name_in(td->scope, td->name);
+
+		if (!varp) {
+			err_with_pos(td->loc, "cannot find variable `%s`", sv_from(td->name));
+		}
+
+		printf("apply %s, type: %s\n", sv_from(td->name), type_dbg_str(td->type));
+
+		assert(varp->type == TYPE_INFER);
+		varp->type = td->type;
+	}
+
+	// pubs all have types, i don't want to sort modules... global exprs is enough
+	for (u32 i = 0, c = arrlenu(p.modp->vars); i < c; i++) {
+		ir_var_t *varp = &p.modp->vars[i];
+		if (varp->is_pub && varp->type == TYPE_INFER) {
+			err_with_pos(varp->loc, "cannot make expression with inferred type public");
+		}
+	}
+}
+
 void pentry(rfile_t file) {
 	file_t *f = FILE_PTR(file);
 	
@@ -1579,7 +1597,6 @@ void pentry(rfile_t file) {
 		.file = file,
 		.mod = f->mod,
 		.modp = MOD_PTR(f->mod),
-		.next_type.name = -1,
 	};
 
 	pnext(); // tok
@@ -1588,7 +1605,8 @@ void pentry(rfile_t file) {
 	while (p.token.kind != TOK_EOF) {
 		ptop_stmt();
 	}
-	pcheck_unused_typedecl();
+
+	papply_typedecls();
 }
 
 void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
@@ -1694,7 +1712,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf("do\n");
 			_ir_tabcnt++;
 			for (int i = 0, c = arrlen(node.d_do_block.exprs); i < c; i++) {
-				_ir_dump_stmt(modp, &node.d_do_block.scope, node.d_do_block.exprs[i]);
+				_ir_dump_stmt(modp, node.d_do_block.scope, node.d_do_block.exprs[i]);
 			}
 			_ir_tabcnt--;
 			break;
@@ -1714,8 +1732,11 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf(")");
 			break;
 		}
-		case NODE_BREAK_INFERRED: {
-			printf("ibrk ");
+		case NODE_BREAK: {
+			printf("brk ");
+			if (node.d_break.label != ISTR_NONE) {
+				printf(":%s ", sv_from(node.d_break.label));
+			}
 			_ir_dump_expr(modp, s, *node.d_break.expr);
 			break;
 		}

@@ -349,7 +349,7 @@ struct ir_node_t {
 		NODE_PROC_DECL,
 		NODE_VAR_DECL,
 		NODE_DO_BLOCK,
-		NODE_IN_BLOCK,
+		// NODE_IN_BLOCK,
 		NODE_INFIX,
 		NODE_POSTFIX,
 		NODE_PREFIX,
@@ -362,8 +362,8 @@ struct ir_node_t {
 		NODE_CALL,
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
-		NODE_BREAK_UNIT,
-		NODE_BREAK_INFERRED,
+		NODE_BREAK_UNIT, // always !
+		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_MUT,
 	} kind;
 	
@@ -394,17 +394,17 @@ struct ir_node_t {
 			tok_t kind;
 		} d_prefix;
 		struct {
-			ir_scope_t scope;
+			ir_scope_t *scope; // scopes are pointers here for a reason
 			istr_t label; // -1 for none
-			ir_node_t *exprs;
+			ir_node_t *exprs; // all do blocks have at least one expr, unless they become a NODE_TUPLE_UNIT
 		} d_do_block;
-		struct {
-			ir_scope_t scope;
+		/* struct {
+			ir_scope_t *scope;
 			// do we even need labels? does that make sense?
 			// istr_t label; // -1 for none
 			ir_node_t *head;
 			ir_node_t *exprs;
-		} d_in_block;
+		} d_in_block; */
 		struct {
 			ir_node_t *lhs;
 			ir_node_t *rhs;
@@ -435,6 +435,7 @@ struct ir_node_t {
 		} d_tuple;
 		struct {
 			ir_node_t *expr;
+			istr_t label;
 		} d_break;
 	};
 };
