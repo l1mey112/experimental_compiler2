@@ -420,6 +420,18 @@ static token_t plex(void) {
 	return (token_t){.kind = TOK_EOF};
 }
 
+const char *tok_op_str(tok_t tok) {
+	switch (tok) {
+		#define X(val, lit) \
+			case val: return lit;
+		TOK_X_OPERATOR_LIST
+		#undef X
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
 const char *tok_dbg_str(token_t tok) {
 	// handle identifiers
 
@@ -622,7 +634,6 @@ enum : u8 {
 	PREC_ADD,     // + -
 	PREC_MUL,     // * / %
 	PREC_CAST,    // :
-	PREC_DEFAULT_CALL,
 	PREC_PREFIX,  // - * ! &
 	PREC_POSTFIX, // ++ --
 	PREC_DOT,     // .x
@@ -684,6 +695,123 @@ static u8 ptok_prec(tok_t kind) {
 }
 
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs);
+ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs);
+
+enum : u8 {
+	PEXPR_ET_NONE,
+	PEXPR_ET_PAREN,
+};
+
+ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
+	u32 bcol = p.token.loc.col;
+	ir_node_t *exprs = NULL;
+
+	// an indented block has columns greater than the column of the original location
+	if (oloc.col != bcol) {
+		punexpected("expected indented block");
+	}
+
+	while (p.token.kind != TOK_EOF) {
+		u32 cln = p.token.loc.line_nr;
+		
+		ir_node_t expr;
+		bool set = pstmt(&expr, s, exprs);
+		if (set) {
+			arrpush(exprs, expr);
+		}
+
+		if (cln != p.token.loc.line_nr && p.token.loc.col != bcol) {
+			break;
+		}
+	}
+
+	if (exprs == NULL) {
+		return NULL;
+	}
+
+	// wrap last expr in break
+	// TODO: don't do this unless the last expr is not a break
+
+	// some last expressions of a do block may possibly be assignments,
+	// which is okay, they're still expressions. our repr code chokes up though
+	// there isn't really a point to be breaking on those expressions.
+	//
+	// if the last expression is (), its most likely one of those expressions.
+
+	ir_node_t *last = &arrlast(exprs);
+	if (last->type == TYPE_UNIT) {
+		ir_node_t node = {
+			.kind = NODE_BREAK_UNIT, // unary shorthand
+			.loc = node.loc,
+			.type = TYPE_BOTTOM,
+		};
+		
+		arrpush(exprs, node);
+	} else {
+		ir_node_t node = *last;
+
+		*last = (ir_node_t){
+			.kind = NODE_BREAK_INFERRED,
+			.loc = node.loc,
+			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
+			.d_break.expr = ir_memdup(node)
+		};
+	}
+
+	return exprs;
+}
+
+// in v -> expr
+// in v do
+//     ...
+//     ...
+/* ir_node_t pin(ir_scope_t *s) {
+	loc_t oloc = p.token.loc;
+	pnext();
+
+	pexpr()
+
+	ir_node_t *exprs = NULL;
+	ir_scope_t scope = ir_new_scope(s);
+
+	if (p.token.loc.line_nr == oloc.line_nr) {
+		// single expression
+		ir_node_t expr = pexpr(&scope, 0, 0, NULL);
+		arrpush(exprs, expr);
+
+		ir_node_t node = {
+			.kind = NODE_IN_BLOCK,
+			.loc = oloc,
+			.type = TYPE_INFER,
+			.d_in_block.scope = scope,
+			.d_in_block.head = ir_memdup(head),
+			.d_in_block.exprs = exprs,
+		};
+
+		return node;
+	} else {
+		// indented block
+		exprs = pindented_block(&scope, oloc);
+		if (exprs == NULL) {
+			return (ir_node_t){
+				.kind = NODE_TUPLE_UNIT,
+				.loc = oloc,
+				.type = TYPE_UNIT,
+			};
+		}
+
+		ir_node_t node = {
+			.kind = NODE_IN_BLOCK,
+			.loc = oloc,
+			.type = TYPE_INFER,
+			.d_in_block.scope = scope,
+			.d_in_block.head = ir_memdup(head),
+			.d_in_block.exprs = exprs,
+		};
+
+		return node;
+	}
+} */
 
 // do
 //     ...
@@ -701,7 +829,6 @@ ir_node_t pdo(ir_scope_t *s) {
 	if (p.token.loc.line_nr == oloc.line_nr) {
 		err_with_pos(oloc, "expected newline after `do`");
 	}
-	u32 bcol = p.token.loc.col;
 
 	ir_node_t block = {
 		.kind = NODE_DO_BLOCK,
@@ -714,21 +841,10 @@ ir_node_t pdo(ir_scope_t *s) {
 		},
 	};
 
-	while (p.token.kind != TOK_EOF) {
-		u32 cln = p.token.loc.line_nr;
-		
-		ir_node_t expr;
-		bool set = pstmt(&expr, &block.d_do_block.scope, block.d_do_block.exprs);
-		if (set) {
-			arrpush(block.d_do_block.exprs, expr);
-		}
+	ir_node_t *exprs = pindented_block(&block.d_do_block.scope, oloc);
+	
 
-		if (cln != p.token.loc.line_nr && p.token.loc.col != bcol) {
-			break;
-		}
-	}
-
-	if (block.d_do_block.exprs == NULL) {
+	if (exprs == NULL) {
 		return (ir_node_t){
 			.kind = NODE_TUPLE_UNIT,
 			.loc = oloc,
@@ -736,34 +852,7 @@ ir_node_t pdo(ir_scope_t *s) {
 		};
 	}
 
-	// wrap last expr in break
-	// TODO: don't do this unless the last expr is not a break
-
-	// some last expressions of a do block may possibly be assignments,
-	// which is okay, they're still expressions. our repr code chokes up though
-	// there isn't really a point to be breaking on those expressions.
-	//
-	// if the last expression is (), its most likely one of those expressions.
-
-	ir_node_t *last = &arrlast(block.d_do_block.exprs);
-	if (last->type == TYPE_UNIT) {
-		ir_node_t node = {
-			.kind = NODE_BREAK_UNIT, // unary shorthand
-			.loc = node.loc,
-			.type = TYPE_BOTTOM,
-		};
-		
-		arrpush(block.d_do_block.exprs, node);
-	} else {
-		ir_node_t node = *last;
-
-		*last = (ir_node_t){
-			.kind = NODE_BREAK_INFERRED,
-			.loc = node.loc,
-			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
-			.d_break.expr = ir_memdup(node)
-		};
-	}
+	block.d_do_block.exprs = exprs;
 
 	return block;
 }
@@ -939,123 +1028,163 @@ ir_node_t pident(ir_scope_t *s) {
 	return node;
 }
 
-enum : u8 {
-	PEXPR_ET_NONE,
-	PEXPR_ET_PAREN,
-};
-
 // (                           a b                          )
 // ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break 
 ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
-	ir_node_t node;
 	token_t token = p.token;
 	u32 line_nr = token.loc.line_nr;
+	ir_node_t node;
+	bool is_single = true;
 
-	switch (token.kind) {
-		case TOK_MUT: {
-			pnext();
-			ir_node_t rhs = pexpr(s, PREC_MUT, cfg, previous_exprs);
-			node = (ir_node_t){
-				.kind = NODE_MUT,
-				.loc = token.loc,
-				.type = TYPE_INFER,
-				.d_mut = ir_memdup(rhs),
-			};
-			break;
-		}
-		case TOK_IDENT: {
-			node = pident(s);
-			break;
-		}
-		case TOK_OPAR: {
-			loc_t oloc = p.token.loc;
-			pnext();
-			if (p.token.kind == TOK_CPAR) {
+	while (true) {
+		ir_node_t onode = node;
+		token_t token = p.token;
+
+		switch (token.kind) {
+			case TOK_MUT: {
+				pnext();
+				ir_node_t rhs = pexpr(s, PREC_MUT, cfg, previous_exprs);
 				node = (ir_node_t){
-					.kind = NODE_TUPLE_UNIT,
-					.loc = oloc,
-					.type = TYPE_UNIT,
+					.kind = NODE_MUT,
+					.loc = token.loc,
+					.type = TYPE_INFER,
+					.d_mut = ir_memdup(rhs),
+				};
+				break;
+			}
+			case TOK_IDENT: {
+				node = pident(s);
+				break;
+			}
+			case TOK_OPAR: {
+				loc_t oloc = p.token.loc;
+				pnext();
+				if (p.token.kind == TOK_CPAR) {
+					node = (ir_node_t){
+						.kind = NODE_TUPLE_UNIT,
+						.loc = oloc,
+						.type = TYPE_UNIT,
+					};
+					pnext();
+					break;
+				}
+				bool first = true;
+				ir_node_t *elems = NULL;
+				while (p.token.kind != TOK_CPAR) {
+					if (first) {
+						node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
+					} else {
+						if (elems == NULL) {
+							arrpush(elems, node);
+						}
+						node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
+						arrpush(elems, node);					
+					}
+
+					if (p.token.kind == TOK_COMMA) {
+						pnext();
+					} else if (p.token.kind != TOK_CPAR) {
+						punexpected("expected `,` or `)`");
+					}
+
+					first = false;
+				}
+				pnext();
+				if (elems != NULL) {
+					node = (ir_node_t){
+						.kind = NODE_TUPLE,
+						.loc = oloc,
+						.type = TYPE_INFER,
+						.d_tuple = {
+							.elems = elems,
+						},
+					};
+				}
+				break;
+			}
+			case TOK_INTEGER: {
+				node = (ir_node_t){
+					.kind = NODE_INTEGER_LIT,
+					.loc = p.token.loc,
+					.type = TYPE_INFER,
+					.d_integer_lit = {
+						.lit = p.token.lit,
+					},
 				};
 				pnext();
 				break;
 			}
-			bool first = true;
-			ir_node_t *elems = NULL;
-			while (p.token.kind != TOK_CPAR) {
-				if (first) {
-					node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
-				} else {
-					if (elems == NULL) {
-						arrpush(elems, node);
+			case TOK_DO: {
+				return pdo(s); // TODO?: no chaining
+			}
+			default: {
+				if (TOK_IS_PREFIX(token.kind)) {
+					pnext();
+					if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
+						node = (ir_node_t){
+							.kind = NODE_INTEGER_LIT,
+							.loc = token.loc,
+							.type = TYPE_INFER,
+							.d_integer_lit = {
+								.lit = p.token.lit,
+								.negate = true,
+							},
+						};
+						pnext();
+					} else {
+						ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
+						node = (ir_node_t){
+							.kind = NODE_PREFIX,
+							.loc = token.loc,
+							.type = TYPE_INFER,
+							.d_prefix.expr = ir_memdup(rhs),
+							.d_prefix.kind = token.kind,
+						};
 					}
-					node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
-					arrpush(elems, node);					
-				}
-
-				if (p.token.kind == TOK_COMMA) {
-					pnext();
-				} else if (p.token.kind != TOK_CPAR) {
-					punexpected("expected `,` or `)`");
-				}
-
-				first = false;
-			}
-			pnext();
-			if (elems != NULL) {
-				node = (ir_node_t){
-					.kind = NODE_TUPLE,
-					.loc = oloc,
-					.type = TYPE_INFER,
-					.d_tuple = {
-						.elems = elems,
-					},
-				};
-			}
-			break;
-		}
-		case TOK_INTEGER: {
-			node = (ir_node_t){
-				.kind = NODE_INTEGER_LIT,
-				.loc = p.token.loc,
-				.type = TYPE_INFER,
-				.d_integer_lit = {
-					.lit = p.token.lit,
-				},
-			};
-			pnext();
-			break;
-		}
-		case TOK_DO: {
-			return pdo(s); // isn't meant to be chained possibly?
-		}
-		default: {
-			if (TOK_IS_PREFIX(token.kind)) {
-				pnext();
-				if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
-					node = (ir_node_t){
-						.kind = NODE_INTEGER_LIT,
-						.loc = token.loc,
-						.type = TYPE_INFER,
-						.d_integer_lit = {
-							.lit = p.token.lit,
-							.negate = true,
-						},
-					};
-					pnext();
 				} else {
-					ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
-					node = (ir_node_t){
-						.kind = NODE_PREFIX,
-						.loc = token.loc,
-						.type = TYPE_INFER,
-						.d_prefix.expr = ir_memdup(rhs),
-						.d_prefix.kind = token.kind,
-					};
+					punexpected("expected expression");
 				}
-			} else {
-				punexpected("expected expression");
 			}
 		}
+
+		switch (cfg) {
+			case PEXPR_ET_PAREN: {
+				if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
+					return node;
+				}
+				break;
+			}
+			case PEXPR_ET_NONE: break;
+			default: {
+				assert_not_reached();
+			}
+		}
+
+		if (p.token.kind == TOK_EOF || ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr) {
+			printf("INNER\n");
+			if (is_single) {
+				is_single = false;
+				continue;
+			}
+
+			node = (ir_node_t){
+				.kind = NODE_CALL,
+				.loc = onode.loc,
+				.type = TYPE_INFER,
+				.d_call.f = ir_memdup(onode),
+				.d_call.arg = ir_memdup(node),
+			};
+
+			// duplicates?
+			if (p.token.kind == TOK_EOF) {
+				return node;
+			}
+			continue;	
+		}
+		if (p.token.kind == TOK_EOF) {
+			return node;
+		}
+		break;
 	}
 
 	while (true) {
@@ -1116,25 +1245,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					}
 				}
 			}
-		}
-
-		if (prec <= PREC_ASSIGN && token.loc.line_nr == line_nr) {
-			if (cfg == PEXPR_ET_PAREN) {
-				if (token.kind == TOK_CPAR || token.kind == TOK_COMMA) {
-					break;
-				}
-			} else if (cfg != PEXPR_ET_NONE) {
-				assert_not_reached();
-			}
-			ir_node_t rhs = pexpr(s, PREC_DEFAULT_CALL, 0, previous_exprs);
-			node = (ir_node_t){
-				.kind = NODE_CALL,
-				.loc = token.loc,
-				.type = TYPE_INFER,
-				.d_call.f = ir_memdup(node),
-				.d_call.arg = ir_memdup(rhs),
-			};
-			continue;
 		}
 		break;
 	}
@@ -1511,18 +1621,6 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 	}
 }
 
-const char *_ir_op_literal(tok_t tok) {
-	switch (tok) {
-		#define X(val, lit) \
-			case val: return lit;
-		TOK_X_OPERATOR_LIST
-		#undef X
-		default: {
-			assert_not_reached();
-		}
-	}
-}
-
 void _ir_dump_scope(mod_t *modp, ir_scope_t *s) {
 	for (int i = 0, c = arrlen(s->locals); i < c; i++) {
 		ir_rvar_t var = s->locals[i];
@@ -1570,7 +1668,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_INFIX: {
-			printf("(%s ", _ir_op_literal(node.d_infix.kind));
+			printf("(%s ", tok_op_str(node.d_infix.kind));
 			_ir_dump_expr(modp, s, *node.d_infix.lhs);
 			printf(" ");
 			_ir_dump_expr(modp, s, *node.d_infix.rhs);
@@ -1578,7 +1676,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_PREFIX: {
-			printf("%s", _ir_op_literal(node.d_prefix.kind));
+			printf("%s", tok_op_str(node.d_prefix.kind));
 			_ir_dump_expr(modp, s, *node.d_prefix.expr);
 			break;
 		}

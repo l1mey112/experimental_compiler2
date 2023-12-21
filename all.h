@@ -153,6 +153,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_F64, "f64") \
 	X(TOK_BOOL, "bool") \
 	X(TOK_DO, "do") \
+	X(TOK_IN, "in") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
 	X(TOK_MUT, "mut") \
@@ -348,6 +349,7 @@ struct ir_node_t {
 		NODE_PROC_DECL,
 		NODE_VAR_DECL,
 		NODE_DO_BLOCK,
+		NODE_IN_BLOCK,
 		NODE_INFIX,
 		NODE_POSTFIX,
 		NODE_PREFIX,
@@ -396,6 +398,13 @@ struct ir_node_t {
 			istr_t label; // -1 for none
 			ir_node_t *exprs;
 		} d_do_block;
+		struct {
+			ir_scope_t scope;
+			// do we even need labels? does that make sense?
+			// istr_t label; // -1 for none
+			ir_node_t *head;
+			ir_node_t *exprs;
+		} d_in_block;
 		struct {
 			ir_node_t *lhs;
 			ir_node_t *rhs;
@@ -510,3 +519,5 @@ tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);
 void types_dump(void);
 const char *type_dbg_str(type_t type);
+const char *tok_op_str(tok_t tok);
+const char *tok_dbg_str(token_t tok);

@@ -1,3 +1,3 @@
-fact :: i32 -> i32
+fact :: usize -> usize
 fact: 0 = 1
-fact: i = i * f in f = fact (i - 1)
+fact: i = i * fact (i - 1)
