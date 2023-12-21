@@ -247,8 +247,13 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 			}
 			return NULL;
 		}
+		case NODE_INTEGER_LIT:
+		case NODE_PROC_DECL: {
+			return NULL;
+		}
 		default: {
 			// TODO: be sure to be exhaustive
+			printf("ir_sym_find_use: unhandled node kind %d\n", expr->kind);
 			assert_not_reached();
 		}
 	}
@@ -1106,7 +1111,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			}
 		}
 
-		if (prec == 0 && token.loc.line_nr == line_nr) {
+		if (prec <= PREC_ASSIGN && token.loc.line_nr == line_nr) {
 			if (cfg == PEXPR_ET_PAREN) {
 				if (token.kind == TOK_CPAR || token.kind == TOK_COMMA) {
 					break;
@@ -1633,6 +1638,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		default: {
 			printf("\nunknown expr kind %d\n", node.kind);
+			print_hint_with_pos(node.loc, "LOC HERE");
 			assert_not_reached();
 		}
 	}
