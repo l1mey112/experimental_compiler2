@@ -228,6 +228,20 @@ enum : u8 {
 
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 	switch (expr->kind) {
+		case NODE_GLOBAL_UNRESOLVED: {
+			for (u32 i = 0; i < arrlenu(c.modp->toplevel.locals); i++) {
+				ir_rvar_t var = c.modp->toplevel.locals[i];
+				ir_var_t *varp = &c.modp->vars[var];
+				if (varp->name == expr->d_global_unresolved) {
+					assert(varp->type != TYPE_INFER && "global variable type not inferred");
+					expr->kind = NODE_VAR;
+					expr->type = varp->type;
+					expr->d_var = var;
+					return expr->type;
+				}
+			}
+			err_with_pos(expr->loc, "unknown ident `%s`", sv_from(expr->d_global_unresolved));
+		}
 		case NODE_VAR_DECL: {
 			ir_var_t *var = VAR_PTR(expr->d_var_decl.lhs);
 			if (var->type == TYPE_INFER) {
@@ -346,6 +360,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			expr->type = fn->d_fn.ret;
 			return expr->type;
+		}
+		case NODE_TUPLE_UNIT: {
+			return TYPE_UNIT;
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 

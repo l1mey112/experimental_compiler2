@@ -247,6 +247,7 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 			}
 			return NULL;
 		}
+		case NODE_DO_BLOCK:
 		case NODE_INTEGER_LIT:
 		case NODE_PROC_DECL: {
 			return NULL;
@@ -306,6 +307,7 @@ static token_t plex(void) {
 		if (is_id_begin(ch)) {
 			u8 *start = p.pc;
 			bool is_tack = *start == '\'';
+			bool is_underscore = *start == '_';
 
 			token_t token = {
 				.loc.line_nr = p.line_nr,
@@ -320,6 +322,12 @@ static token_t plex(void) {
 
 			if (is_tack && p.pc - start == 1) {
 				err_with_pos(token.loc, "invalid identifier `\'`");
+			}
+
+			if (is_underscore && p.pc - start == 1) {
+				token.loc.len = 1;
+				token.kind = TOK_UNDERSCORE;
+				return token;
 			}
 
 			// get length and id pointer
@@ -517,13 +525,11 @@ type_t ptype(void) {
 			} else {
 				assert_not_reached();
 			}
-			// terminating condition
 			break;
 		}
 		case TOK_NOT: {
 			pnext();
 			type = TYPE_BOTTOM;
-			// terminating condition
 			break;
 		}
 		case TOK_OPAR: {
@@ -559,9 +565,11 @@ type_t ptype(void) {
 			pnext();
 
 			if (single != (type_t)-1) {
-				return single;
+				type = single;
+				break;
 			} else if (elems == NULL) {
-				return TYPE_UNIT;
+				type = TYPE_UNIT;
+				break;
 			}
 
 			type = type_new((tinfo_t){
@@ -569,7 +577,6 @@ type_t ptype(void) {
 				.d_tuple.elems = elems,
 				.d_tuple.len = arrlen(elems),
 			}, NULL);
-			// terminating condition
 			break;
 		}
 		default: {
@@ -1484,7 +1491,7 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 		}
 		case PATTERN_VAR: {
 			ir_var_t *varp = &modp->vars[pattern.d_var];
-			printf("%s:%u", sv_from(varp->name), pattern.d_var);
+			printf("%s.%u", sv_from(varp->name), pattern.d_var);
 			break;
 		}
 		case PATTERN_TUPLE: {
@@ -1538,11 +1545,11 @@ void _ir_tabs(void) {
 	printf(__VA_ARGS__);
 
 void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
-	printf("%s:", type_dbg_str(node.type));
+	// printf("[%s]:", type_dbg_str(node.type));
 
 	switch (node.kind) {
 		case NODE_VAR: {
-			printf("%s:%u", sv_from(modp->vars[node.d_var].name), node.d_var);
+			printf("%s.%u", sv_from(modp->vars[node.d_var].name), node.d_var);
 			break;
 		}
 		case NODE_GLOBAL_UNRESOLVED: {
@@ -1576,8 +1583,9 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_CALL: {
+			printf("(");
 			_ir_dump_expr(modp, s, *node.d_call.f);
-			printf(" (");
+			printf(" ");
 			_ir_dump_expr(modp, s, *node.d_call.arg);
 			printf(")");
 			break;
@@ -1651,9 +1659,9 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			type_t fn_type = var.type;
 			istr_t name = var.name;
 			
-			TAB_PRINTF("%s :: %s\n", sv_from(name), type_dbg_str(fn_type));
+			TAB_PRINTF("%s.%u :: %s\n", sv_from(name), node.d_proc_decl.var, type_dbg_str(fn_type));
 			if (node.d_proc_decl.patterns) {
-				TAB_PRINTF("%s:%u _ = switch\n", sv_from(name), node.d_proc_decl.var);
+				TAB_PRINTF("%s.%u _ = switch\n", sv_from(name), node.d_proc_decl.var);
 				_ir_tabcnt++;
 				for (u32 i = 0, c = arrlenu(node.d_proc_decl.exprs); i < c; i++) {
 					// _ir_dump_scope(modp, &node.d_proc_decl.scopes[i]);
@@ -1673,8 +1681,8 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		case NODE_VAR_DECL: {
 			ir_var_t var = modp->vars[node.d_var_decl.lhs];
-			TAB_PRINTF("%s :: %s\n", sv_from(var.name), type_dbg_str(var.type));
-			TAB_PRINTF("%s:%u", sv_from(var.name), node.d_var_decl.lhs);
+			TAB_PRINTF("%s.%u :: %s\n", sv_from(var.name), node.d_var_decl.lhs, type_dbg_str(var.type));
+			TAB_PRINTF("%s.%u", sv_from(var.name), node.d_var_decl.lhs);
 			printf(" = ");
 			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
 			printf("\n");

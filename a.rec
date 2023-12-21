@@ -1,6 +1,3 @@
-curry :: i32 -> i32 -> i32 -> i32
-curry: x, y, z = x + y + z
-
-a = curry 30
-b = a 50
-c = b 60
+fact :: i32 -> i32
+fact: 0 = 1
+fact: i = i * f in f = fact (i - 1)
