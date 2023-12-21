@@ -119,34 +119,6 @@ end:
 	return ret;
 }
 
-type_t cinfix_promotion(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
-	type_t ret;
-	type_t rt = cconvert_implicit(lhs->type, rhs->type);
-	type_t lt = cconvert_implicit(rhs->type, lhs->type);
-
-	if (lt == TYPE_INFER && rt == TYPE_INFER) {
-		err_with_pos(onerror, "type mismatch: cannot implicitly promote `%s` and `%s`", type_dbg_str(lt), type_dbg_str(rt));
-	}
-
-	if (lt == TYPE_INFER) {
-		ret = rt;
-	} else if (rt == TYPE_INFER) {
-		ret = lt;
-	}
-
-	// insert explicit casts
-
-	if (lhs->type != ret) {
-		cir_unchecked_cast(ret, lhs, lhs->loc);
-	} else if (rhs->type != ret) {
-		cir_unchecked_cast(ret, rhs, rhs->loc);
-	} else {
-		assert_not_reached();
-	}
-
-	return ret;
-}
-
 // convert a big curry into a tuple of args
 type_t cfn_args_to_tuple(type_t fn) {
 	tinfo_t tuple = {
@@ -288,16 +260,42 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return TYPE_UNIT;
 		}
 		case NODE_INFIX: {
+			ir_node_t *lhs = expr->d_infix.lhs, *rhs = expr->d_infix.rhs;
+			
 			// integer promotion rules for lhs and rhs
 			// TODO: don't check right expression without left expression
-			type_t lhs_type = cexpr(s, upvalue, expr->d_infix.lhs);
-			type_t rhs_type = cexpr(s, lhs_type, expr->d_infix.rhs);
+			type_t lhs_type = cexpr(s, upvalue, lhs);
+			type_t rhs_type = cexpr(s, lhs_type, rhs);
 			// _ = x + y
 
 			if (lhs_type == rhs_type) {
 				expr->type = lhs_type;
 			} else {
-				expr->type = cinfix_promotion(expr->d_infix.lhs, expr->d_infix.rhs, expr->loc);
+				type_t ret;
+				type_t rt = cconvert_implicit(lhs->type, rhs->type);
+				type_t lt = cconvert_implicit(rhs->type, lhs->type);
+
+				if (lt == TYPE_INFER && rt == TYPE_INFER) {
+					err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
+				}
+
+				if (lt == TYPE_INFER) {
+					ret = rt;
+				} else if (rt == TYPE_INFER) {
+					ret = lt;
+				}
+
+				// insert explicit casts
+
+				if (lhs->type != ret) {
+					cir_unchecked_cast(ret, lhs, lhs->loc);
+				} else if (rhs->type != ret) {
+					cir_unchecked_cast(ret, rhs, rhs->loc);
+				} else {
+					assert_not_reached();
+				}
+
+				expr->type = ret;
 			}
 			return expr->type;
 		}
@@ -332,7 +330,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			mod_t *sym_modp = MOD_PTR(sym_mod);
 			for (u32 i = 0, c = arrlenu(sym_modp->vars); i < c; i++) {
 				ir_var_t *var = &sym_modp->vars[i];
-				if (var->name == expr->d_sym_unresolved.name) {
+				if (var->is_pub && var->name == expr->d_sym_unresolved.name) {
 					*expr = (ir_node_t){
 						.kind = NODE_SYM,
 						.loc = expr->loc,
