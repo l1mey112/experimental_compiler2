@@ -1,4 +1,6 @@
-import mod.a
+curry :: i32 -> i32 -> i32 -> i32
+curry: x, y, z = x + y + z
 
-v :: i32 -> i32 -> i32
-v: x, y = x + y
+a = curry 30
+b = a 50
+c = b 60

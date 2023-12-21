@@ -171,7 +171,7 @@ type_t cfn_args_to_tuple(type_t fn) {
 }
 
 // get return type
-type_t cfn_type(type_t fn) {
+type_t cfn_type_full_return(type_t fn) {
 	assert(type_kind(fn) == TYPE_FN);
 
 	while (type_kind(fn) == TYPE_FN) {
@@ -257,13 +257,13 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				// TODO: when generics come around, sure
 				err_with_pos(expr->loc, "function type inference is not implemented yet");
 			}
-			if (type_get(varp->type)->kind != TYPE_FN) {
+			if (type_kind(varp->type) != TYPE_FN) {
 				err_with_pos(expr->loc, "expected function type, got `%s`", type_dbg_str(varp->type));
 			}
 			// you know, a function being a bunch of patterns matching
 			// on a tuple of args is a pretty good abstraction
 			type_t args_tuple = cfn_args_to_tuple(varp->type);
-			type_t return_type = cfn_type(varp->type);
+			type_t return_type = cfn_type_full_return(varp->type);
 			for (u32 i = 0, c = arrlenu(expr->d_proc_decl.scopes); i < c; i++) {
 				cpattern(&expr->d_proc_decl.scopes[i], &expr->d_proc_decl.patterns[i], args_tuple);
 			}
@@ -271,7 +271,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				type_t type = cexpr(&expr->d_proc_decl.scopes[i], return_type, &expr->d_proc_decl.exprs[i]);
 				ctype_assert(type, return_type, expr->d_proc_decl.exprs[i].loc);
 			}
-			break;
+			return TYPE_UNIT;
 		}
 		case NODE_INFIX: {
 			// integer promotion rules for lhs and rhs
@@ -333,6 +333,19 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				}
 			}
 			err_with_pos(expr->loc, "unresolved symbol `%s`", expr->d_sym_unresolved.name);
+		}
+		case NODE_CALL: {
+			type_t f_type = cexpr(s, TYPE_INFER, expr->d_call.f);
+			if (type_kind(f_type) != TYPE_FN) {
+				err_with_pos(expr->loc, "expected function type, got `%s`", type_dbg_str(f_type));
+			}
+			tinfo_t *fn = type_get(f_type);
+			type_t arg_type = cexpr(s, fn->d_fn.arg, expr->d_call.arg);
+			if (fn->d_fn.arg != arg_type) {
+				err_with_pos(expr->loc, "expected argument type `%s`, got `%s`", type_dbg_str(fn->d_fn.arg), type_dbg_str(arg_type));
+			}
+			expr->type = fn->d_fn.ret;
+			return expr->type;
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 
