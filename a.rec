@@ -1,3 +1,4 @@
 import mod.a
 
-v: a, y = a + y
+v :: i32 -> i32 -> i32
+v: x, y = x + y

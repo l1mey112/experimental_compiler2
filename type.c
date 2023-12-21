@@ -44,7 +44,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 
 // reference T -> TYPE_UNKNOWN 
 // define T -> TYPE_!UNKNOWN probably TYPE_STRUCT
-type_t type_new(tinfo_t typeinfo, loc_t *loc) {
+type_t type_new(tinfo_t typeinfo, loc_t *onerror) {
 	assert(typeinfo.kind >= _TYPE_CONCRETE_MAX);
 
 	// intern types, there aren't that many in an average program
@@ -62,7 +62,7 @@ type_t type_new(tinfo_t typeinfo, loc_t *loc) {
 			if (typeinfo.is_named && nb->is_named && typeinfo.kind != nb->kind) {
 				if (typeinfo.kind != TYPE_UNKNOWN) {
 					// therefore nb->kind != TYPE_UNKNOWN, and is already defined
-					err_with_pos(*loc, "type `%s` already defined", fs_module_symbol_str(typeinfo.d_named.mod, typeinfo.d_named.name));
+					err_with_pos(*onerror, "type `%s` already defined", fs_module_symbol_str(typeinfo.d_named.mod, typeinfo.d_named.name));
 				}
 			}
 
@@ -76,6 +76,16 @@ type_t type_new(tinfo_t typeinfo, loc_t *loc) {
 	type_t type = type_len + _TYPE_CONCRETE_MAX;
 	types[type_len++] = typeinfo;
 	return type;
+}
+
+// safe for comparisions
+ti_kind type_kind(type_t type) {
+	if (type < _TYPE_CONCRETE_MAX) {
+		return type;
+	}
+
+	tinfo_t *typeinfo = type_get(type);
+	return typeinfo->kind;
 }
 
 tinfo_t *type_get(type_t type) {

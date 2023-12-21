@@ -30,6 +30,13 @@ void cir_unchecked_cast(type_t to, ir_node_t *node, loc_t loc) {
 	};
 }
 
+bool ctype_is_numeric(type_t type) {
+	// TODO: aliases etc
+	return (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END) ||
+		(type >= TYPE_UNSIGNED_INTEGERS_START && type <= TYPE_UNSIGNED_INTEGERS_END) ||
+		(type == TYPE_F32 || type == TYPE_F64);
+}
+
 // TYPE_INFER on fail to convert
 type_t cconvert_implicit(type_t to, type_t from) {
 	type_t ret;
@@ -140,6 +147,85 @@ type_t cinfix_promotion(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
 	return ret;
 }
 
+// convert a big curry into a tuple of args
+type_t cfn_args_to_tuple(type_t fn) {
+	tinfo_t tuple = {
+		.kind = TYPE_TUPLE,
+	};
+
+	tinfo_t *tinfo = type_get(fn);
+	assert(tinfo->kind == TYPE_FN);
+
+	do {
+		type_t arg = tinfo->d_fn.arg;
+		arrpush(tuple.d_tuple.elems, arg);
+		if (tinfo->d_fn.ret < _TYPE_CONCRETE_MAX) {
+			break;
+		}
+		tinfo = type_get(tinfo->d_fn.ret);
+	} while (tinfo->kind == TYPE_FN);
+
+	tuple.d_tuple.len = arrlenu(tuple.d_tuple.elems);
+
+	return type_new(tuple, NULL);
+}
+
+// get return type
+type_t cfn_type(type_t fn) {
+	assert(type_kind(fn) == TYPE_FN);
+
+	while (type_kind(fn) == TYPE_FN) {
+		tinfo_t *tinfo = type_get(fn);
+		fn = tinfo->d_fn.ret;
+	}
+
+	return fn;
+}
+
+void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
+	switch (pattern->kind) {
+		case PATTERN_TUPLE: {
+			tinfo_t *tinfo = type_get(type);
+			if (tinfo->kind != TYPE_TUPLE) {
+				err_with_pos(pattern->loc, "cannot match tuple pattern against non-tuple type `%s`", type_dbg_str(type));
+			}
+			if (tinfo->d_tuple.len != arrlenu(pattern->d_tuple.elems)) {
+				err_with_pos(pattern->loc, "cannot match tuple pattern against tuple type `%s` of different length", type_dbg_str(type));
+			}
+			for (size_t i = 0; i < arrlenu(pattern->d_tuple.elems); i++) {
+				cpattern(s, &pattern->d_tuple.elems[i], tinfo->d_tuple.elems[i]);
+			}
+			break;
+		}
+		case PATTERN_VAR: {
+			ir_var_t *var = VAR_PTR(pattern->d_var);
+			if (var->type == TYPE_INFER) {
+				var->type = type;
+			} else {
+				// var patterns don't have explicit types
+				assert_not_reached();
+			}
+			break;
+		}
+		case PATTERN_INTEGER_LIT: {
+			// TODO: check integer is inbounds for type
+			if (!ctype_is_numeric(type)) {
+				err_with_pos(pattern->loc, "cannot match integer literal against non-numeric type `%s`", type_dbg_str(type));
+			}
+			break;
+		}
+		case PATTERN_UNDERSCORE: {
+			break;
+		}
+	}
+}
+
+// TODO: eventually?
+enum : u8 {
+	CEXPR_NONE,
+	CEXPR_LVALUE,
+};
+
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 	switch (expr->kind) {
 		case NODE_VAR_DECL: {
@@ -161,6 +247,31 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				}
 			}
 			return TYPE_UNIT;
+		}
+		case NODE_PROC_DECL: {
+			// 1. check if return type is infer, IT SHOULD NOT BE
+			//    err_with_pos("complex inference and generics aren't implemented yet")
+			// 2. cpattern_to_type(...) for each pattern
+			ir_var_t *varp = VAR_PTR(expr->d_proc_decl.var);
+			if (varp->type == TYPE_INFER) {
+				// TODO: when generics come around, sure
+				err_with_pos(expr->loc, "function type inference is not implemented yet");
+			}
+			if (type_get(varp->type)->kind != TYPE_FN) {
+				err_with_pos(expr->loc, "expected function type, got `%s`", type_dbg_str(varp->type));
+			}
+			// you know, a function being a bunch of patterns matching
+			// on a tuple of args is a pretty good abstraction
+			type_t args_tuple = cfn_args_to_tuple(varp->type);
+			type_t return_type = cfn_type(varp->type);
+			for (u32 i = 0, c = arrlenu(expr->d_proc_decl.scopes); i < c; i++) {
+				cpattern(&expr->d_proc_decl.scopes[i], &expr->d_proc_decl.patterns[i], args_tuple);
+			}
+			for (u32 i = 0, c = arrlenu(expr->d_proc_decl.exprs); i < c; i++) {
+				type_t type = cexpr(&expr->d_proc_decl.scopes[i], return_type, &expr->d_proc_decl.exprs[i]);
+				ctype_assert(type, return_type, expr->d_proc_decl.exprs[i].loc);
+			}
+			break;
 		}
 		case NODE_INFIX: {
 			// integer promotion rules for lhs and rhs
@@ -188,10 +299,10 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			// TODO: check that upvalue is a valid integer type
 			//       however we can ignore upvalue and the caller MUST handle it
 			//       -- that is more elegant than having to check for it here
-			if (upvalue == TYPE_INFER) {
-				expr->type = TYPE_I32;
-			} else {
+			if (upvalue != TYPE_INFER && ctype_is_numeric(upvalue)) {
 				expr->type = upvalue;
+			} else {
+				expr->type = TYPE_I32;
 			}
 			return expr->type;
 		}

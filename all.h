@@ -494,7 +494,7 @@ struct tinfo_t {
 		} d_fn;
 		struct {
 			type_t *elems;
-			u8 len;
+			u32 len;
 		} d_tuple;
 		struct {
 			rmod_t mod;
@@ -505,6 +505,8 @@ struct tinfo_t {
 	};
 };
 
-type_t type_new(tinfo_t typeinfo, loc_t *loc);
+type_t type_new(tinfo_t typeinfo, loc_t *onerror);
+tinfo_t *type_get(type_t type);
+ti_kind type_kind(type_t type);
 void types_dump(void);
 const char *type_dbg_str(type_t type);

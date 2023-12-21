@@ -1219,7 +1219,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 
 		pattern = (ir_pattern_t){
 			.kind = PATTERN_TUPLE,
-			.loc = name_loc,
+			.loc = patterns[0].loc,
 			.d_tuple = {
 				.elems = patterns,
 				.len = arrlen(patterns),
