@@ -707,9 +707,9 @@ ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
 	ir_node_t *exprs = NULL;
 
 	// an indented block has columns greater than the column of the original location
-	if (oloc.col != bcol) {
+	/* if (oloc.col != bcol) {
 		punexpected("expected indented block");
-	}
+	} */
 
 	while (p.token.kind != TOK_EOF) {
 		u32 cln = p.token.loc.line_nr;
@@ -835,13 +835,13 @@ ir_node_t pdo(ir_scope_t *s) {
 		.loc = oloc,
 		.type = TYPE_INFER,
 		.d_do_block = {
-			.scope = ir_new_scope(s),
+			.scope = ir_new_scope_ptr(s),
 			.exprs = NULL,
 			.label = ISTR_NONE,
 		},
 	};
 
-	ir_node_t *exprs = pindented_block(&block.d_do_block.scope, oloc);
+	ir_node_t *exprs = pindented_block(block.d_do_block.scope, oloc);
 	
 
 	if (exprs == NULL) {
@@ -1037,6 +1037,13 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	bool is_single = true;
 
 	while (true) {
+		if (p.token.kind == TOK_EOF) {
+			if (is_single) {
+				punexpected("expected expression");
+			}
+			return node;
+		}
+
 		ir_node_t onode = node;
 		token_t token = p.token;
 
@@ -1148,20 +1155,19 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 		}
 
 		switch (cfg) {
+			case PEXPR_ET_NONE: break;
 			case PEXPR_ET_PAREN: {
 				if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
 					return node;
 				}
 				break;
 			}
-			case PEXPR_ET_NONE: break;
 			default: {
 				assert_not_reached();
 			}
 		}
 
-		if (p.token.kind == TOK_EOF || ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr) {
-			printf("INNER\n");
+		if (p.token.kind == TOK_EOF || (ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr)) {
 			if (is_single) {
 				is_single = false;
 				continue;
@@ -1174,17 +1180,13 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				.d_call.f = ir_memdup(onode),
 				.d_call.arg = ir_memdup(node),
 			};
-
-			// duplicates?
-			if (p.token.kind == TOK_EOF) {
-				return node;
-			}
 			continue;	
 		}
-		if (p.token.kind == TOK_EOF) {
-			return node;
-		}
 		break;
+	}
+
+	if (p.token.kind == TOK_EOF) {
+		return node;
 	}
 
 	while (true) {
