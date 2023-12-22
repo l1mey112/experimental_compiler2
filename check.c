@@ -234,6 +234,12 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 
 	c.blocks_len--;
 
+	// no breaks pointing to this do, but somehow some ! code ran
+	if (blk->brk_type == TYPE_INFER) {
+		assert(arrlast(node->d_do_block.exprs).type == TYPE_BOTTOM);
+		blk->brk_type = TYPE_BOTTOM;
+	}
+
 	return blk->brk_type;
 }
 
@@ -433,7 +439,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (blk->brk_type == TYPE_INFER || blk->brk_type == TYPE_BOTTOM) {
 				blk->brk_type = brk_type;
 				blk->brk_loc = expr->loc;
-			} else if (blk->brk_type != brk_type) {
+			} else if (brk_type != TYPE_BOTTOM && blk->brk_type != brk_type) {
 				print_err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(blk->brk_type), type_dbg_str(brk_type));
 				print_hint_with_pos(blk->brk_loc, "type `%s` deduced here", type_dbg_str(blk->brk_type));
 				err_unwind();
@@ -443,7 +449,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_IF: {
 			type_t cond_type = cexpr(s, TYPE_BOOL, expr->d_if.cond);
 			if (cond_type != TYPE_BOOL) {
-				err_with_pos(expr->d_if.cond->loc, "expected `bool`, got `%s`", type_dbg_str(cond_type));
+				err_with_pos(expr->d_if.cond->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(cond_type));
 			}
 			if (expr->d_if.els == NULL) {
 				upvalue = TYPE_INFER; // should be (), but does that even matter really?
