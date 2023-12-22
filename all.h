@@ -158,7 +158,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_IO, "io") \
 	X(TOK_MUT, "mut") \
 	X(TOK_IMPORT, "import") \
-	X(TOK_PUB, "pub")
+	X(TOK_PUB, "pub") \
+	X(TOK_BREAK, "brk")
 
 // in specific order due to how operators are parsed
 #define TOK_X_OPERATOR_LIST \
@@ -397,6 +398,7 @@ struct ir_node_t {
 			ir_scope_t *scope; // scopes are pointers here for a reason
 			istr_t label; // -1 for none
 			ir_node_t *exprs; // all do blocks have at least one expr, unless they become a NODE_TUPLE_UNIT
+			u8 blk_id;
 		} d_do_block;
 		/* struct {
 			ir_scope_t *scope;
@@ -434,8 +436,8 @@ struct ir_node_t {
 			ir_node_t *elems;
 		} d_tuple;
 		struct {
-			ir_node_t *expr;
-			istr_t label;
+			ir_node_t *expr; // in use with NODE_BREAK
+			u8 blk_id;
 		} d_break;
 	};
 };

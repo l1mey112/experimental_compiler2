@@ -6,6 +6,12 @@
 typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
 typedef struct ptypedecl_t ptypedecl_t;
+typedef struct pblk_t pblk_t;
+
+struct pblk_t {
+	istr_t label;
+	loc_t loc; // TODO: i don't even think we'll need this?
+};
 
 struct pimport_t {
 	rmod_t mod;
@@ -32,6 +38,8 @@ struct pctx_t {
 	u32 is_len;
 	ptypedecl_t tds[128]; // type decl stack
 	u32 tds_len;
+	pblk_t blks[256]; // block stack, idx encoded in a u8
+	u32 blks_len;
 	rfile_t file;
 	rmod_t mod;
 	mod_t *modp;
@@ -708,11 +716,7 @@ static u8 ptok_prec(tok_t kind) {
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs);
 ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs);
 
-enum : u8 {
-	PEXPR_ET_NONE,
-	PEXPR_ET_PAREN,
-};
-
+// MUST HAVE BLK ENTRY AS TOP BLK IN FIRST CALL
 ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
 	u32 bcol = p.token.loc.col;
 	ir_node_t *exprs = NULL;
@@ -755,18 +759,19 @@ ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = node.loc,
 			.type = TYPE_BOTTOM,
+			.d_break.blk_id = p.blks_len - 1, // top blk
 		};
 		
 		arrpush(exprs, node);
-	} else {
+	} else if (last->type != TYPE_BOTTOM) {
 		ir_node_t node = *last;
 
 		*last = (ir_node_t){
 			.kind = NODE_BREAK,
 			.loc = node.loc,
 			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
+			.d_break.blk_id = p.blks_len - 1, // top blk
 			.d_break.expr = ir_memdup(node),
-			.d_break.label = ISTR_NONE,
 		};
 	}
 
@@ -825,10 +830,31 @@ ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
 	}
 } */
 
+// if `opt_label != ISTR_NONE` then `onerror` points to label otherwise the `brk` expr
+u8 pblk_locate(istr_t opt_label, loc_t onerror) {
+	if (p.blks_len > 0 && opt_label == ISTR_NONE) {
+		return p.blks_len - 1;
+	}
+
+	for (u32 i = p.blks_len; i-- > 0;) {
+		pblk_t *blk = &p.blks[i];
+		if (blk->label == opt_label) {
+			return i;
+		}
+	}
+
+	// makes more sense, need to specialise the error message regardless on state of blks
+	if (opt_label != ISTR_NONE) {
+		err_with_pos(onerror, "label `%s` not found", sv_from(opt_label));
+	} else {
+		err_with_pos(onerror, "not inside a block");
+	}
+}
+
 // do
 //     ...
 //     ...
-ir_node_t pdo(ir_scope_t *s) {
+ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 	if (p.token.kind == TOK_EOF) {
@@ -842,6 +868,7 @@ ir_node_t pdo(ir_scope_t *s) {
 		err_with_pos(oloc, "expected newline after `do`");
 	}
 
+	u8 blk_id = p.blks_len++;
 	ir_node_t block = {
 		.kind = NODE_DO_BLOCK,
 		.loc = oloc,
@@ -850,11 +877,16 @@ ir_node_t pdo(ir_scope_t *s) {
 			.scope = ir_new_scope_ptr(s),
 			.exprs = NULL,
 			.label = ISTR_NONE,
+			.blk_id = blk_id,
 		},
 	};
 
+	p.blks[blk_id] = (pblk_t){
+		.label = opt_label,
+		.loc = opt_loc,
+	};
 	ir_node_t *exprs = pindented_block(block.d_do_block.scope, oloc);
-	
+	p.blks_len--;
 
 	if (exprs == NULL) {
 		return (ir_node_t){
@@ -1033,6 +1065,12 @@ ir_node_t pident(ir_scope_t *s) {
 	return node;
 }
 
+// TODO: would probably want to make this a bitfield when more expr cfg are added
+enum : u8 {
+	PEXPR_ET_NONE,
+	PEXPR_ET_PAREN,
+};
+
 // (                           a b                          )
 // ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break 
 ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
@@ -1042,19 +1080,73 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	bool is_single = true;
 	bool should_continue = true;
 
+	struct {
+		istr_t name;
+		loc_t name_loc;
+	} label;
+
+	label.name = ISTR_NONE;
+
 	while (should_continue) {
 		ir_node_t onode = node;
 		token_t token = p.token;
 
 		switch (token.kind) {
+			case TOK_COLON: {
+				// label
+				pnext();
+				pcheck(TOK_IDENT);
+				label.name = p.token.lit;
+				label.name_loc = p.token.loc;
+				pnext();
+				switch (p.token.kind) {
+					case TOK_DO:
+						break;
+					default: {
+						err_with_pos(p.token.loc, "expected `do` after label");
+					}
+				}
+				continue;
+			}
+			case TOK_DO: {
+				node = pdo(s, label.name, label.name_loc); // TODO?: no chaining
+				label.name = ISTR_NONE;
+				should_continue = false;
+				break;
+			}
+			case TOK_BREAK: {
+				istr_t label = ISTR_NONE;
+				loc_t onerror = p.token.loc;
+				pnext();
+				// parse label
+				if (p.token.kind == TOK_COLON) {
+					pnext();
+					pcheck(TOK_IDENT);
+					label = p.token.lit;
+					onerror = p.token.loc;
+					pnext();
+				}
+				u8 blk_id = pblk_locate(label, onerror);
+				ir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+				node = (ir_node_t){
+					.kind = NODE_BREAK,
+					.loc = token.loc,
+					.type = TYPE_BOTTOM,
+					.d_break = {
+						.blk_id = blk_id,
+						.expr = ir_memdup(expr),
+					},
+				};
+				break;
+			}
 			case TOK_MUT: {
 				pnext();
-				ir_node_t rhs = pexpr(s, PREC_MUT, cfg, previous_exprs);
+				ir_node_t lhs = pexpr(s, PREC_MUT, cfg, previous_exprs);
 				node = (ir_node_t){
 					.kind = NODE_MUT,
 					.loc = token.loc,
 					.type = TYPE_INFER,
-					.d_mut = ir_memdup(rhs),
+					.d_mut = ir_memdup(lhs),
 				};
 				break;
 			}
@@ -1118,11 +1210,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					},
 				};
 				pnext();
-				break;
-			}
-			case TOK_DO: {
-				node = pdo(s); // TODO?: no chaining
-				should_continue = false;
 				break;
 			}
 			default: {
@@ -1702,7 +1789,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_DO_BLOCK: {
-			printf("do\n");
+			printf(":%u do\n", node.d_do_block.blk_id);
 			_ir_tabcnt++;
 			for (int i = 0, c = arrlen(node.d_do_block.exprs); i < c; i++) {
 				_ir_dump_stmt(modp, node.d_do_block.scope, node.d_do_block.exprs[i]);
@@ -1726,10 +1813,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_BREAK: {
-			printf("brk ");
-			if (node.d_break.label != ISTR_NONE) {
-				printf(":%s ", sv_from(node.d_break.label));
-			}
+			printf("brk :%u ", node.d_break.blk_id);
 			_ir_dump_expr(modp, s, *node.d_break.expr);
 			break;
 		}
