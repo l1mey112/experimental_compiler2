@@ -46,6 +46,8 @@ bool ctype_is_numeric(type_t type) {
 		(type == TYPE_F32 || type == TYPE_F64);
 }
 
+// TODO: maybe never implement?
+//       cconvert_implicit handles only implicit casts
 enum _safe_cast_kind : u8 {
 	SC_N, // impossible
 	SC_I, // implicit
@@ -131,6 +133,12 @@ type_t cconvert_implicit(type_t to, type_t from) {
 		ret = to;
 		goto end;
 	}
+	
+	// ! goes into everything
+	if (from == TYPE_BOTTOM) {
+		ret = to;
+		goto end;
+	}
 
 	return TYPE_INFER;
 end:
@@ -213,25 +221,25 @@ void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr);
 
-type_t cdo(ir_node_t *node, type_t upvalue) {
-	type_t ret = TYPE_INFER;
+void cblk_exprs(ir_node_t *exprs) {
+	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
+		ir_node_t *expr = &exprs[i];
+		// nonsensical to pass upvalue
+		type_t type = cexpr(expr->d_do_block.scope, TYPE_INFER, expr);
+		if (type == TYPE_BOTTOM && i + 1 < c) {
+			err_with_pos(exprs[i + 1].loc, "unreachable code");
+		}
+	}
+}
 
+type_t cdo(ir_node_t *node, type_t upvalue) {
 	cblk_t *blk = &c.blocks[c.blocks_len++];
 
 	*blk = (cblk_t){
 		.brk_type = TYPE_INFER,
 		.upvalue = upvalue,
 	};
-	
-	for (u32 i = 0, c = arrlenu(node->d_do_block.exprs); i < c; i++) {
-		ir_node_t *expr = &node->d_do_block.exprs[i];
-		// nonsensical to pass upvalue
-		type_t type = cexpr(expr->d_do_block.scope, TYPE_INFER, expr);
-		if (type == TYPE_BOTTOM && i + 1 < c) {
-			err_with_pos(node->d_do_block.exprs[i + 1].loc, "unreachable code");
-		}
-	}
-
+	cblk_exprs(node->d_do_block.exprs);
 	c.blocks_len--;
 
 	// no breaks pointing to this do, but somehow some ! code ran
@@ -241,6 +249,54 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 	}
 
 	return blk->brk_type;
+}
+
+type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
+	cblk_t *blk = &c.blocks[c.blocks_len++];
+
+	*blk = (cblk_t){
+		.brk_type = TYPE_INFER,
+		.upvalue = upvalue,
+	};
+	// cblk_exprs(node->d_loop);
+	// TODO: see with `if`, we don't ignore the type and actually check it against `()`
+	//       maybe we should go back to `if` and remove that behavior
+	(void)cexpr(s, TYPE_INFER, node->d_loop.expr);
+	c.blocks_len--;
+
+	// if a loop block has no breaks, it loops forever
+	if (blk->brk_type == TYPE_INFER) {
+		blk->brk_type = TYPE_BOTTOM;
+	}
+
+	return blk->brk_type;
+}
+
+// TYPE_INFER on error
+type_t cinfix_type_resolution(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
+	type_t ret;
+	type_t rt = cconvert_implicit(lhs->type, rhs->type);
+	type_t lt = cconvert_implicit(rhs->type, lhs->type);
+
+	if (lt == TYPE_INFER && rt == TYPE_INFER) {
+		return TYPE_INFER;
+	}
+
+	if (lt == TYPE_INFER) {
+		ret = rt;
+	} else if (rt == TYPE_INFER) {
+		ret = lt;
+	}
+
+	// insert explicit casts
+
+	if (lhs->type != ret && lhs->type != TYPE_BOTTOM) {
+		cir_unchecked_cast(ret, lhs, lhs->loc);
+	} else if (rhs->type != ret && rhs->type != TYPE_BOTTOM) {
+		cir_unchecked_cast(ret, rhs, rhs->loc);
+	}
+
+	return ret;
 }
 
 // TODO: eventually?
@@ -321,32 +377,8 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 
 			if (lhs_type == rhs_type) {
 				expr->type = lhs_type;
-			} else {
-				type_t ret;
-				type_t rt = cconvert_implicit(lhs->type, rhs->type);
-				type_t lt = cconvert_implicit(rhs->type, lhs->type);
-
-				if (lt == TYPE_INFER && rt == TYPE_INFER) {
-					err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
-				}
-
-				if (lt == TYPE_INFER) {
-					ret = rt;
-				} else if (rt == TYPE_INFER) {
-					ret = lt;
-				}
-
-				// insert explicit casts
-
-				if (lhs->type != ret) {
-					cir_unchecked_cast(ret, lhs, lhs->loc);
-				} else if (rhs->type != ret) {
-					cir_unchecked_cast(ret, rhs, rhs->loc);
-				} else {
-					assert_not_reached();
-				}
-
-				expr->type = ret;
+			} else if ((expr->type = cinfix_type_resolution(lhs, rhs, expr->loc)) == TYPE_INFER) {
+				err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
 			}
 			return expr->type;
 		}
@@ -413,6 +445,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_DO_BLOCK: {
 			return cdo(expr, upvalue);
 		}
+		case NODE_LOOP: {
+			return cloop(s, expr, upvalue);
+		}
 		case NODE_TUPLE_UNIT: {
 			return TYPE_UNIT;
 		}
@@ -464,10 +499,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				expr->type = TYPE_UNIT;
 			} else {
 				type_t else_type = cexpr(s, upvalue, expr->d_if.els);
-				if (else_type != then_type) {
+				if ((expr->type = cinfix_type_resolution(expr->d_if.then, expr->d_if.els, expr->loc)) == TYPE_INFER) {
 					err_with_pos(expr->d_if.els->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(then_type), type_dbg_str(else_type));
 				}
-				expr->type = then_type;
 			}
 			return expr->type;
 		}

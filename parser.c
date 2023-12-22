@@ -717,7 +717,7 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs);
 ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs);
 
 // MUST HAVE BLK ENTRY AS TOP BLK IN FIRST CALL
-ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
+ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	u32 bcol = p.token.loc.col;
 	ir_node_t *exprs = NULL;
 
@@ -808,7 +808,7 @@ ir_node_t *pindented_block(ir_scope_t *s, loc_t oloc) {
 		return node;
 	} else {
 		// indented block
-		exprs = pindented_block(&scope, oloc);
+		exprs = pindented_do_block(&scope, oloc);
 		if (exprs == NULL) {
 			return (ir_node_t){
 				.kind = NODE_TUPLE_UNIT,
@@ -876,7 +876,6 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 		.d_do_block = {
 			.scope = ir_new_scope_ptr(s),
 			.exprs = NULL,
-			.label = ISTR_NONE,
 			.blk_id = blk_id,
 		},
 	};
@@ -885,7 +884,7 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 		.label = opt_label,
 		.loc = opt_loc,
 	};
-	ir_node_t *exprs = pindented_block(block.d_do_block.scope, oloc);
+	ir_node_t *exprs = pindented_do_block(block.d_do_block.scope, oloc);
 	p.blks_len--;
 
 	if (exprs == NULL) {
@@ -899,6 +898,33 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 	block.d_do_block.exprs = exprs;
 
 	return block;
+}
+
+// loop
+//     ...
+//     ...
+ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t opt_label, loc_t opt_loc) {
+	loc_t oloc = p.token.loc;
+	pnext();
+
+	u8 blk_id = p.blks_len++;
+	ir_node_t loop = {
+		.kind = NODE_LOOP,
+		.loc = oloc,
+		.type = TYPE_INFER,
+		.d_loop = {
+			.blk_id = blk_id,
+		},
+	};
+
+	p.blks[blk_id] = (pblk_t){
+		.label = opt_label,
+		.loc = opt_loc,
+	};
+	loop.d_loop.expr = ir_memdup(pexpr(s, 0, expr_cfg, previous_exprs));
+	p.blks_len--;
+
+	return loop;
 }
 
 // do complex logic here, so that when typechecking all local variables are resolved
@@ -1136,6 +1162,11 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					}
 				}
 				continue;
+			}
+			case TOK_LOOP: {
+				node = ploop(s, cfg, previous_exprs, label.name, label.name_loc);
+				label.name = ISTR_NONE;
+				break;
 			}
 			case TOK_DO: {
 				node = pdo(s, label.name, label.name_loc); // TODO?: no chaining
@@ -1829,6 +1860,11 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf(")");
 			break;
 		}
+		case NODE_LOOP: {
+			printf(":%u loop ", node.d_loop.blk_id);
+			_ir_dump_expr(modp, s, *node.d_loop.expr);
+			break;
+		}
 		case NODE_DO_BLOCK: {
 			printf(":%u do\n", node.d_do_block.blk_id);
 			_ir_tabcnt++;
@@ -1869,7 +1905,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_CAST: {
-			printf("cast(");
+			printf("[%s]:cast(", type_dbg_str(node.type));
 			_ir_dump_expr(modp, s, *node.d_cast);
 			printf(")");
 			break;

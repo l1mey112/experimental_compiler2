@@ -1,4 +1,8 @@
 t :: i32 -> i32
-t: i = :t do
-	do
-		brk :t 50
+t: 'i = loop if ('i < 0):bool
+	then brk 'i
+	else 'i -= 1
+
+
+forever :: () -> !
+forever: _ = loop ()

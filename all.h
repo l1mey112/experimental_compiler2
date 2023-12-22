@@ -354,6 +354,7 @@ struct ir_node_t {
 		NODE_PROC_DECL,
 		NODE_VAR_DECL,
 		NODE_DO_BLOCK,
+		NODE_LOOP,
 		NODE_IF,
 		// NODE_IN_BLOCK,
 		NODE_INFIX,
@@ -401,10 +402,13 @@ struct ir_node_t {
 		} d_prefix;
 		struct {
 			ir_scope_t *scope; // scopes are pointers here for a reason
-			istr_t label; // -1 for none
 			ir_node_t *exprs; // all do blocks have at least one expr, unless they become a NODE_TUPLE_UNIT
 			u8 blk_id;
 		} d_do_block;
+		struct {
+			ir_node_t *expr;
+			u8 blk_id;
+		} d_loop;
 		/* struct {
 			ir_scope_t *scope;
 			// do we even need labels? does that make sense?
