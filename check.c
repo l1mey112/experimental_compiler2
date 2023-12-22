@@ -3,10 +3,19 @@
 #include "stb_ds.h"
 
 typedef struct cctx_t cctx_t;
+typedef struct cblk_t cblk_t;
+
+struct cblk_t {
+	type_t upvalue;
+	type_t brk_type;
+	loc_t brk_loc; // if `first_type` not TYPE_INFER
+};
 
 struct cctx_t {
 	rmod_t mod;
 	mod_t *modp;
+	cblk_t blocks[64];
+	u32 blocks_len;
 };
 
 cctx_t c;
@@ -37,8 +46,17 @@ bool ctype_is_numeric(type_t type) {
 		(type == TYPE_F32 || type == TYPE_F64);
 }
 
+enum _safe_cast_kind : u8 {
+	SC_N, // impossible
+	SC_I, // implicit
+	SC_E, // explicit
+};
+
 // TYPE_INFER on fail to convert
 type_t cconvert_implicit(type_t to, type_t from) {
+	assert(to < _TYPE_CONCRETE_MAX);
+	assert(from < _TYPE_CONCRETE_MAX);
+	
 	type_t ret;
 
 	if (to == from) {
@@ -154,6 +172,7 @@ type_t cfn_type_full_return(type_t fn) {
 	return fn;
 }
 
+// useful for determining a functions type, but not now
 void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
@@ -190,6 +209,32 @@ void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 			break;
 		}
 	}
+}
+
+type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr);
+
+type_t cdo(ir_node_t *node, type_t upvalue) {
+	type_t ret = TYPE_INFER;
+
+	cblk_t *blk = &c.blocks[c.blocks_len++];
+
+	*blk = (cblk_t){
+		.brk_type = TYPE_INFER,
+		.upvalue = upvalue,
+	};
+	
+	for (u32 i = 0, c = arrlenu(node->d_do_block.exprs); i < c; i++) {
+		ir_node_t *expr = &node->d_do_block.exprs[i];
+		// nonsensical to pass upvalue
+		type_t type = cexpr(expr->d_do_block.scope, TYPE_INFER, expr);
+		if (type == TYPE_BOTTOM && i + 1 < c) {
+			err_with_pos(node->d_do_block.exprs[i + 1].loc, "unreachable code");
+		}
+	}
+
+	c.blocks_len--;
+
+	return blk->brk_type;
 }
 
 // TODO: eventually?
@@ -359,8 +404,41 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			expr->type = fn->d_fn.ret;
 			return expr->type;
 		}
+		case NODE_DO_BLOCK: {
+			return cdo(expr, upvalue);
+		}
 		case NODE_TUPLE_UNIT: {
 			return TYPE_UNIT;
+		}
+		case NODE_BREAK_UNIT:
+		case NODE_BREAK: {
+			cblk_t *blk = &c.blocks[expr->d_break.blk_id]; // 1:1 correspondence
+			
+			type_t brk_type;
+			switch (expr->kind) {
+				case NODE_BREAK_UNIT: {
+					brk_type = TYPE_UNIT;
+					break;
+				}
+				case NODE_BREAK: {
+					brk_type = cexpr(s, blk->upvalue, expr->d_break.expr);
+					break;
+				}
+				default: {
+					assert_not_reached();
+				}
+			}
+
+			// ! encompasses all types
+			if (blk->brk_type == TYPE_INFER || blk->brk_type == TYPE_BOTTOM) {
+				blk->brk_type = brk_type;
+				blk->brk_loc = expr->loc;
+			} else if (blk->brk_type != brk_type) {
+				print_err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(blk->brk_type), type_dbg_str(brk_type));
+				print_hint_with_pos(blk->brk_loc, "type `%s` deduced here", type_dbg_str(blk->brk_type));
+				err_unwind();
+			}
+			return TYPE_BOTTOM;
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 

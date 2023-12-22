@@ -111,11 +111,9 @@ int main(int argc, const char *argv[]) {
 ret:
 	// TODO: register_root() etc for module system
 
-	if (!err) {
-		if (!setjmp(err_diag.unwind)) {
-			for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
-				cmodule(i);
-			}
+	if (!err && !setjmp(err_diag.unwind)) {
+		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
+			cmodule(i);
 		}
 	}
 	for (rmod_t i = 0; i < fs_mod_arena_len; i++) {

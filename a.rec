@@ -10,6 +10,6 @@
 ; 
 ; 	afact i 1
 
-t: i = :t do
-	do
-		brk :t 50
+t :: i32 -> i32
+t: i = do
+	50 + 20
