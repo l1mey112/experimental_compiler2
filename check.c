@@ -305,6 +305,7 @@ enum : u8 {
 	CEXPR_LVALUE,
 };
 
+// upvalue only makes sense for number literals, which may have a lot of types
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 	switch (expr->kind) {
 		case NODE_GLOBAL_UNRESOLVED: {
@@ -367,19 +368,40 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return TYPE_UNIT;
 		}
 		case NODE_INFIX: {
-			ir_node_t *lhs = expr->d_infix.lhs, *rhs = expr->d_infix.rhs;
-			
-			// integer promotion rules for lhs and rhs
-			// TODO: don't check right expression without left expression
-			type_t lhs_type = cexpr(s, upvalue, lhs);
-			type_t rhs_type = cexpr(s, lhs_type, rhs);
-			// _ = x + y
+			ir_node_t *lhs = expr->d_infix.lhs;
+			ir_node_t *rhs = expr->d_infix.rhs;
 
-			if (lhs_type == rhs_type) {
-				expr->type = lhs_type;
-			} else if ((expr->type = cinfix_type_resolution(lhs, rhs, expr->loc)) == TYPE_INFER) {
-				err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
+			// short circuting || and &&
+			bool both_be_bool = expr->d_infix.kind == TOK_AND || expr->d_infix.kind == TOK_OR;
+
+			if (!both_be_bool) {
+				// integer promotion rules for lhs and rhs
+				// TODO: don't check right expression without left expression
+				type_t lhs_type = cexpr(s, upvalue, lhs);
+				type_t rhs_type = cexpr(s, lhs_type, rhs);
+				// _ = x + y
+
+				if (lhs_type == rhs_type) {
+					expr->type = lhs_type;
+				} else if ((expr->type = cinfix_type_resolution(lhs, rhs, expr->loc)) == TYPE_INFER) {
+					err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
+				}
+			} else {
+				type_t lhs_type = cexpr(s, TYPE_INFER, lhs);
+				type_t rhs_type = cexpr(s, TYPE_INFER, rhs);
+
+				if (lhs_type != TYPE_BOTTOM && lhs_type != TYPE_BOOL) {
+					err_with_pos(lhs->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(lhs_type));
+				}
+				if (rhs_type != TYPE_BOTTOM && rhs_type != TYPE_BOOL) {
+					err_with_pos(rhs->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(rhs_type));
+				}
 			}
+
+			if (TOK_IS_COND(expr->d_infix.kind)) {
+				expr->type = TYPE_BOOL;
+			}
+
 			return expr->type;
 		}
 		case NODE_VAR: {

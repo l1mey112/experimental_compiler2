@@ -1,8 +1,10 @@
 t :: i32 -> i32
-t: 'i = loop if ('i < 0):bool
+t: 'i = loop if 'i < 0
 	then brk 'i
 	else 'i -= 1
 
-
 forever :: () -> !
 forever: _ = loop ()
+
+boolnever :: bool -> bool -> bool
+boolnever: a, b = (loop ()) && b

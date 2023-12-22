@@ -217,6 +217,17 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	((t) == TOK_SUB || \
 	(t) == TOK_NOT)
 
+// these tokens will always evaluate to bool
+#define TOK_IS_COND(t) \
+	((t) == TOK_EQ || \
+	(t) == TOK_NEQ || \
+	(t) == TOK_LT || \
+	(t) == TOK_GT || \
+	(t) == TOK_LE || \
+	(t) == TOK_GE || \
+	(t) == TOK_AND || \
+	(t) == TOK_OR)
+
 /* (t) == TOK_TILDE || \
 	(t) == TOK_MUL || \
 	(t) == TOK_BAND) */
