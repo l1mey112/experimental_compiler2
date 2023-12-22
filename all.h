@@ -153,13 +153,17 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_F64, "f64") \
 	X(TOK_BOOL, "bool") \
 	X(TOK_DO, "do") \
-	X(TOK_IN, "in") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
 	X(TOK_MUT, "mut") \
 	X(TOK_IMPORT, "import") \
 	X(TOK_PUB, "pub") \
-	X(TOK_BREAK, "brk")
+	X(TOK_BREAK, "brk") \
+	X(TOK_IF, "if") \
+	X(TOK_THEN, "then") \
+	X(TOK_ELSE, "else")
+
+//	X(TOK_IN, "in")
 
 // in specific order due to how operators are parsed
 #define TOK_X_OPERATOR_LIST \
@@ -350,6 +354,7 @@ struct ir_node_t {
 		NODE_PROC_DECL,
 		NODE_VAR_DECL,
 		NODE_DO_BLOCK,
+		NODE_IF,
 		// NODE_IN_BLOCK,
 		NODE_INFIX,
 		NODE_POSTFIX,
@@ -439,6 +444,11 @@ struct ir_node_t {
 			ir_node_t *expr; // in use with NODE_BREAK
 			u8 blk_id;
 		} d_break;
+		struct {
+			ir_node_t *cond;
+			ir_node_t *then;
+			ir_node_t *els; // possible NULL, then whole evaluates to ()
+		} d_if;
 	};
 };
 

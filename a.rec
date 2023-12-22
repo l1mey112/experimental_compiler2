@@ -10,6 +10,13 @@
 ; 
 ; 	afact i 1
 
-t :: i32 -> i32
-t: i = do
-	50 + 20
+t :: i32 -> bool -> i32
+t: i, c = if c then i else 0
+
+k :: i32 -> bool -> i32
+k: i, c = do
+	mut 'v = 0
+	
+	if c then
+		'v = i
+	'v

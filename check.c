@@ -440,6 +440,31 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			return TYPE_BOTTOM;
 		}
+		case NODE_IF: {
+			type_t cond_type = cexpr(s, TYPE_BOOL, expr->d_if.cond);
+			if (cond_type != TYPE_BOOL) {
+				err_with_pos(expr->d_if.cond->loc, "expected `bool`, got `%s`", type_dbg_str(cond_type));
+			}
+			if (expr->d_if.els == NULL) {
+				upvalue = TYPE_INFER; // should be (), but does that even matter really?
+			}
+			type_t then_type = cexpr(s, upvalue, expr->d_if.then);
+
+			if (expr->d_if.els == NULL) {
+				// TODO: possibly ignore?
+				if (then_type != TYPE_UNIT) {
+					err_with_pos(expr->d_if.then->loc, "type mismatch: expected `()`, got `%s`", type_dbg_str(then_type));
+				}
+				expr->type = TYPE_UNIT;
+			} else {
+				type_t else_type = cexpr(s, upvalue, expr->d_if.els);
+				if (else_type != then_type) {
+					err_with_pos(expr->d_if.els->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(then_type), type_dbg_str(else_type));
+				}
+				expr->type = then_type;
+			}
+			return expr->type;
+		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 
 			assert_not_reached();

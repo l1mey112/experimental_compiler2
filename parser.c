@@ -1065,10 +1065,14 @@ ir_node_t pident(ir_scope_t *s) {
 	return node;
 }
 
-// TODO: would probably want to make this a bitfield when more expr cfg are added
+// ----: would probably want to make this a bitfield when more expr cfg are added
+//       or not? expressions are nested, you can't get in this superposition of end tokens
+//       weird... don't make this change
 enum : u8 {
 	PEXPR_ET_NONE,
 	PEXPR_ET_PAREN,
+	PEXPR_ET_THEN,
+	PEXPR_ET_ELSE,
 };
 
 // (                           a b                          )
@@ -1092,6 +1096,31 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 		token_t token = p.token;
 
 		switch (token.kind) {
+			// TODO: labels
+			case TOK_IF: {
+				// if ... then ... else ...
+				// if ... then ...            (will evaluate to unit)
+				pnext();
+				ir_node_t cond = pexpr(s, 0, PEXPR_ET_THEN, previous_exprs);
+				pexpect(TOK_THEN);
+				ir_node_t then = pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs);
+				ir_node_t *els = NULL;
+				if (p.token.kind == TOK_ELSE) {
+					pnext();
+					els = ir_memdup(pexpr(s, 0, 0, previous_exprs));
+				}
+				node = (ir_node_t){
+					.kind = NODE_IF,
+					.type = TYPE_INFER,
+					.loc = token.loc,
+					.d_if = {
+						.cond = ir_memdup(cond),
+						.then = ir_memdup(then),
+						.els = els,
+					},
+				};
+				break;
+			}
 			case TOK_COLON: {
 				// label
 				pnext();
@@ -1247,6 +1276,18 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			case PEXPR_ET_NONE: break;
 			case PEXPR_ET_PAREN: {
 				if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
+					should_continue = false;
+				}
+				break;
+			}
+			case PEXPR_ET_THEN: {
+				if (p.token.kind == TOK_THEN) {
+					should_continue = false;
+				}
+				break;
+			}
+			case PEXPR_ET_ELSE: {
+				if (p.token.kind == TOK_ELSE) {
 					should_continue = false;
 				}
 				break;
@@ -1840,6 +1881,19 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_SYM: {
 			ir_var_t *var = MOD_VAR_PTR(node.d_sym.mod, node.d_sym.var);
 			printf("%s", fs_module_symbol_str(node.d_sym.mod, var->name));
+			break;
+		}
+		case NODE_IF: {
+			printf("if ");
+			_ir_dump_expr(modp, s, *node.d_if.cond);
+			printf(" then ");
+			_ir_dump_expr(modp, s, *node.d_if.then);
+			printf(" else ");
+			if (node.d_if.els == NULL) {
+				printf("()");
+			} else {
+				_ir_dump_expr(modp, s, *node.d_if.els);
+			}
 			break;
 		}
 		default: {
