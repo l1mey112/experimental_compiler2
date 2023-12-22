@@ -1,3 +1,11 @@
+; fact :: usize -> usize
+; fact: 0 = 1
+; fact: i = i * fact (i - 1)
+
 fact :: usize -> usize
-fact: 0 = 1
-fact: i = i * fact (i - 1)
+fact: i = do
+	afact :: usize -> usize -> usize
+	afact: 1, a = a
+	afact: i, a = afact (i - 1) (i * a)
+
+	afact i 1

@@ -662,7 +662,6 @@ static u8 ptok_prec(tok_t kind) {
 
 	switch (kind) {
 		case TOK_OSQ:
-		case TOK_IDENT:
 			return PREC_INDEX;
 		case TOK_DOT:
 			return PREC_DOT;
@@ -984,7 +983,6 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 }
 
 ir_node_t pident(ir_scope_t *s) {
-
 	pcheck(TOK_IDENT);
 
 	int id;
@@ -1042,15 +1040,9 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	u32 line_nr = token.loc.line_nr;
 	ir_node_t node;
 	bool is_single = true;
+	bool should_continue = true;
 
-	while (true) {
-		if (p.token.kind == TOK_EOF) {
-			if (is_single) {
-				punexpected("expected expression");
-			}
-			return node;
-		}
-
+	while (should_continue) {
 		ir_node_t onode = node;
 		token_t token = p.token;
 
@@ -1129,7 +1121,9 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				break;
 			}
 			case TOK_DO: {
-				return pdo(s); // TODO?: no chaining
+				node = pdo(s); // TODO?: no chaining
+				should_continue = false;
+				break;
 			}
 			default: {
 				if (TOK_IS_PREFIX(token.kind)) {
@@ -1155,6 +1149,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 							.d_prefix.kind = token.kind,
 						};
 					}
+					break;
 				} else {
 					punexpected("expected expression");
 				}
@@ -1165,7 +1160,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			case PEXPR_ET_NONE: break;
 			case PEXPR_ET_PAREN: {
 				if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
-					return node;
+					should_continue = false;
 				}
 				break;
 			}
@@ -1174,12 +1169,9 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			}
 		}
 
-		if (p.token.kind == TOK_EOF || (ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr)) {
-			if (is_single) {
-				is_single = false;
-				continue;
-			}
-
+		if (is_single) {
+			is_single = false;
+		} else {
 			node = (ir_node_t){
 				.kind = NODE_CALL,
 				.loc = onode.loc,
@@ -1187,12 +1179,15 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				.d_call.f = ir_memdup(onode),
 				.d_call.arg = ir_memdup(node),
 			};
-			continue;	
+		}
+
+		if (ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr) {
+			continue;
 		}
 		break;
 	}
 
-	if (p.token.kind == TOK_EOF) {
+	if (!should_continue) {
 		return node;
 	}
 
@@ -1570,8 +1565,6 @@ void papply_typedecls(void) {
 		if (!varp) {
 			err_with_pos(td->loc, "cannot find variable `%s`", sv_from(td->name));
 		}
-
-		printf("apply %s, type: %s\n", sv_from(td->name), type_dbg_str(td->type));
 
 		assert(varp->type == TYPE_INFER);
 		varp->type = td->type;
