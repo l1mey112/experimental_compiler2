@@ -152,6 +152,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_F32, "f32") \
 	X(TOK_F64, "f64") \
 	X(TOK_BOOL, "bool") \
+	X(TOK_TRUE, "true") \
+	X(TOK_FALSE, "false") \
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
@@ -372,6 +374,7 @@ struct ir_node_t {
 		NODE_POSTFIX,
 		NODE_PREFIX,
 		NODE_INTEGER_LIT,
+		NODE_BOOL_LIT,
 		NODE_VAR,
 		NODE_GLOBAL_UNRESOLVED,
 		NODE_SYM,
@@ -437,6 +440,7 @@ struct ir_node_t {
 			istr_t lit;
 			bool negate;
 		} d_integer_lit;
+		bool d_bool_lit;
 		struct {
 			ir_rvar_t var;
 			ir_scope_t *scopes;

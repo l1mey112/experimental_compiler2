@@ -352,7 +352,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				err_with_pos(expr->loc, "function type inference is not implemented yet");
 			}
 			if (type_kind(varp->type) != TYPE_FN) {
-				err_with_pos(expr->loc, "expected function type, got `%s`", type_dbg_str(varp->type));
+				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(varp->type));
 			}
 			// you know, a function being a bunch of patterns matching
 			// on a tuple of args is a pretty good abstraction
@@ -366,6 +366,38 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				ctype_assert(type, return_type, expr->d_proc_decl.exprs[i].loc);
 			}
 			return TYPE_UNIT;
+		}
+		case NODE_PREFIX: {
+			switch (expr->d_prefix.kind) {
+				case TOK_SUB: {
+					type_t type = cexpr(s, upvalue, expr->d_prefix.expr);
+					if (!ctype_is_numeric(type)) {
+						err_with_pos(expr->loc, "type mismatch: expected numeric type, got `%s`", type_dbg_str(type));
+					}
+					expr->type = type;
+					break;
+				}
+				case TOK_NOT: {
+					type_t type = cexpr(s, TYPE_INFER, expr->d_prefix.expr);
+					if (type != TYPE_BOOL) {
+						err_with_pos(expr->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(type));
+					}
+					expr->type = TYPE_BOOL;
+					break;
+				}
+				default: {
+					assert_not_reached();
+				}
+			}
+			return expr->type;
+		}
+		case NODE_POSTFIX: {
+			type_t type = cexpr(s, upvalue, expr->d_postfix.expr);
+			if (!ctype_is_numeric(type)) {
+				err_with_pos(expr->loc, "type mismatch: expected numeric type, got `%s`", type_dbg_str(type));
+			}
+			expr->type = type;
+			return expr->type;
 		}
 		case NODE_INFIX: {
 			ir_node_t *lhs = expr->d_infix.lhs;
@@ -423,6 +455,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			return expr->type;
 		}
+		case NODE_BOOL_LIT: {
+			return TYPE_BOOL;
+		}
 		case NODE_CAST: {
 			type_t t = cexpr(s, expr->type, expr->d_cast);
 			// TODO: check if this cast is even possible
@@ -454,12 +489,12 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_CALL: {
 			type_t f_type = cexpr(s, TYPE_INFER, expr->d_call.f);
 			if (type_kind(f_type) != TYPE_FN) {
-				err_with_pos(expr->loc, "expected function type, got `%s`", type_dbg_str(f_type));
+				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
 			}
 			tinfo_t *fn = type_get(f_type);
 			type_t arg_type = cexpr(s, fn->d_fn.arg, expr->d_call.arg);
 			if (fn->d_fn.arg != arg_type) {
-				err_with_pos(expr->loc, "expected argument type `%s`, got `%s`", type_dbg_str(fn->d_fn.arg), type_dbg_str(arg_type));
+				err_with_pos(expr->loc, "type mismatch: expected argument type `%s`, got `%s`", type_dbg_str(fn->d_fn.arg), type_dbg_str(arg_type));
 			}
 			expr->type = fn->d_fn.ret;
 			return expr->type;

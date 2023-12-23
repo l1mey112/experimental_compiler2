@@ -1122,6 +1122,17 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 		token_t token = p.token;
 
 		switch (token.kind) {
+			case TOK_TRUE:
+			case TOK_FALSE: {
+				pnext();
+				node = (ir_node_t){
+					.kind = NODE_BOOL_LIT,
+					.type = TYPE_BOOL,
+					.loc = token.loc,
+					.d_bool_lit = token.kind == TOK_TRUE,
+				};
+				break;
+			}
 			// TODO: labels
 			case TOK_IF: {
 				// if ... then ... else ...
@@ -1832,6 +1843,10 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			} else {
 				printf("%s", sv_from(node.d_integer_lit.lit));
 			}
+			break;
+		}
+		case NODE_BOOL_LIT: {
+			printf("%s", node.d_bool_lit ? "true" : "false");
 			break;
 		}
 		case NODE_POSTFIX: {

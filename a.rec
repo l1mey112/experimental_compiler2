@@ -1,10 +1,11 @@
-t :: i32 -> i32
-t: 'i = loop if 'i < 0
-	then brk 'i
-	else 'i -= 1
+n :: bool -> bool
+n: i = !i
 
-forever :: () -> !
-forever: _ = loop ()
+main :: () -> ()
+main: _ = do
+	mut 'v = false
 
-boolnever :: bool -> bool -> bool
-boolnever: a, b = (loop ()) && b
+	'v = n 'v
+	'v = n 'v
+	'v = n 'v
+	'v = n 'v
