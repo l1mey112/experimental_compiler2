@@ -939,57 +939,27 @@ ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t op
 
 // do complex logic here, so that when typechecking all local variables are resolved
 // and it only has to deal with global symbols by resolving them
-// -- all variable definitions have been resolved to single assign statements by then
-// -- if the checker sees `mut 'v = 20` it's an error, as `mut 'v` means something
-ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *previous_exprs) {	
-	// during parsing, the lhs can be one of three things
-	// 1. NODE_GLOBAL_UNRESOLVED (could not resolve from scope)
-	// 2. NODE_VAR (could resolve variable)
-	// 3. NODE_MUT (could resolve variable, 'var creation)
-	// 4. NODE_*   (could be a valid lhs? could also not be? let the checker handle it)
+ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *previous_exprs) {
+	// is this a variable declaration?
 
-	// v = 20           ; var #1
-	// do               ;
-	//     v = 25       ; var #2  (create new var)
+	// x = 40        (variable declaration)
+	// mut 'x = 40   (variable declaration)
+	// mut x = 40    (variable declaration, but error)
 
-	// 'v = 20          ; var #1
-	// do               ;
-	//     'v = 25      ; var #1  (assign var)
+	bool is_decl = false;
+	bool is_mut = false;
 
-	// remember: assigning to an immutable identifier will create a new one
-	//           assigning to a mutable identifier will update the existing one
-	// remember: mutable identifiers need to be "declared" before they can be used
-	//           unlike immutable identifiers (which only have declarations)
-	// remember: a variable may possibly be a global one, which NODE_GLOBAL_UNRESOLVED is preferred
-	// remember: `mut 'v = ...` means create new variable
-
-	bool assign = false; // unrolled || chain
-
-	// if lhs: mut 'v
-	if (lhs.kind == NODE_MUT && lhs.d_mut->kind == NODE_VAR && VAR_PTR_IS_T(VAR_PTR(lhs.d_mut->d_var))) {
+	if (lhs.kind == NODE_VAR) {
+		is_decl = !VAR_PTR_IS_T(VAR_PTR(lhs.d_var));
+	} else if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
+		is_decl = !ISTR_IS_T(lhs.d_global_unresolved);
+	} else if (lhs.kind == NODE_MUT) {
+		is_decl = true;
+		is_mut = true;
 		lhs = *lhs.d_mut; // leak
 	}
-	// if lhs: mut 'v*
-	else if (lhs.kind == NODE_MUT && lhs.d_mut->kind == NODE_GLOBAL_UNRESOLVED && ISTR_IS_T(lhs.d_mut->d_global_unresolved)) {
-		lhs = *lhs.d_mut; // leak
-	}
-	// is this not a symbol or var?
-	else if (lhs.kind != NODE_GLOBAL_UNRESOLVED && lhs.kind != NODE_VAR) {
-		assign = true;
-	}
-	// if it is a symbol, is it a mutable identifier?
-	else if (lhs.kind == NODE_GLOBAL_UNRESOLVED && ISTR_IS_T(lhs.d_global_unresolved)) {
-		assign = true;
-	}
-	// if it is a var, is it a mutable identifier?
-	else if (lhs.kind == NODE_VAR && VAR_PTR_IS_T(VAR_PTR(lhs.d_var))) {
-		assign = true;
-	}
 
-	// if lhs is NODE_GLOBAL_UNRESOLVED and mutable identifier, let it assign
-	// if lhs is NODE_VAR and mutable identifier, let it assign
-	// if lhs is NODE_*, let it assign
-	if (assign) {
+	if (!is_decl) {
 		return (ir_node_t){
 			.kind = NODE_INFIX,
 			.loc = loc,
@@ -1000,11 +970,21 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		};
 	}
 
-	// --- EVERYTHING PAST HERE IS DECL OF NEW VARIABLE
-	// lhs is NODE_GLOBAL_UNRESOLVED or NODE_VAR
-	//
-	// it's okay to define a new variable, it just better not exist already in the scope
-	// it's also an error to use before decl in a scope
+	if (is_mut && (lhs.kind != NODE_GLOBAL_UNRESOLVED && lhs.kind != NODE_VAR)) {
+		printf("kind: %u\n", lhs.kind);
+		err_with_pos(lhs.loc, "cannot declare a mutable variable with a non-variable expression");
+	}
+
+	istr_t name;
+	if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
+		name = lhs.d_global_unresolved;
+	} else {
+		name = VAR_PTR(lhs.d_var)->name;
+	}
+
+	if (is_mut && !ISTR_IS_T(name)) {
+		err_with_pos(lhs.loc, "cannot declare a mutable variable with a non mutable name");
+	}
 
 	if (lhs.kind == NODE_VAR && ir_var_exists_in(s, lhs.d_var)) {
 		const char *name = sv_from(VAR_PTR(lhs.d_var)->name);
@@ -1013,23 +993,11 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		print_hint_with_pos(oloc, "variable `%s` declared here", name);
 		err_unwind();
 	}
-	
-	// we know the variable doesn't exist, but before declaring we need to make sure
-	// it hasn't been used yet in this scope.
 
-	// decay into name to locate uses in scope
-	istr_t name;
-
-	if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
-		name = lhs.d_global_unresolved;
-	} else if (lhs.kind == NODE_VAR) {
-		name = VAR_PTR(lhs.d_var)->name;
-	} else {
-		assert_not_reached();
-	}
-
+	// can't use the variable before declaring it in the same scope,
+	// except in a toplevel context (global variables)
 	ir_node_t *use;
-	if ((use = ir_sym_find_uses(previous_exprs, name))) {
+	if (s != NULL && (use = ir_sym_find_uses(previous_exprs, name))) {
 		print_err_with_pos(use->loc, "use of variable `%s` before declaration in same scope", sv_from(name));
 		print_hint_with_pos(lhs.loc, "variable `%s` declared here", sv_from(name));
 		err_unwind();
@@ -1359,6 +1327,10 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				.d_call.f = ir_memdup(onode),
 				.d_call.arg = ir_memdup(node),
 			};
+		}
+
+		if (p.token.kind == TOK_EOF) {
+			return node;
 		}
 
 		if (ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr) {

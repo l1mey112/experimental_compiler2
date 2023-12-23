@@ -1,3 +1,1 @@
-main :: () -> ()
-main: _ = :t do
-	brk :t ()
+b = 20
