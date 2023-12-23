@@ -11,6 +11,7 @@ typedef struct pblk_t pblk_t;
 struct pblk_t {
 	istr_t label;
 	loc_t loc; // TODO: i don't even think we'll need this?
+	bool always_brk; // if false, a `brk` without a label doesn't resolve to this
 };
 
 struct pimport_t {
@@ -754,15 +755,23 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	// if the last expression is (), its most likely one of those expressions.
 
 	ir_node_t *last = &arrlast(exprs);
+	u32 blk_id = p.blks_len - 1; // top blk
 	if (last->type == TYPE_UNIT && last->kind != NODE_TUPLE_UNIT) {
 		ir_node_t node = {
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = node.loc,
 			.type = TYPE_BOTTOM,
-			.d_break.blk_id = p.blks_len - 1, // top blk
+			.d_break.blk_id = blk_id,
 		};
 		
 		arrpush(exprs, node);
+	} else if (last->kind == NODE_TUPLE_UNIT) {
+		*last = (ir_node_t){
+			.kind = NODE_BREAK_UNIT, // unary shorthand
+			.loc = last->loc,
+			.type = TYPE_BOTTOM,
+			.d_break.blk_id = blk_id,
+		};
 	} else if (last->type != TYPE_BOTTOM) {
 		ir_node_t node = *last;
 
@@ -770,7 +779,7 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 			.kind = NODE_BREAK_INFERRED,
 			.loc = node.loc,
 			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
-			.d_break.blk_id = p.blks_len - 1, // top blk
+			.d_break.blk_id = blk_id,
 			.d_break.expr = ir_memdup(node),
 		};
 	}
@@ -832,12 +841,11 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 
 // if `opt_label != ISTR_NONE` then `onerror` points to label otherwise the `brk` expr
 u8 pblk_locate(istr_t opt_label, loc_t onerror) {
-	if (p.blks_len > 0 && opt_label == ISTR_NONE) {
-		return p.blks_len - 1;
-	}
-
 	for (u32 i = p.blks_len; i-- > 0;) {
 		pblk_t *blk = &p.blks[i];
+		if (!blk->always_brk && opt_label == ISTR_NONE) {
+			continue;
+		}
 		if (blk->label == opt_label) {
 			return i;
 		}
@@ -847,7 +855,7 @@ u8 pblk_locate(istr_t opt_label, loc_t onerror) {
 	if (opt_label != ISTR_NONE) {
 		err_with_pos(onerror, "label `%s` not found", sv_from(opt_label));
 	} else {
-		err_with_pos(onerror, "not inside a block");
+		err_with_pos(onerror, "not inside a loop");
 	}
 }
 
@@ -883,6 +891,7 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 	p.blks[blk_id] = (pblk_t){
 		.label = opt_label,
 		.loc = opt_loc,
+		.always_brk = false,
 	};
 	ir_node_t *exprs = pindented_do_block(block.d_do_block.scope, oloc);
 	p.blks_len--;
@@ -920,6 +929,7 @@ ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t op
 	p.blks[blk_id] = (pblk_t){
 		.label = opt_label,
 		.loc = opt_loc,
+		.always_brk = true,
 	};
 	loop.d_loop.expr = ir_memdup(pexpr(s, 0, expr_cfg, previous_exprs));
 	p.blks_len--;
@@ -1911,7 +1921,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_BREAK_UNIT: {
-			printf("brk ()");
+			printf("brk :%u ()", node.d_break.blk_id);
 			break;
 		}
 		case NODE_MUT: {

@@ -1,11 +1,3 @@
-n :: bool -> bool
-n: i = !i
-
 main :: () -> ()
-main: _ = do
-	mut 'v = false
-
-	'v = n 'v
-	'v = n 'v
-	'v = n 'v
-	'v = n 'v
+main: _ = :t do
+	brk :t ()
