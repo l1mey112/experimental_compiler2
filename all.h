@@ -384,6 +384,7 @@ struct ir_node_t {
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
 		NODE_BREAK_UNIT, // always !
+		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_MUT,
 	} kind;

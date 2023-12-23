@@ -248,6 +248,19 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 		blk->brk_type = TYPE_BOTTOM;
 	}
 
+	ir_node_t last;
+	if (blk->brk_type == TYPE_UNIT && arrlast(node->d_do_block.exprs).kind == NODE_BREAK_INFERRED) {
+		last = arrlast(node->d_do_block.exprs);
+		
+		arrlast(node->d_do_block.exprs) = *last.d_break.expr;
+		ir_node_t unit_brk = {
+			.kind = NODE_BREAK_UNIT,
+			.loc = last.loc,
+			.type = TYPE_UNIT,
+		};
+		arrpush(node->d_do_block.exprs, unit_brk);
+	}
+
 	return blk->brk_type;
 }
 
@@ -508,6 +521,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_TUPLE_UNIT: {
 			return TYPE_UNIT;
 		}
+		case NODE_BREAK_INFERRED:
 		case NODE_BREAK_UNIT:
 		case NODE_BREAK: {
 			cblk_t *blk = &c.blocks[expr->d_break.blk_id]; // 1:1 correspondence
@@ -518,6 +532,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 					brk_type = TYPE_UNIT;
 					break;
 				}
+				case NODE_BREAK_INFERRED:
 				case NODE_BREAK: {
 					brk_type = cexpr(s, blk->upvalue, expr->d_break.expr);
 					break;
@@ -525,6 +540,17 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				default: {
 					assert_not_reached();
 				}
+			}
+
+			// last expr in a `do` block, break inserted by compiler
+			// the distinction is made so we can do such:
+			//
+			// t :: () -> ()
+			// t: _ = do
+			//     expr          ; this expr returns non ()
+			//
+			if (expr->kind == NODE_BREAK_INFERRED && blk->upvalue == TYPE_UNIT) {
+				brk_type = TYPE_UNIT;
 			}
 
 			// ! encompasses all types

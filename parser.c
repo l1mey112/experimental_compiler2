@@ -754,7 +754,7 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	// if the last expression is (), its most likely one of those expressions.
 
 	ir_node_t *last = &arrlast(exprs);
-	if (last->type == TYPE_UNIT) {
+	if (last->type == TYPE_UNIT && last->kind != NODE_TUPLE_UNIT) {
 		ir_node_t node = {
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = node.loc,
@@ -767,7 +767,7 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 		ir_node_t node = *last;
 
 		*last = (ir_node_t){
-			.kind = NODE_BREAK,
+			.kind = NODE_BREAK_INFERRED,
 			.loc = node.loc,
 			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
 			.d_break.blk_id = p.blks_len - 1, // top blk
@@ -1904,6 +1904,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf(")");
 			break;
 		}
+		case NODE_BREAK_INFERRED:
 		case NODE_BREAK: {
 			printf("brk :%u ", node.d_break.blk_id);
 			_ir_dump_expr(modp, s, *node.d_break.expr);
