@@ -328,6 +328,9 @@ typedef struct ir_pattern_t ir_pattern_t;
 // TODO: fancy arena allocators? fuck that!
 //       we're going for a quick and dirty bootstrap
 
+extern ir_var_t *ir_vars;
+
+#define VAR_PTR(id) (&ir_vars[id])
 #define VAR_IS_T(v) ISTR_IS_T((v).name)
 #define VAR_PTR_IS_T(v) ISTR_IS_T((v)->name)
 
@@ -487,7 +490,6 @@ struct mod_t {
 		u32 files_count;
 	} on_disk;
 
-	ir_var_t *vars;
 	ir_scope_t toplevel;
 	ir_node_t *exprs;
 };
@@ -505,7 +507,6 @@ extern u32 fs_mod_arena_len;
 extern mod_t fs_mod_arena[128];
 
 #define MOD_PTR(mod) (&fs_mod_arena[mod])
-#define MOD_VAR_PTR(mod, var) (&fs_mod_arena[mod].vars[var])
 #define FILE_PTR(file) (&fs_files_queue[file])
 
 void fs_set_entry_argp(const char *argp);

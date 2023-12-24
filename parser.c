@@ -59,7 +59,6 @@ int pimport_ident(istr_t name) {
 	return -1;
 }
 
-#define VAR_PTR(id) (&p.modp->vars[id])
 
 static bool ir_name_exists_in(ir_scope_t *scope, istr_t name) {
 	if (scope == NULL) {
@@ -68,7 +67,7 @@ static bool ir_name_exists_in(ir_scope_t *scope, istr_t name) {
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
 		ir_rvar_t id = scope->locals[i];
-		ir_var_t *var = &p.modp->vars[id];
+		ir_var_t *var = VAR_PTR(id);
 
 		if (var->name == name) {
 			return true;
@@ -100,7 +99,7 @@ static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
 		ir_rvar_t id = scope->locals[i];
-		ir_var_t *var = &p.modp->vars[id];
+		ir_var_t *var = VAR_PTR(id);
 
 		if (var->name == name) {
 			return var;
@@ -126,13 +125,13 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t o
 		err_unwind();
 	}
 	
-	ir_rvar_t id = arrlen(p.modp->vars);
+	ir_rvar_t id = arrlen(ir_vars);
 	ir_var_t var = {
 		.loc = onerror,
 		.name = name,
 		.type = type,
 	};
-	arrpush(p.modp->vars, var);
+	arrpush(ir_vars, var);
 
 	if (scope == NULL) {
 		scope = &p.modp->toplevel;
@@ -157,7 +156,7 @@ static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) 
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
 		ir_rvar_t id = scope->locals[i];
-		ir_var_t *var = &p.modp->vars[id];
+		ir_var_t *var = VAR_PTR(id);
 
 		if (var->name == name) {
 			if (out) {
@@ -1734,8 +1733,8 @@ void papply_typedecls(void) {
 	}
 
 	// pubs all have types, i don't want to sort modules... global exprs is enough
-	for (u32 i = 0, c = arrlenu(p.modp->vars); i < c; i++) {
-		ir_var_t *varp = &p.modp->vars[i];
+	for (u32 i = 0, c = arrlenu(p.modp->toplevel.locals); i < c; i++) {
+		ir_var_t *varp = VAR_PTR(p.modp->toplevel.locals[i]);
 		if (varp->is_pub && varp->type == TYPE_INFER) {
 			err_with_pos(varp->loc, "cannot make expression with inferred type public");
 		}
@@ -1776,7 +1775,7 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 			break;
 		}
 		case PATTERN_VAR: {
-			ir_var_t *varp = &modp->vars[pattern.d_var];
+			ir_var_t *varp = VAR_PTR(pattern.d_var);
 			printf("%s.%u", sv_from(varp->name), pattern.d_var);
 			break;
 		}
@@ -1800,7 +1799,7 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 void _ir_dump_scope(mod_t *modp, ir_scope_t *s) {
 	for (int i = 0, c = arrlen(s->locals); i < c; i++) {
 		ir_rvar_t var = s->locals[i];
-		ir_var_t *varp = &modp->vars[var];
+		ir_var_t *varp = VAR_PTR(var);
 		printf("  %s :: %s\n", sv_from(varp->name), type_dbg_str(varp->type));
 	}
 }
@@ -1823,7 +1822,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 
 	switch (node.kind) {
 		case NODE_VAR: {
-			printf("%s.%u", sv_from(modp->vars[node.d_var].name), node.d_var);
+			printf("%s.%u", sv_from(VAR_PTR(node.d_var)->name), node.d_var);
 			break;
 		}
 		case NODE_GLOBAL_UNRESOLVED: {
@@ -1924,7 +1923,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_SYM: {
-			ir_var_t *var = MOD_VAR_PTR(node.d_sym.mod, node.d_sym.var);
+			ir_var_t *var = VAR_PTR(node.d_sym.var);
 			printf("%s", fs_module_symbol_str(node.d_sym.mod, var->name));
 			break;
 		}
@@ -1952,9 +1951,9 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
 		case NODE_PROC_DECL: {
-			ir_var_t var = modp->vars[node.d_proc_decl.var];
-			type_t fn_type = var.type;
-			istr_t name = var.name;
+			ir_var_t *var = VAR_PTR(node.d_proc_decl.var);
+			type_t fn_type = var->type;
+			istr_t name = var->name;
 			
 			TAB_PRINTF("%s.%u :: %s\n", sv_from(name), node.d_proc_decl.var, type_dbg_str(fn_type));
 			if (node.d_proc_decl.patterns) {
@@ -1977,9 +1976,9 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_VAR_DECL: {
-			ir_var_t var = modp->vars[node.d_var_decl.lhs];
-			TAB_PRINTF("%s.%u :: %s\n", sv_from(var.name), node.d_var_decl.lhs, type_dbg_str(var.type));
-			TAB_PRINTF("%s.%u", sv_from(var.name), node.d_var_decl.lhs);
+			ir_var_t *var = VAR_PTR(node.d_var_decl.lhs);
+			TAB_PRINTF("%s.%u :: %s\n", sv_from(var->name), node.d_var_decl.lhs, type_dbg_str(var->type));
+			TAB_PRINTF("%s.%u", sv_from(var->name), node.d_var_decl.lhs);
 			printf(" = ");
 			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
 			printf("\n");

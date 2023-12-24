@@ -20,8 +20,6 @@ struct cctx_t {
 
 cctx_t c;
 
-#define VAR_PTR(id) (&c.modp->vars[id])
-
 void ctype_assert(type_t src, type_t of, loc_t onerror) {
 	if (src != of) {
 		err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(of), type_dbg_str(src));
@@ -364,7 +362,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_GLOBAL_UNRESOLVED: {
 			for (u32 i = 0; i < arrlenu(c.modp->toplevel.locals); i++) {
 				ir_rvar_t var = c.modp->toplevel.locals[i];
-				ir_var_t *varp = &c.modp->vars[var];
+				ir_var_t *varp = VAR_PTR(var);
 				if (varp->name == expr->d_global_unresolved) {
 					assert(varp->type != TYPE_INFER && "global variable type not inferred");
 					expr->kind = NODE_VAR;
@@ -527,8 +525,8 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_SYM_UNRESOLVED: {
 			rmod_t sym_mod = expr->d_sym_unresolved.mod;
 			mod_t *sym_modp = MOD_PTR(sym_mod);
-			for (u32 i = 0, c = arrlenu(sym_modp->vars); i < c; i++) {
-				ir_var_t *var = &sym_modp->vars[i];
+			for (u32 i = 0, c = arrlenu(sym_modp->toplevel.locals); i < c; i++) {
+				ir_var_t *var = VAR_PTR(sym_modp->toplevel.locals[i]);
 				if (var->is_pub && var->name == expr->d_sym_unresolved.name) {
 					*expr = (ir_node_t){
 						.kind = NODE_SYM,
