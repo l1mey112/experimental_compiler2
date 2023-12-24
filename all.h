@@ -91,13 +91,15 @@ void print_diag_without_pos(const char *type, const char *fmt, ...);
 	} while (0)
 
 
-#define sv_cmp_literal(a, alen, b) sv_cmp(a, alen, (u8 *)b, sizeof(b "") - 1)
-static inline bool sv_cmp(u8 *a, size_t alen, u8 *b, size_t blen) {
+#define ptr_cmp_literal(a, alen, b) ptr_cmp(a, alen, (u8 *)b, sizeof(b "") - 1)
+static inline bool ptr_cmp(u8 *a, size_t alen, u8 *b, size_t blen) {
 	if (alen != blen) {
 		return false;
 	}
 	return memcmp(a, b, alen) == 0;
 }
+
+#define sv_cmp_literal(a, b) (strcmp(sv_from(a), b) == 0)
 
 //#ifdef NDEBUG
 //	#define assert_not_reached()  __builtin_unreachable()
@@ -290,7 +292,7 @@ enum ti_kind {
 	TYPE_UNKNOWN, // reference to be filled in later
 	TYPE_TUPLE,
 	TYPE_FN,
-	// TYPE_PTR,
+	TYPE_PTR,
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
 	// TYPE_ENUM,
@@ -539,14 +541,16 @@ struct tinfo_t {
 			u32 len;
 		} d_tuple;
 		struct {
+			type_t ref;
+		} d_ptr;
+		struct {
 			rmod_t mod;
 			istr_t name;
 		} d_named;
-
-		// type_t type_ref;
 	};
 };
 
+type_t type_new_inc_mul(type_t type);
 type_t type_new(tinfo_t typeinfo, loc_t *onerror);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);

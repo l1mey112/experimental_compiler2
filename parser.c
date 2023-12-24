@@ -363,7 +363,7 @@ static token_t plex(void) {
 
 			if (0);
 			#define X(val, lit) \
-				else if (sv_cmp_literal(start, len, lit)) token.kind = val;
+				else if (ptr_cmp_literal(start, len, lit)) token.kind = val;
 			TOK_X_KEYWORDS_LIST
 			#undef X
 			else {
@@ -541,13 +541,12 @@ type_t ptok_to_type(tok_t kind) {
 	}
 }
 
-// will always parse into a type
-type_t ptype(void) {
-	// loc_t initial_pos = p.token.loc;
+// i love prededence climbing
+type_t ptype(void);
+
+type_t ptype_unit(void) {
 	type_t type;
 	
-	// TODO: support parsing of function types in parentheses
-
 	switch (p.token.kind) {
 		case TOK_IDENT: {
 			istr_t initial = p.token.lit;
@@ -621,14 +620,32 @@ type_t ptype(void) {
 		}
 	}
 
+	return type;
+}
+
+// will always parse into a type
+type_t ptype(void) {
+	type_t type;
+	
+	// TODO: support parsing of function types in parentheses
+
+	switch (p.token.kind) {
+		case TOK_MUL: {
+			pnext();
+			type = ptype_unit();
+			type = type_new_inc_mul(type);
+			break;
+		}
+		default: {
+			type = ptype_unit();
+			break;
+		}
+	}
+
 	// parse curried form
 	// essentially a precedence climber, with only one operation which is ->
 	// i32 -> i32 -> i32
 	// i32 -> (i32 -> i32)
-	//
-	// TODO: currently a recursive impl when should be using while(not TYPE_FN)
-	//       to make it work basically like a pexpr()
-	//
 	if (p.token.kind == TOK_ARROW) {
 		// i32 -> ...
 		//     ^^
@@ -859,20 +876,14 @@ u8 pblk_locate(istr_t opt_label, loc_t onerror) {
 	}
 }
 
+// naive indentation rules, but works for now
 // do
 //     ...
 //     ...
 ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
-	if (p.token.kind == TOK_EOF) {
-		return (ir_node_t){
-			.kind = NODE_TUPLE_UNIT,
-			.loc = oloc,
-			.type = TYPE_UNIT,
-		};
-	}
-	if (p.token.loc.line_nr == oloc.line_nr) {
+	if (p.token.kind == TOK_EOF || p.token.loc.line_nr == oloc.line_nr) {
 		err_with_pos(oloc, "expected newline after `do`");
 	}
 

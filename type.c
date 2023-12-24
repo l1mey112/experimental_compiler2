@@ -17,9 +17,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 	}
 
 	switch (a_type) {
-		/* case TYPE_PTR:
-			return a->type_ref == b->type_ref; */
-		case TYPE_FN:
+		case TYPE_FN: {
 			if (a->d_fn.arg != b->d_fn.arg) {
 				return false;
 			}
@@ -27,7 +25,8 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 				return false;
 			}
 			return true;
-		case TYPE_TUPLE:
+		}
+		case TYPE_TUPLE: {
 			if (a->d_tuple.len != b->d_tuple.len) {
 				return false;
 			}
@@ -37,8 +36,13 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 				}
 			}
 			return true;
-		default:
+		}
+		case TYPE_PTR: {
+			return a->d_ptr.ref == b->d_ptr.ref;
+		}
+		default: {
 			assert_not_reached();
+		}
 	}
 }
 
@@ -76,6 +80,15 @@ type_t type_new(tinfo_t typeinfo, loc_t *onerror) {
 	type_t type = type_len + _TYPE_CONCRETE_MAX;
 	types[type_len++] = typeinfo;
 	return type;
+}
+
+type_t type_new_inc_mul(type_t type) {
+	tinfo_t typeinfo = {
+		.kind = TYPE_PTR,
+		.d_ptr.ref = type,
+	};
+
+	return type_new(typeinfo, NULL);
 }
 
 // safe for comparisions
@@ -141,6 +154,10 @@ static void _type_dbg_str(type_t type) {
 			_type_dbg_str(typeinfo->d_fn.arg);
 			COMMIT(sprintf((char *)p, " -> "));
 			_type_dbg_str(typeinfo->d_fn.ret);
+			return;
+		case TYPE_PTR:
+			COMMIT(sprintf((char *)p, "*"));
+			_type_dbg_str(typeinfo->d_ptr.ref);
 			return;
 		default:
 			assert_not_reached();

@@ -55,9 +55,9 @@ enum _safe_cast_kind : u8 {
 };
 
 // TYPE_INFER on fail to convert
-type_t cconvert_implicit(type_t to, type_t from) {
-	assert(to < _TYPE_CONCRETE_MAX);
-	assert(from < _TYPE_CONCRETE_MAX);
+type_t cconvert_integers(type_t to, type_t from) {
+	assert(ctype_is_numeric(to));
+	assert(ctype_is_numeric(from));
 	
 	type_t ret;
 
@@ -251,7 +251,7 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 	ir_node_t last;
 	if (blk->brk_type == TYPE_UNIT && arrlast(node->d_do_block.exprs).kind == NODE_BREAK_INFERRED) {
 		last = arrlast(node->d_do_block.exprs);
-		
+
 		arrlast(node->d_do_block.exprs) = *last.d_break.expr;
 		ir_node_t unit_brk = {
 			.kind = NODE_BREAK_UNIT,
@@ -287,9 +287,24 @@ type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 
 // TYPE_INFER on error
 type_t cinfix_type_resolution(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
+	ti_kind tkind_lhs = type_kind(lhs->type);
+	ti_kind tkind_rhs = type_kind(rhs->type);
+
+	bool lhs_numeric = ctype_is_numeric(lhs->type);
+	bool rhs_numeric = ctype_is_numeric(rhs->type);
+
+	// no explicit cast because pointer arithmetic relies on underlying type
+	if (tkind_lhs == TYPE_PTR && rhs_numeric) {
+		return lhs->type;
+	}
+
+	if (!lhs_numeric || !rhs_numeric) {
+		return TYPE_INFER;
+	}
+	
 	type_t ret;
-	type_t rt = cconvert_implicit(lhs->type, rhs->type);
-	type_t lt = cconvert_implicit(rhs->type, lhs->type);
+	type_t rt = cconvert_integers(lhs->type, rhs->type);
+	type_t lt = cconvert_integers(rhs->type, lhs->type);
 
 	if (lt == TYPE_INFER && rt == TYPE_INFER) {
 		return TYPE_INFER;
@@ -310,6 +325,31 @@ type_t cinfix_type_resolution(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
 	}
 
 	return ret;
+}
+
+// TYPE_INFER on error
+type_t cimplcit_cast(ir_node_t *expr, type_t to) {
+	ti_kind tkind_to = type_kind(to);
+	ti_kind tkind_from = type_kind(expr->type);
+
+	bool to_numeric = ctype_is_numeric(to);
+	bool from_numeric = ctype_is_numeric(expr->type);
+
+	if (!to_numeric || !from_numeric) {
+		return TYPE_INFER;
+	}
+
+	type_t rt = cconvert_integers(to, expr->type);
+
+	if (rt == TYPE_INFER) {
+		return TYPE_INFER;
+	}
+
+	if (rt != expr->type) {
+		cir_unchecked_cast(rt, expr, expr->loc);
+	}
+
+	return rt;
 }
 
 // TODO: eventually?
@@ -340,17 +380,15 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (var->type == TYPE_INFER) {
 				var->type = cexpr(s, upvalue, expr->d_var_decl.rhs);
 			} else {
-				type_t ret = cexpr(s, var->type, expr->d_var_decl.rhs);
+				type_t expr_type = cexpr(s, var->type, expr->d_var_decl.rhs);
 
 				// need to convert expression to variable type
-				if (ret != var->type) {
+				if (expr_type != var->type) {
 					// implicitly convert
-					ret = cconvert_implicit(var->type, ret);
+					type_t ret = cimplcit_cast(expr->d_var_decl.rhs, var->type);
 					if (ret == TYPE_INFER) {
-						err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(var->type), type_dbg_str(ret));
+						err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(var->type), type_dbg_str(expr_type));
 					}
-					// ret == var->type
-					cir_unchecked_cast(var->type, expr->d_var_decl.rhs, expr->loc);
 				}
 			}
 			return TYPE_UNIT;
@@ -473,6 +511,14 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_CAST: {
 			type_t t = cexpr(s, expr->type, expr->d_cast);
+
+			if (expr->d_cast->kind == NODE_INTEGER_LIT) {
+				if (sv_cmp_literal(expr->d_cast->d_integer_lit.lit, "0")) {
+					err_with_pos(expr->loc, "cannot cast `0` to `%s`", type_dbg_str(expr->type));
+				}
+			}
+			// ????????????
+			
 			// TODO: check if this cast is even possible
 			// if (cconvert_implicit(expr->type, t) == TYPE_INFER)
 			(void)t;
