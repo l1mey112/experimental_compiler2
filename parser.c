@@ -109,8 +109,101 @@ static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
 	return NULL;
 }
 
+// find uses in expressions that are apart of the same scope
+// don't recurse into deeper scopes
+// WILL ONLY FIND SYMBOLS
+// warning: possibly unstable pointer
+// WILL IGNORE EXISTING VARS RESOLVED FROM AN OLDER SCOPE, ITS JUST NAMES TO NAMES HERE
+static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
+	ir_node_t *r;
+	switch (expr->kind) {
+		case NODE_GLOBAL_UNRESOLVED: {
+			if (expr->d_global_unresolved == name) {
+				return expr;
+			}
+			return NULL;
+		}
+		case NODE_VAR: {
+			if (VAR_PTR(expr->d_var)->name == name) {
+				return expr;
+			}
+			return NULL;
+		}
+		case NODE_POSTFIX: {
+			return ir_sym_find_use(expr->d_postfix.expr, name);
+		}
+		case NODE_PREFIX: {
+			return ir_sym_find_use(expr->d_prefix.expr, name);
+		}
+		case NODE_INFIX: {
+			if ((r = ir_sym_find_use(expr->d_infix.lhs, name))) {
+				return r;
+			}
+			if ((r = ir_sym_find_use(expr->d_infix.rhs, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_CALL: {
+			if ((r = ir_sym_find_use(expr->d_call.f, name))) {
+				return r;
+			}
+			if ((r = ir_sym_find_use(expr->d_call.arg, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_TUPLE: {
+			for (u32 i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
+				ir_node_t *exprp = &expr->d_tuple.elems[i];
+				if ((r = ir_sym_find_use(exprp, name))) {
+					return r;
+				}
+			}
+			return NULL;
+		}
+		// even though this doesn't make sense, include for completeness
+		case NODE_BREAK: {
+			if ((r = ir_sym_find_use(expr->d_break.expr, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_DO_BLOCK:
+		case NODE_INTEGER_LIT:
+		case NODE_PROC_DECL: {
+			return NULL;
+		}
+		default: {
+			// TODO: be sure to be exhaustive
+			printf("ir_sym_find_use: unhandled node kind %d\n", expr->kind);
+			assert_not_reached();
+		}
+	}
+}
+
+// find uses in expressions that are apart of the same scope
+// don't recurse into deeper scopes
+// WILL ONLY FIND SYMBOLS
+// warning: possibly unstable pointer
+static ir_node_t *ir_sym_find_uses(ir_node_t *exprs, istr_t name) {
+	if (exprs == NULL) {
+		return NULL;
+	}
+	
+	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
+		ir_node_t *expr = &exprs[i];
+		if ((expr = ir_sym_find_use(expr, name))) {
+			return expr;
+		}
+	}
+
+	return NULL;
+}
+
 // NULL meaning toplevel
-static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t onerror) {
+// `scope` MUST refer to `previous_exprs`
+static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t onerror, ir_node_t *previous_exprs) {
 	int idx;
 	if ((idx = pimport_ident(name)) != -1) {
 		print_err_with_pos(onerror, "variable `%s` cannot shadow import `%s`", sv_from(name), sv_from(name));
@@ -122,6 +215,13 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t o
 	if ((ex_var = ir_name_in(scope, name))) {
 		print_err_with_pos(onerror, "variable `%s` already exists in scope", sv_from(name));
 		print_hint_with_pos(ex_var->loc, "variable `%s` declared here", sv_from(name));
+		err_unwind();
+	}
+
+	ir_node_t *use;
+	if (scope != NULL && (use = ir_sym_find_uses(previous_exprs, name))) {
+		print_err_with_pos(use->loc, "use of variable `%s` before declaration in same scope", sv_from(name));
+		print_hint_with_pos(onerror, "variable `%s` declared here", sv_from(name));
 		err_unwind();
 	}
 	
@@ -198,100 +298,6 @@ static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
 			return expr;
 		}
 	}
-	return NULL;
-}
-
-// find uses in expressions that are apart of the same scope
-// don't recurse into deeper scopes
-// WILL ONLY FIND SYMBOLS
-// warning: possibly unstable pointer
-// WILL IGNORE EXISTING VARS RESOLVED FROM AN OLDER SCOPE, ITS JUST NAMES TO NAMES HERE
-static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
-	ir_node_t *r;
-	switch (expr->kind) {
-		case NODE_GLOBAL_UNRESOLVED: {
-			if (expr->d_global_unresolved == name) {
-				return expr;
-			}
-			return NULL;
-		}
-		case NODE_VAR: {
-			if (VAR_PTR(expr->d_var)->name == name) {
-				return expr;
-			}
-			return NULL;
-		}
-		case NODE_POSTFIX: {
-			return ir_sym_find_use(expr->d_postfix.expr, name);
-		}
-		case NODE_PREFIX: {
-			return ir_sym_find_use(expr->d_prefix.expr, name);
-		}
-		case NODE_INFIX: {
-			if ((r = ir_sym_find_use(expr->d_infix.lhs, name))) {
-				return r;
-			}
-			if ((r = ir_sym_find_use(expr->d_infix.rhs, name))) {
-				return r;
-			}
-			return NULL;
-		}
-		case NODE_CALL: {
-			if ((r = ir_sym_find_use(expr->d_call.f, name))) {
-				return r;
-			}
-			if ((r = ir_sym_find_use(expr->d_call.arg, name))) {
-				return r;
-			}
-			return NULL;
-		}
-		case NODE_TUPLE: {
-			for (u32 i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
-				ir_node_t *exprp = &expr->d_tuple.elems[i];
-				if ((r = ir_sym_find_use(exprp, name))) {
-					return r;
-				}
-			}
-			return NULL;
-		}
-		// even though this doesn't make sense, include for completeness
-		case NODE_BREAK: {
-			if ((r = ir_sym_find_use(expr->d_break.expr, name))) {
-				return r;
-			}
-			return NULL;
-		}
-		case NODE_VAR_DECL: {
-			if ((r = ir_sym_find_use(expr->d_var_decl.rhs, name))) {
-				return r;
-			}
-			return NULL;
-		}
-		case NODE_DO_BLOCK:
-		case NODE_INTEGER_LIT:
-		case NODE_PROC_DECL: {
-			return NULL;
-		}
-		default: {
-			// TODO: be sure to be exhaustive
-			printf("ir_sym_find_use: unhandled node kind %d\n", expr->kind);
-			assert_not_reached();
-		}
-	}
-}
-
-// find uses in expressions that are apart of the same scope
-// don't recurse into deeper scopes
-// WILL ONLY FIND SYMBOLS
-// warning: possibly unstable pointer
-static ir_node_t *ir_sym_find_uses(ir_node_t *exprs, istr_t name) {
-	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
-		ir_node_t *expr = &exprs[i];
-		if ((expr = ir_sym_find_use(expr, name))) {
-			return expr;
-		}
-	}
-
 	return NULL;
 }
 
@@ -952,21 +958,14 @@ ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t op
 ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *previous_exprs) {
 	// is this a variable declaration?
 
-	// x = 40        (variable declaration)
-	// mut 'x = 40   (variable declaration)
-	// mut x = 40    (variable declaration, but error)
+	// x = 40  (variable declaration)
 
 	bool is_decl = false;
-	bool is_mut = false;
 
 	if (lhs.kind == NODE_VAR) {
 		is_decl = !VAR_PTR_IS_T(VAR_PTR(lhs.d_var));
 	} else if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
 		is_decl = !ISTR_IS_T(lhs.d_global_unresolved);
-	} else if (lhs.kind == NODE_MUT) {
-		is_decl = true;
-		is_mut = true;
-		lhs = *lhs.d_mut; // leak
 	}
 
 	if (!is_decl) {
@@ -980,11 +979,6 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		};
 	}
 
-	if (is_mut && (lhs.kind != NODE_GLOBAL_UNRESOLVED && lhs.kind != NODE_VAR)) {
-		printf("kind: %u\n", lhs.kind);
-		err_with_pos(lhs.loc, "cannot declare a mutable variable with a non-variable expression");
-	}
-
 	istr_t name;
 	if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
 		name = lhs.d_global_unresolved;
@@ -992,39 +986,80 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		name = VAR_PTR(lhs.d_var)->name;
 	}
 
-	if (is_mut && !ISTR_IS_T(name)) {
-		err_with_pos(lhs.loc, "cannot declare a mutable variable with a non mutable name");
-	}
-
-	if (lhs.kind == NODE_VAR && ir_var_exists_in(s, lhs.d_var)) {
-		const char *name = sv_from(VAR_PTR(lhs.d_var)->name);
-		loc_t oloc = VAR_PTR(lhs.d_var)->loc;
-		print_err_with_pos(lhs.loc, "variable `%s` already exists in scope", name);
-		print_hint_with_pos(oloc, "variable `%s` declared here", name);
-		err_unwind();
-	}
-
-	// can't use the variable before declaring it in the same scope,
-	// except in a toplevel context (global variables)
-	ir_node_t *use;
-	if (s != NULL && (use = ir_sym_find_uses(previous_exprs, name))) {
-		print_err_with_pos(use->loc, "use of variable `%s` before declaration in same scope", sv_from(name));
-		print_hint_with_pos(lhs.loc, "variable `%s` declared here", sv_from(name));
-		err_unwind();
-	}
-
-	// TODO: no need for `onerror`, we know var doesn't exist
-	//       probably introduce INVALID_LOC macro ??
-	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, lhs.loc);
+	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, lhs.loc, previous_exprs);
 
 	// creation of a variable is ()
 	// should keep? i don't know
 	return (ir_node_t){
-		.kind = NODE_VAR_DECL,
+		.kind = NODE_LET_DECL,
 		.loc = loc,
 		.type = TYPE_UNIT,
-		.d_var_decl.lhs = var,
-		.d_var_decl.rhs = ir_memdup(rhs),
+		.d_let_decl.pattern = (ir_pattern_t){
+			.kind = PATTERN_VAR,
+			.loc = lhs.loc,
+			.d_var = var,
+		},
+		.d_let_decl.expr = ir_memdup(rhs),
+	};
+}
+
+// will create vars it cannot find
+ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs) {
+	switch (p.token.kind) {
+		case TOK_UNDERSCORE: {
+			pnext();
+			return (ir_pattern_t){
+				.kind = PATTERN_UNDERSCORE,
+			};
+		}
+		case TOK_IDENT: {
+			istr_t name = p.token.lit;
+			loc_t name_loc = p.token.loc;
+			pnext();
+			ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc, previous_exprs);
+			return (ir_pattern_t){
+				.loc = name_loc,
+				.kind = PATTERN_VAR,
+				.d_var = var,
+			};
+		}
+		case TOK_INTEGER: {
+			istr_t val = p.token.lit;
+			loc_t loc = p.token.loc;
+			pnext();
+			return (ir_pattern_t){
+				.loc = loc,
+				.kind = PATTERN_INTEGER_LIT,
+				.d_integer_lit = val,
+			};
+		}
+		default: {
+			punexpected("expected pattern");
+		}
+	}
+}
+
+ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
+	pcheck(TOK_LET);
+
+	loc_t oloc = p.token.loc;
+
+	pnext();
+	// let x = 20
+	//     ^
+
+	ir_pattern_t pattern = ppattern(s, previous_exprs);
+	pexpect(TOK_ASSIGN);
+	// let x = 20
+	//         ^^
+	ir_node_t rhs = pexpr(s, 0, cfg, previous_exprs);
+
+	return (ir_node_t){
+		.kind = NODE_LET_DECL,
+		.loc = oloc,
+		.type = TYPE_UNIT,
+		.d_let_decl.pattern = pattern,
+		.d_let_decl.expr = ir_memdup(rhs),
 	};
 }
 
@@ -1171,6 +1206,11 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				node = pdo(s, label.name, label.name_loc); // TODO?: no chaining
 				label.name = ISTR_NONE;
 				should_continue = false;
+				break;
+			}
+			case TOK_LET: {
+				node = plet(s, cfg, previous_exprs);
+				should_continue = false; // single expr
 				break;
 			}
 			case TOK_BREAK: {
@@ -1418,42 +1458,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	return node;
 }
 
-// will create vars it cannot find
-ir_pattern_t ppattern(ir_scope_t *s) {
-	switch (p.token.kind) {
-		case TOK_UNDERSCORE: {
-			pnext();
-			return (ir_pattern_t){
-				.kind = PATTERN_UNDERSCORE,
-			};
-		}
-		case TOK_IDENT: {
-			istr_t name = p.token.lit;
-			loc_t name_loc = p.token.loc;
-			pnext();
-			ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc);
-			return (ir_pattern_t){
-				.loc = name_loc,
-				.kind = PATTERN_VAR,
-				.d_var = var,
-			};
-		}
-		case TOK_INTEGER: {
-			istr_t val = p.token.lit;
-			loc_t loc = p.token.loc;
-			pnext();
-			return (ir_pattern_t){
-				.loc = loc,
-				.kind = PATTERN_INTEGER_LIT,
-				.d_integer_lit = val,
-			};
-		}
-		default: {
-			punexpected("expected pattern");
-		}
-	}
-}
-
 // function declarations:
 // - io <name>            = ...
 // - <name>:    <pattern> = ...
@@ -1496,7 +1500,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 		// ^^^^^^^^^
 
 		while (true) {
-			ir_pattern_t pattern = ppattern(&enclosing_scope);
+			ir_pattern_t pattern = ppattern(&enclosing_scope, NULL);
 			arrpush(patterns, pattern);
 			if (p.token.kind == TOK_COMMA) {
 				pnext();
@@ -1533,7 +1537,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	}
 
 	// create new var before evaluation so it can be referenced recursively
-	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc);
+	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc, previous_exprs);
 
 	ir_node_t *exprs = NULL;
 	arrpush(exprs, expr);
@@ -1667,7 +1671,7 @@ void pimport(void) {
 void pmake_pub(ir_node_t *node) {
 	ir_var_t *varp;
 	
-	switch (node->kind) {
+	/* switch (node->kind) {
 		case NODE_PROC_DECL: {
 			varp = VAR_PTR(node->d_proc_decl.var);
 			break;
@@ -1676,10 +1680,10 @@ void pmake_pub(ir_node_t *node) {
 			varp = VAR_PTR(node->d_var);
 			break;
 		}
-		default: {
+		default: { */
 			err_with_pos(node->loc, "cannot make this expression public");
-		}
-	}
+		/* }
+	} */
 
 	assert(!varp->is_pub);
 	varp->is_pub = true;
@@ -1948,6 +1952,25 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	}
 }
 
+void _ir_dump_newvar_pattern(ir_pattern_t pattern) {
+	switch (pattern.kind) {
+		case PATTERN_VAR: {
+			ir_var_t *var = VAR_PTR(pattern.d_var);
+			TAB_PRINTF("%s.%u :: %s\n", sv_from(var->name), pattern.d_var, type_dbg_str(var->type));
+			break;
+		}
+		case PATTERN_TUPLE: {
+			for (u32 i = 0; i < pattern.d_tuple.len; i++) {
+				_ir_dump_newvar_pattern(pattern.d_tuple.elems[i]);
+			}
+			break;
+		}
+		case PATTERN_UNDERSCORE:
+		case PATTERN_INTEGER_LIT:
+			break;
+	}
+}
+
 void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
 		case NODE_PROC_DECL: {
@@ -1975,12 +1998,12 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			}
 			break;
 		}
-		case NODE_VAR_DECL: {
-			ir_var_t *var = VAR_PTR(node.d_var_decl.lhs);
-			TAB_PRINTF("%s.%u :: %s\n", sv_from(var->name), node.d_var_decl.lhs, type_dbg_str(var->type));
-			TAB_PRINTF("%s.%u", sv_from(var->name), node.d_var_decl.lhs);
+		case NODE_LET_DECL: {
+			_ir_dump_newvar_pattern(node.d_let_decl.pattern);
+			TAB_PRINTF("let ");
+			_ir_dump_pattern(modp, s, node.d_let_decl.pattern);
 			printf(" = ");
-			_ir_dump_expr(modp, s, *node.d_var_decl.rhs);
+			_ir_dump_expr(modp, s, *node.d_let_decl.expr);
 			printf("\n");
 			break;
 		}

@@ -373,7 +373,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			err_with_pos(expr->loc, "unknown ident `%s`", sv_from(expr->d_global_unresolved));
 		}
-		case NODE_VAR_DECL: {
+		/* case NODE_VAR_DECL: {
 			ir_var_t *var = VAR_PTR(expr->d_var_decl.lhs);
 			if (var->type == TYPE_INFER) {
 				var->type = cexpr(s, upvalue, expr->d_var_decl.rhs);
@@ -390,7 +390,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				}
 			}
 			return TYPE_UNIT;
-		}
+		} */
 		case NODE_PROC_DECL: {
 			// 1. check if return type is infer, IT SHOULD NOT BE
 			//    err_with_pos("complex inference and generics aren't implemented yet")
@@ -487,7 +487,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_VAR: {
 			// we know this already
-			ir_var_t *var = VAR_PTR(expr->d_var_decl.lhs);
+			ir_var_t *var = VAR_PTR(expr->d_var);
 			expr->type = var->type;
 			return expr->type;
 		}

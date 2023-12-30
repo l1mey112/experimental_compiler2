@@ -156,6 +156,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_BOOL, "bool") \
 	X(TOK_TRUE, "true") \
 	X(TOK_FALSE, "false") \
+	X(TOK_LET, "let") \
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
@@ -370,7 +371,7 @@ struct ir_pattern_t {
 struct ir_node_t {
 	enum node_kind_t {
 		NODE_PROC_DECL,
-		NODE_VAR_DECL,
+		NODE_LET_DECL,
 		NODE_DO_BLOCK,
 		NODE_LOOP,
 		NODE_IF,
@@ -455,9 +456,9 @@ struct ir_node_t {
 			ir_node_t *exprs;
 		} d_proc_decl;
 		struct {
-			ir_rvar_t lhs;
-			ir_node_t *rhs;
-		} d_var_decl;
+			ir_pattern_t pattern;
+			ir_node_t *expr;
+		} d_let_decl;
 		struct {
 			ir_node_t *f;
 			ir_node_t *arg;
@@ -466,7 +467,7 @@ struct ir_node_t {
 			ir_node_t *elems;
 		} d_tuple;
 		struct {
-			ir_node_t *expr; // in use with NODE_BREAK
+			ir_node_t *expr; // in use with NODE_BREAK*
 			u8 blk_id;
 		} d_break;
 		struct {
