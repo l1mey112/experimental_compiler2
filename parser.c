@@ -1470,7 +1470,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	loc_t name_loc = p.token.loc;
 
 	if (ISTR_IS_T(name)) {
-		punexpected("expected a non-tack name");
+		punexpected("expected a non mutable name");
 	}
 
 	// io name

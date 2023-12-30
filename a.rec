@@ -1,7 +1,1 @@
-import mod.a
-
-v :: *i32
-v = 5:*i32
-
-b = v + 1
-c = b + a.v
+v: k = k
