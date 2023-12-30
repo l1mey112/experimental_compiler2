@@ -1145,6 +1145,15 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 		token_t token = p.token;
 
 		switch (token.kind) {
+			case TOK_UNDEFINED: {
+				pnext();
+				node = (ir_node_t){
+					.kind = NODE_UNDEFINED,
+					.type = TYPE_INFER,
+					.loc = token.loc,
+				};
+				break;
+			}
 			case TOK_TRUE:
 			case TOK_FALSE: {
 				pnext();
@@ -1940,6 +1949,10 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			} else {
 				_ir_dump_expr(modp, s, *node.d_if.els);
 			}
+			break;
+		}
+		case NODE_UNDEFINED: {
+			printf("undefined");
 			break;
 		}
 		default: {

@@ -157,6 +157,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_TRUE, "true") \
 	X(TOK_FALSE, "false") \
 	X(TOK_LET, "let") \
+	X(TOK_UNDEFINED, "undefined") \
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
@@ -270,7 +271,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	
 
 #define TOK_X_LIST \
-	X(TOK_UNDEFINED, "tok_undefined") \
+	X(TOK_NIL, "tok_nil") \
 	X(TOK_EOF, "EOF") \
 	X(TOK_IDENT, "identifier") \
 	X(TOK_INTEGER, "integer") \
@@ -291,6 +292,8 @@ enum ti_kind {
 	_TYPE_CONCRETE_MAX,
 	//
 	TYPE_UNKNOWN, // reference to be filled in later
+	TYPE_VAR, // typevars
+	// TYPE_GENERIC, // generic (we don't make guarantees about polymorphism)
 	TYPE_TUPLE,
 	TYPE_FN,
 	TYPE_PTR,
@@ -393,6 +396,7 @@ struct ir_node_t {
 		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_MUT,
+		NODE_UNDEFINED,
 	} kind;
 	
 	type_t type;
@@ -533,6 +537,7 @@ struct tinfo_t {
 	bool is_named; // module.lit for named types
 
 	union {
+		type_t d_typevar_type;
 		struct {
 			// curried representation
 			type_t arg;
@@ -553,6 +558,8 @@ struct tinfo_t {
 };
 
 type_t type_new_inc_mul(type_t type);
+type_t typevar_new(void);
+void typevar_replace(type_t typevar, type_t type);
 type_t type_new(tinfo_t typeinfo, loc_t *onerror);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);

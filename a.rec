@@ -1,4 +1,6 @@
-v: l = l + 20
-v: 0 = 20
+add :: i32 -> i32 -> i32
+add: a b = a + b
 
-k: a b = a + b
+let 'abc = undefined
+
+v = add 'abc

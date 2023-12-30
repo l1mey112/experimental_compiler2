@@ -350,6 +350,40 @@ type_t cimplcit_cast(ir_node_t *expr, type_t to) {
 	return rt;
 }
 
+// ? and i32 -> ? = i32
+type_t cunify(type_t lhs, type_t rhs) {
+	ti_kind lhs_kind = type_kind(lhs);
+	ti_kind rhs_kind = type_kind(rhs);
+
+	if (lhs == rhs) {
+		return lhs;
+	}
+
+	// ? = lhs
+	if (lhs_kind == TYPE_VAR) {
+		typevar_replace(lhs, rhs);
+		return rhs;
+	}
+
+	// ? = rhs
+	if (rhs_kind == TYPE_VAR) {
+		typevar_replace(rhs, lhs);
+		return lhs;
+	}
+
+	// ! coerces to everything
+	if (lhs_kind == TYPE_BOTTOM) {
+		return rhs;
+	}
+
+	// ! coerces to everything
+	if (rhs_kind == TYPE_BOTTOM) {
+		return lhs;
+	}
+
+	assert_not_reached();
+}
+
 // TODO: eventually?
 enum : u8 {
 	CEXPR_NONE,
@@ -391,6 +425,11 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			return TYPE_UNIT;
 		} */
+		case NODE_LET_DECL: {
+			type_t expr_type = cexpr(s, TYPE_INFER, expr->d_let_decl.expr);
+			cpattern(s, &expr->d_let_decl.pattern, expr_type);
+			return TYPE_UNIT;
+		}
 		case NODE_PROC_DECL: {
 			// 1. check if return type is infer, IT SHOULD NOT BE
 			//    err_with_pos("complex inference and generics aren't implemented yet")
@@ -463,6 +502,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				// _ = x + y
 
 				if (lhs_type == rhs_type) {
+					expr->type = lhs_type;
+				} else if (expr->d_infix.kind == TOK_ASSIGN && type_kind(lhs_type) == TYPE_VAR) {
+					typevar_replace(lhs_type, rhs_type);
 					expr->type = lhs_type;
 				} else if ((expr->type = cinfix_type_resolution(lhs, rhs, expr->loc)) == TYPE_INFER) {
 					err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
@@ -550,7 +592,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			tinfo_t *fn = type_get(f_type);
 			type_t arg_type = cexpr(s, fn->d_fn.arg, expr->d_call.arg);
-			if (fn->d_fn.arg != arg_type) {
+			if (cunify(fn->d_fn.arg, arg_type) == TYPE_INFER) {
 				err_with_pos(expr->loc, "type mismatch: expected argument type `%s`, got `%s`", type_dbg_str(fn->d_fn.arg), type_dbg_str(arg_type));
 			}
 			expr->type = fn->d_fn.ret;
@@ -630,6 +672,11 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 					err_with_pos(expr->d_if.els->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(then_type), type_dbg_str(else_type));
 				}
 			}
+			return expr->type;
+		}
+		case NODE_UNDEFINED: {
+			type_t tv = typevar_new(); // create new placeholder for type
+			expr->type = tv;
 			return expr->type;
 		}
 		default: {

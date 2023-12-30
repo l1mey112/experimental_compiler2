@@ -91,6 +91,22 @@ type_t type_new_inc_mul(type_t type) {
 	return type_new(typeinfo, NULL);
 }
 
+type_t typevar_new(void) {
+	tinfo_t typeinfo = {
+		.kind = TYPE_VAR,
+		.d_typevar_type = TYPE_INFER,
+	};
+	
+	return type_new(typeinfo, NULL);
+}
+
+void typevar_replace(type_t typevar, type_t type) {
+	assert(type_kind(typevar) == TYPE_VAR);
+
+	tinfo_t *typeinfo = type_get(typevar);
+	typeinfo->d_typevar_type = type;
+}
+
 // safe for comparisions
 ti_kind type_kind(type_t type) {
 	if (type < _TYPE_CONCRETE_MAX) {
@@ -158,6 +174,13 @@ static void _type_dbg_str(type_t type) {
 		case TYPE_PTR:
 			COMMIT(sprintf((char *)p, "*"));
 			_type_dbg_str(typeinfo->d_ptr.ref);
+			return;
+		case TYPE_VAR:
+			if (typeinfo->d_typevar_type == TYPE_INFER) {
+				COMMIT(sprintf((char *)p, "?%u", type));
+			} else {
+				_type_dbg_str(typeinfo->d_typevar_type);
+			}
 			return;
 		default:
 			assert_not_reached();
