@@ -1496,15 +1496,13 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 		pnext();
 		ir_pattern_t *patterns = NULL;
 
-		// <pattern>, <pattern>, <pattern> = ...
+		// <pattern> <pattern> <pattern> = ...
 		// ^^^^^^^^^
 
 		while (true) {
 			ir_pattern_t pattern = ppattern(&enclosing_scope, NULL);
 			arrpush(patterns, pattern);
-			if (p.token.kind == TOK_COMMA) {
-				pnext();
-			} else {
+			if (p.token.kind == TOK_ASSIGN) {
 				break;
 			}
 		}
