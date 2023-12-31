@@ -4,6 +4,8 @@
 
 typedef struct cctx_t cctx_t;
 typedef struct cblk_t cblk_t;
+typedef struct cscope_t cscope_t;
+typedef struct cinfer_vars_t cinfer_vars_t;
 
 struct cblk_t {
 	type_t upvalue;
@@ -11,16 +13,52 @@ struct cblk_t {
 	loc_t brk_loc; // if `first_type` not TYPE_INFER
 };
 
+struct cscope_t {
+	u32 ifvars_lvl;
+};
+
+struct cinfer_vars_t {
+	type_t last_var;
+	ir_node_t *def;
+};
+
 struct cctx_t {
 	rmod_t mod;
 	mod_t *modp;
 	cblk_t blocks[64];
 	u32 blocks_len;
+	cscope_t scopes[64];
+	u32 scopes_len;
+	cinfer_vars_t ifvars[256];
+	u32 ifvars_len;
 };
 
 cctx_t c;
 
+void cscope_enter(void) {
+	c.scopes[c.scopes_len++] = (cscope_t){
+		.ifvars_lvl = c.ifvars_len,
+	};
+}
+
+void cscope_leave(void) {
+	u32 idx = --c.scopes_len;
+	c.ifvars_len = c.scopes[idx].ifvars_lvl;		
+}
+
+cinfer_vars_t *cifvars_get(type_t type) {
+	for (u32 i = 0; i < c.ifvars_len; i++) {
+		if (c.ifvars[i].last_var == type) {
+			return &c.ifvars[i];
+		}
+	}
+	return NULL;
+}
+
 void ctype_assert(type_t src, type_t of, loc_t onerror) {
+	src = type_underlying(src);
+	of = type_underlying(of);
+	
 	if (src != of) {
 		err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(of), type_dbg_str(src));
 	}
@@ -38,10 +76,12 @@ void cir_unchecked_cast(type_t to, ir_node_t *node, loc_t loc) {
 }
 
 bool ctype_is_numeric(type_t type) {
+	ti_kind kind = type_kind(type);
+	
 	// TODO: aliases etc
-	return (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END) ||
-		(type >= TYPE_UNSIGNED_INTEGERS_START && type <= TYPE_UNSIGNED_INTEGERS_END) ||
-		(type == TYPE_F32 || type == TYPE_F64);
+	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
+		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END) ||
+		(kind == TYPE_F32 || kind == TYPE_F64);
 }
 
 // TODO: maybe never implement?
@@ -54,6 +94,9 @@ enum _safe_cast_kind : u8 {
 
 // TYPE_INFER on fail to convert
 type_t cconvert_integers(type_t to, type_t from) {
+	to = type_underlying(to);
+	from = type_underlying(from);
+	
 	assert(ctype_is_numeric(to));
 	assert(ctype_is_numeric(from));
 	
@@ -219,25 +262,24 @@ void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr);
 
-void cblk_exprs(ir_node_t *exprs) {
-	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
-		ir_node_t *expr = &exprs[i];
-		// nonsensical to pass upvalue
-		type_t type = cexpr(expr->d_do_block.scope, TYPE_INFER, expr);
-		if (type == TYPE_BOTTOM && i + 1 < c) {
-			err_with_pos(exprs[i + 1].loc, "unreachable code");
-		}
-	}
-}
-
 type_t cdo(ir_node_t *node, type_t upvalue) {
-	cblk_t *blk = &c.blocks[c.blocks_len++];
+	u8 blk_id = c.blocks_len++;
+	cblk_t *blk = &c.blocks[blk_id];
 
 	*blk = (cblk_t){
 		.brk_type = TYPE_INFER,
 		.upvalue = upvalue,
 	};
-	cblk_exprs(node->d_do_block.exprs);
+	cscope_enter();
+	for (u32 i = 0, c = arrlenu(node->d_do_block.exprs); i < c; i++) {
+		ir_node_t *expr = &node->d_do_block.exprs[i];
+		// nonsensical to pass upvalue
+		type_t type = cexpr(node->d_do_block.scope, TYPE_INFER, expr);
+		if (type == TYPE_BOTTOM && i + 1 < c) {
+			err_with_pos(node->d_do_block.exprs[i + 1].loc, "unreachable code");
+		}
+	}
+	cscope_leave();
 	c.blocks_len--;
 
 	// no breaks pointing to this do, but somehow some ! code ran
@@ -250,13 +292,13 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 	if (blk->brk_type == TYPE_UNIT && arrlast(node->d_do_block.exprs).kind == NODE_BREAK_INFERRED) {
 		last = arrlast(node->d_do_block.exprs);
 
-		arrlast(node->d_do_block.exprs) = *last.d_break.expr;
-		ir_node_t unit_brk = {
+		arrlast(node->d_do_block.exprs) = (ir_node_t){
 			.kind = NODE_BREAK_UNIT,
 			.loc = last.loc,
-			.type = TYPE_UNIT,
+			.type = TYPE_BOTTOM,
+			.d_break.blk_id = blk_id,
+			.d_break.expr = ir_memdup(last),
 		};
-		arrpush(node->d_do_block.exprs, unit_brk);
 	}
 
 	return blk->brk_type;
@@ -269,7 +311,6 @@ type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 		.brk_type = TYPE_INFER,
 		.upvalue = upvalue,
 	};
-	// cblk_exprs(node->d_loop);
 	// TODO: see with `if`, we don't ignore the type and actually check it against `()`
 	//       maybe we should go back to `if` and remove that behavior
 	(void)cexpr(s, TYPE_INFER, node->d_loop.expr);
@@ -351,7 +392,7 @@ type_t cimplcit_cast(ir_node_t *expr, type_t to) {
 }
 
 // ? and i32 -> ? = i32
-type_t cunify(type_t lhs, type_t rhs) {
+type_t cunify(type_t lhs, type_t rhs, loc_t onerror) {
 	ti_kind lhs_kind = type_kind(lhs);
 	ti_kind rhs_kind = type_kind(rhs);
 
@@ -380,8 +421,100 @@ type_t cunify(type_t lhs, type_t rhs) {
 	if (rhs_kind == TYPE_BOTTOM) {
 		return lhs;
 	}
+	
+	err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs), type_dbg_str(rhs));
+}
 
-	assert_not_reached();
+void cfn(ir_node_t *node) {
+	// 1. check if return type is infer, IT SHOULD NOT BE
+	//    err_with_pos("complex inference and generics aren't implemented yet")
+	// 2. cpattern_to_type(...) for each pattern
+	ir_var_t *varp = VAR_PTR(node->d_proc_decl.var);
+	
+	// create the typevars
+	if (varp->type == TYPE_INFER) {
+		// make sure they have the same argument length
+		int plen = -1;
+		for (u32 i = 0, c = arrlenu(node->d_proc_decl.patterns); i < c; i++) {
+			if (plen == (u32)-1) {
+				plen = arrlenu(node->d_proc_decl.patterns[i].d_tuple.elems);
+			} else {
+				if (plen != arrlenu(node->d_proc_decl.patterns[i].d_tuple.elems)) {
+					err_with_pos(node->d_proc_decl.patterns[i].loc, "function argument length mismatch on pattern");
+				}
+			}
+		}
+
+		assert(plen > 0); // all functions take a single argument
+		printf("plen: %u\n", plen);
+
+		// plen: 2
+		//     ? -> ? -> ?
+		//     ^    ^
+
+		// TODO: ?18 -> ?16 -> ?15
+		// TODO: do not create a typevar for the return value
+		type_t last = typevar_new();
+		type_t fn_type = last;
+		for (u32 i = 0; i < plen; i++) {
+			tinfo_t typeinfo = {
+				.kind = TYPE_FN,
+				.d_fn = {
+					.arg = typevar_new(),
+					.ret = fn_type,
+				}
+			};
+			
+			fn_type = type_new(typeinfo, NULL);
+		}
+		// add to infer vars
+		c.ifvars[c.ifvars_len++] = (cinfer_vars_t){
+			.last_var = last,
+			.def = node,
+		};
+		varp->type = fn_type;
+	} else {
+		if (type_kind(varp->type) != TYPE_FN) {
+			err_with_pos(node->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(varp->type));
+		}
+		// you know, a function being a bunch of patterns matching
+		// on a tuple of args is a pretty good abstraction
+		type_t args_tuple = cfn_args_to_tuple(varp->type);
+		type_t return_type = cfn_type_full_return(varp->type);
+		for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
+			cpattern(&node->d_proc_decl.scopes[i], &node->d_proc_decl.patterns[i], args_tuple);
+		}
+		for (u32 i = 0, c = arrlenu(node->d_proc_decl.exprs); i < c; i++) {
+			cscope_enter();
+			type_t type = cexpr(&node->d_proc_decl.scopes[i], return_type, &node->d_proc_decl.exprs[i]);
+			cscope_leave();
+			ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
+		}
+	}
+}
+
+type_t cfn_calculate_return(ir_node_t *node) {
+	ir_var_t *varp = VAR_PTR(node->d_proc_decl.var);
+
+	type_t args_tuple = cfn_args_to_tuple(varp->type);
+	type_t return_var = cfn_type_full_return(varp->type);
+	printf("return_var: %s\n", type_dbg_str(return_var));
+	assert(type_kind_raw(return_var) == TYPE_VAR);
+	type_t return_type = TYPE_INFER;
+
+	for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
+		cpattern(&node->d_proc_decl.scopes[i], &node->d_proc_decl.patterns[i], args_tuple);
+	}
+	for (u32 i = 0, c = arrlenu(node->d_proc_decl.exprs); i < c; i++) {
+		cscope_enter();
+		type_t type = cexpr(&node->d_proc_decl.scopes[i], return_type, &node->d_proc_decl.exprs[i]);
+		cscope_leave();
+		if (return_type == TYPE_INFER) {
+			typevar_replace(return_var, type);
+			return_type = return_var;
+		}
+		ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
+	}
 }
 
 // TODO: eventually?
@@ -431,28 +564,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return TYPE_UNIT;
 		}
 		case NODE_PROC_DECL: {
-			// 1. check if return type is infer, IT SHOULD NOT BE
-			//    err_with_pos("complex inference and generics aren't implemented yet")
-			// 2. cpattern_to_type(...) for each pattern
-			ir_var_t *varp = VAR_PTR(expr->d_proc_decl.var);
-			if (varp->type == TYPE_INFER) {
-				// TODO: when generics come around, sure
-				err_with_pos(expr->loc, "function type inference is not implemented yet");
-			}
-			if (type_kind(varp->type) != TYPE_FN) {
-				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(varp->type));
-			}
-			// you know, a function being a bunch of patterns matching
-			// on a tuple of args is a pretty good abstraction
-			type_t args_tuple = cfn_args_to_tuple(varp->type);
-			type_t return_type = cfn_type_full_return(varp->type);
-			for (u32 i = 0, c = arrlenu(expr->d_proc_decl.scopes); i < c; i++) {
-				cpattern(&expr->d_proc_decl.scopes[i], &expr->d_proc_decl.patterns[i], args_tuple);
-			}
-			for (u32 i = 0, c = arrlenu(expr->d_proc_decl.exprs); i < c; i++) {
-				type_t type = cexpr(&expr->d_proc_decl.scopes[i], return_type, &expr->d_proc_decl.exprs[i]);
-				ctype_assert(type, return_type, expr->d_proc_decl.exprs[i].loc);
-			}
+			cfn(expr);
 			return TYPE_UNIT;
 		}
 		case NODE_PREFIX: {
@@ -531,7 +643,8 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			// we know this already
 			ir_var_t *var = VAR_PTR(expr->d_var);
 			expr->type = var->type;
-			return expr->type;
+			// only variables may contain typevars
+			return type_underlying(expr->type);
 		}
 		case NODE_INTEGER_LIT: {
 			// default integer type is i32
@@ -592,8 +705,14 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			tinfo_t *fn = type_get(f_type);
 			type_t arg_type = cexpr(s, fn->d_fn.arg, expr->d_call.arg);
-			if (cunify(fn->d_fn.arg, arg_type) == TYPE_INFER) {
-				err_with_pos(expr->loc, "type mismatch: expected argument type `%s`, got `%s`", type_dbg_str(fn->d_fn.arg), type_dbg_str(arg_type));
+			assert(cunify(fn->d_fn.arg, arg_type, expr->loc) != TYPE_INFER); // TODO: use
+
+			// infer the return value, no more functions left
+			if (type_kind(fn->d_fn.ret) == TYPE_VAR) {
+				// ?1 -> ?2 -> ?3
+				cinfer_vars_t *ifvars;
+				assert((ifvars = cifvars_get(fn->d_fn.ret)) != NULL);
+				cfn_calculate_return(ifvars->def);
 			}
 			expr->type = fn->d_fn.ret;
 			return expr->type;

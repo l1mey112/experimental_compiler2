@@ -40,6 +40,10 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 		case TYPE_PTR: {
 			return a->d_ptr.ref == b->d_ptr.ref;
 		}
+		case TYPE_VAR: {
+			// types with different typevar types are not equal
+			return false;
+		}
 		default: {
 			assert_not_reached();
 		}
@@ -108,20 +112,72 @@ void typevar_replace(type_t typevar, type_t type) {
 }
 
 // safe for comparisions
-ti_kind type_kind(type_t type) {
+ti_kind type_kind_raw(type_t type) {
 	if (type < _TYPE_CONCRETE_MAX) {
 		return type;
 	}
 
-	tinfo_t *typeinfo = type_get(type);
+	tinfo_t *typeinfo = type_get_raw(type);
 	return typeinfo->kind;
+}
+
+// safe for comparisions
+ti_kind type_kind(type_t type) {
+	if (type < _TYPE_CONCRETE_MAX) {
+		return type;
+	}
+	
+	u32 idx = type - _TYPE_CONCRETE_MAX;
+	tinfo_t *typeinfo = &types[idx];
+
+	if (typeinfo->kind == TYPE_VAR && typeinfo->d_typevar_type != TYPE_INFER) {
+		return type_kind(typeinfo->d_typevar_type);
+	}
+	
+	return typeinfo->kind;
+}
+
+// don't unwrap vars
+tinfo_t *type_get_raw(type_t type) {
+	assert(type >= _TYPE_CONCRETE_MAX);
+	u32 idx = type - _TYPE_CONCRETE_MAX;
+	
+	tinfo_t *typeinfo = &types[idx];
+	return typeinfo;
 }
 
 tinfo_t *type_get(type_t type) {
 	assert(type >= _TYPE_CONCRETE_MAX);
 	u32 idx = type - _TYPE_CONCRETE_MAX;
-	assert(idx < type_len);
-	return &types[idx];
+	
+	tinfo_t *typeinfo = &types[idx];
+
+	if (typeinfo->kind == TYPE_VAR && typeinfo->d_typevar_type != TYPE_INFER) {
+		return type_get(typeinfo->d_typevar_type);
+	}
+
+	return typeinfo;
+}
+
+// unwrap typevars where needed
+type_t type_underlying(type_t type) {
+	if (type < _TYPE_CONCRETE_MAX) {
+		return type;
+	}
+
+	u32 idx = type - _TYPE_CONCRETE_MAX;
+	tinfo_t *typeinfo = &types[idx];
+
+	if (typeinfo->kind == TYPE_VAR && typeinfo->d_typevar_type != TYPE_INFER) {
+		return type_underlying(typeinfo->d_typevar_type);
+	}
+
+	return type;
+}
+
+// unwrap typevars where needed
+bool type_eq(type_t a, type_t b) {
+	return type_underlying(a) == type_underlying(b);
 }
 
 static u8 *p;
@@ -148,7 +204,7 @@ static void _type_dbg_str(type_t type) {
 		return;
 	}
 
-	tinfo_t *typeinfo = type_get(type);
+	tinfo_t *typeinfo = type_get_raw(type);
 
 	switch (typeinfo->kind) {
 		case TYPE_UNKNOWN:

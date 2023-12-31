@@ -758,7 +758,7 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 			arrpush(exprs, expr);
 		}
 
-		if (cln != p.token.loc.line_nr && p.token.loc.col != bcol) {
+		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
 			break;
 		}
 	}
@@ -779,20 +779,21 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	ir_node_t *last = &arrlast(exprs);
 	u32 blk_id = p.blks_len - 1; // top blk
 	if (last->type == TYPE_UNIT && last->kind != NODE_TUPLE_UNIT) {
-		ir_node_t node = {
+		ir_node_t node = *last;
+		*last = (ir_node_t){
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = node.loc,
 			.type = TYPE_BOTTOM,
 			.d_break.blk_id = blk_id,
+			.d_break.expr = ir_memdup(node),
 		};
-		
-		arrpush(exprs, node);
 	} else if (last->kind == NODE_TUPLE_UNIT) {
 		*last = (ir_node_t){
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = last->loc,
 			.type = TYPE_BOTTOM,
 			.d_break.blk_id = blk_id,
+			.d_break.expr = NULL,
 		};
 	} else if (last->type != TYPE_BOTTOM) {
 		ir_node_t node = *last;
@@ -1915,6 +1916,10 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		case NODE_BREAK_UNIT: {
 			printf("brk :%u ()", node.d_break.blk_id);
+			if (node.d_break.expr != NULL) {
+				printf(" ");
+				_ir_dump_expr(modp, s, *node.d_break.expr);
+			}
 			break;
 		}
 		case NODE_MUT: {

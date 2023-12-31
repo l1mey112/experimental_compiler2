@@ -392,7 +392,7 @@ struct ir_node_t {
 		NODE_CALL,
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
-		NODE_BREAK_UNIT, // always !
+		NODE_BREAK_UNIT, // always !. may have expr which argument is ignored to return ()
 		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_MUT,
@@ -561,8 +561,12 @@ type_t type_new_inc_mul(type_t type);
 type_t typevar_new(void);
 void typevar_replace(type_t typevar, type_t type);
 type_t type_new(tinfo_t typeinfo, loc_t *onerror);
+tinfo_t *type_get_raw(type_t type);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);
+ti_kind type_kind_raw(type_t type);
+type_t type_underlying(type_t a);
+bool type_eq(type_t a, type_t b);
 void types_dump(void);
 const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
