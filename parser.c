@@ -1150,7 +1150,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				pnext();
 				node = (ir_node_t){
 					.kind = NODE_UNDEFINED,
-					.type = TYPE_INFER,
+					.type = TYPE_UNDEFINED,
 					.loc = token.loc,
 				};
 				break;

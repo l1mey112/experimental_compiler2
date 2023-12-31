@@ -18,7 +18,8 @@ struct cscope_t {
 };
 
 struct cinfer_vars_t {
-	type_t last_var;
+	type_t type;
+	loc_t onerror;
 	ir_node_t *def;
 };
 
@@ -43,16 +44,36 @@ void cscope_enter(void) {
 
 void cscope_leave(void) {
 	u32 idx = --c.scopes_len;
-	c.ifvars_len = c.scopes[idx].ifvars_lvl;		
+	u32 old_lvl = c.scopes[idx].ifvars_lvl;
+
+	// make sure all unknown vars are substituted
+	for (u32 i = old_lvl; i < c.ifvars_len; i++) {
+		if (type_kind(c.ifvars[i].type) == TYPE_VAR) {
+			err_with_pos(c.ifvars[i].onerror, "type annotations needed");
+		}
+	}
+	
+	c.ifvars_len = old_lvl;
 }
 
-cinfer_vars_t *cifvars_get(type_t type) {
+cinfer_vars_t *cinfer_get(type_t type) {
 	for (u32 i = 0; i < c.ifvars_len; i++) {
-		if (c.ifvars[i].last_var == type) {
+		if (c.ifvars[i].type == type) {
 			return &c.ifvars[i];
 		}
 	}
 	return NULL;
+}
+
+void cinfer_register(type_t type, loc_t onerror, ir_node_t *def) {
+	assert(type_kind(type) == TYPE_VAR);
+	assert(cinfer_get(type) == NULL);
+
+	c.ifvars[c.ifvars_len++] = (cinfer_vars_t){
+		.type = type,
+		.onerror = onerror,
+		.def = def,
+	};
 }
 
 void ctype_assert(type_t src, type_t of, loc_t onerror) {
@@ -94,9 +115,6 @@ enum _safe_cast_kind : u8 {
 
 // TYPE_INFER on fail to convert
 type_t cconvert_integers(type_t to, type_t from) {
-	to = type_underlying(to);
-	from = type_underlying(from);
-	
 	assert(ctype_is_numeric(to));
 	assert(ctype_is_numeric(from));
 	
@@ -240,10 +258,12 @@ void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 		case PATTERN_VAR: {
 			ir_var_t *var = VAR_PTR(pattern->d_var);
 			if (var->type == TYPE_INFER) {
+				if (type == TYPE_UNDEFINED) {
+					type = typevar_new();
+					cinfer_register(type, var->loc, NULL);
+				}
+				
 				var->type = type;
-			} else {
-				// var patterns don't have explicit types
-				assert_not_reached();
 			}
 			break;
 		}
@@ -446,7 +466,6 @@ void cfn(ir_node_t *node) {
 		}
 
 		assert(plen > 0); // all functions take a single argument
-		printf("plen: %u\n", plen);
 
 		// plen: 2
 		//     ? -> ? -> ?
@@ -469,8 +488,9 @@ void cfn(ir_node_t *node) {
 		}
 		// add to infer vars
 		c.ifvars[c.ifvars_len++] = (cinfer_vars_t){
-			.last_var = last,
+			.type = last,
 			.def = node,
+			.onerror = node->loc,
 		};
 		varp->type = fn_type;
 	} else {
@@ -493,12 +513,11 @@ void cfn(ir_node_t *node) {
 	}
 }
 
-type_t cfn_calculate_return(ir_node_t *node) {
+void cfn_calculate_return(ir_node_t *node) {
 	ir_var_t *varp = VAR_PTR(node->d_proc_decl.var);
 
 	type_t args_tuple = cfn_args_to_tuple(varp->type);
 	type_t return_var = cfn_type_full_return(varp->type);
-	printf("return_var: %s\n", type_dbg_str(return_var));
 	assert(type_kind_raw(return_var) == TYPE_VAR);
 	type_t return_type = TYPE_INFER;
 
@@ -711,7 +730,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (type_kind(fn->d_fn.ret) == TYPE_VAR) {
 				// ?1 -> ?2 -> ?3
 				cinfer_vars_t *ifvars;
-				assert((ifvars = cifvars_get(fn->d_fn.ret)) != NULL);
+				assert((ifvars = cinfer_get(fn->d_fn.ret)) != NULL);
 				cfn_calculate_return(ifvars->def);
 			}
 			expr->type = fn->d_fn.ret;
@@ -794,9 +813,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return expr->type;
 		}
 		case NODE_UNDEFINED: {
-			type_t tv = typevar_new(); // create new placeholder for type
-			expr->type = tv;
-			return expr->type;
+			return TYPE_UNDEFINED;
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 
@@ -817,5 +834,7 @@ void cmodule(rmod_t mod) {
 		.modp = MOD_PTR(mod)
 	};
 
+	cscope_enter();
 	ctoplevel_exprs(&c.modp->toplevel, c.modp->exprs);
+	cscope_leave();
 }

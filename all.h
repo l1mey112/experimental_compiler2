@@ -138,7 +138,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 #define TYPE_X_CONCRETE_LIST \
 	TYPE_X_CONCRETE_LITERALS_LIST \
 	X(TYPE_UNIT, "()") \
-	X(TYPE_BOTTOM, "!")
+	X(TYPE_BOTTOM, "!") \
+	X(TYPE_UNDEFINED, "undefined")
 
 #define TOK_X_KEYWORDS_LIST \
 	X(TOK_I8, "i8") \
