@@ -83,7 +83,7 @@ void ctype_assert(type_t src, type_t of, loc_t onerror) {
 	}
 }
 
-void cir_unchecked_cast(type_t to, ir_node_t *node, loc_t loc) {
+void cir_cast(type_t to, ir_node_t *node, loc_t loc) {
 	ir_node_t *dup = ir_memdup(*node);
 
 	*node = (ir_node_t) {
@@ -94,14 +94,6 @@ void cir_unchecked_cast(type_t to, ir_node_t *node, loc_t loc) {
 	};
 }
 
-bool ctype_is_integer(type_t type) {
-	ti_kind kind = type_kind(type);
-	
-	// TODO: aliases etc
-	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
-		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END);
-}
-
 bool ctype_is_numeric(type_t type) {
 	ti_kind kind = type_kind(type);
 	
@@ -110,14 +102,6 @@ bool ctype_is_numeric(type_t type) {
 		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END) ||
 		(kind == TYPE_F32 || kind == TYPE_F64);
 }
-
-// TODO: maybe never implement?
-//       cconvert_implicit handles only implicit casts
-enum _safe_cast_kind : u8 {
-	SC_N, // impossible
-	SC_I, // implicit
-	SC_E, // explicit
-};
 
 // TYPE_INFER on fail to convert
 type_t cconvert_integers(type_t to, type_t from) {
@@ -350,107 +334,111 @@ type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 	return blk->brk_type;
 }
 
-// TYPE_INFER on error
-type_t cinfix_type_resolution(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
-	ti_kind tkind_lhs = type_kind(lhs->type);
-	ti_kind tkind_rhs = type_kind(rhs->type);
-
-	bool lhs_numeric = ctype_is_numeric(lhs->type);
-	bool rhs_numeric = ctype_is_numeric(rhs->type);
-
-	// no explicit cast because pointer arithmetic relies on underlying type
-	if (tkind_lhs == TYPE_PTR && ctype_is_integer(rhs->type)) {
-		return lhs->type;
-	}
-
-	if (!lhs_numeric || !rhs_numeric) {
-		return TYPE_INFER;
-	}
-	
-	type_t ret;
-	type_t rt = cconvert_integers(lhs->type, rhs->type);
-	type_t lt = cconvert_integers(rhs->type, lhs->type);
-
-	if (lt == TYPE_INFER && rt == TYPE_INFER) {
-		return TYPE_INFER;
-	}
-
-	if (lt == TYPE_INFER) {
-		ret = rt;
-	} else if (rt == TYPE_INFER) {
-		ret = lt;
-	} else {
-		ret = lt;
-	}
-
-	// insert explicit casts
-
-	if (lhs->type != ret && lhs->type != TYPE_BOTTOM) {
-		cir_unchecked_cast(ret, lhs, lhs->loc);
-	} else if (rhs->type != ret && rhs->type != TYPE_BOTTOM) {
-		cir_unchecked_cast(ret, rhs, rhs->loc);
-	}
-
-	return ret;
+bool ckind_is_numeric(ti_kind kind) {
+	// TODO: aliases etc
+	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
+		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END) ||
+		(kind == TYPE_F32 || kind == TYPE_F64);
 }
 
-// TYPE_INFER on error
-type_t cimplcit_cast(ir_node_t *expr, type_t to) {
-	ti_kind tkind_to = type_kind(to);
-	ti_kind tkind_from = type_kind(expr->type);
+// lhs <- rhs
+// don't disregard the return, sometimes explicit casts aren't inserted (for example, lhs being !)
+type_t cunify(type_t lhs_t, ir_node_t *rhs) {
+	type_t rhs_t = type_underlying(rhs->type);
+	ti_kind lhs_kind = type_kind(lhs_t);
+	ti_kind rhs_kind = type_kind(rhs_t);
 
-	bool to_numeric = ctype_is_numeric(to);
-	bool from_numeric = ctype_is_numeric(expr->type);
-
-	if (!to_numeric || !from_numeric) {
-		return TYPE_INFER;
-	}
-
-	type_t rt = cconvert_integers(to, expr->type);
-
-	if (rt == TYPE_INFER) {
-		return TYPE_INFER;
-	}
-
-	if (rt != expr->type) {
-		cir_unchecked_cast(rt, expr, expr->loc);
-	}
-
-	return rt;
-}
-
-// ? and i32 -> ? = i32
-type_t cunify(type_t lhs, type_t rhs, loc_t onerror) {
-	ti_kind lhs_kind = type_kind(lhs);
-	ti_kind rhs_kind = type_kind(rhs);
-
-	if (lhs == rhs) {
-		return lhs;
+	if (lhs_t == rhs_t) {
+		return lhs_t;
 	}
 
 	// ? = lhs
 	if (lhs_kind == TYPE_VAR) {
-		typevar_replace(lhs, rhs);
-		return rhs;
+		typevar_replace(lhs_t, rhs_t);
+		return rhs_t;
 	}
 
 	// ? = rhs
 	if (rhs_kind == TYPE_VAR) {
-		typevar_replace(rhs, lhs);
-		return lhs;
+		typevar_replace(rhs_t, lhs_t);
+		return lhs_t;
 	}
 
 	// ! coerces to everything
 	if (lhs_kind == TYPE_BOTTOM) {
-		return rhs;
+		return rhs_t;
 	}
 
 	// ! coerces to everything
 	if (rhs_kind == TYPE_BOTTOM) {
-		return lhs;
+		return lhs_t;
+	}
+
+	if (ckind_is_numeric(lhs_kind) && ckind_is_numeric(rhs_kind)) {
+		type_t lhs_c = cconvert_integers(lhs_t, rhs_t);
+
+		if (lhs_c != TYPE_INFER) {
+			if (lhs_c != rhs_t) {
+				cir_cast(lhs_c, rhs, rhs->loc);
+			}
+
+			return lhs_c;
+		}
+	}
+
+	err_with_pos(rhs->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs_t), type_dbg_str(rhs_t));
+}
+
+type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
+	ir_node_t *lhs = node->d_infix.lhs;
+	ir_node_t *rhs = node->d_infix.rhs;
+	tok_t kind = node->d_infix.kind;
+
+	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
+
+	type_t lhs_t;
+	type_t rhs_t;
+
+	if (!is_bool_op) {
+		lhs_t = cexpr(s, upvalue, lhs);
+		rhs_t = cexpr(s, lhs_t, rhs);
+	} else {
+		lhs_t = cexpr(s, TYPE_BOOL, lhs);
+		rhs_t = cexpr(s, TYPE_BOOL, rhs);
+	}
+
+	// small sanity checks
+	assert(type_underlying(lhs_t) == lhs_t);
+	assert(type_underlying(rhs_t) == rhs_t);
+	//
+	ti_kind lhs_kind = type_kind(lhs_t);
+	ti_kind rhs_kind = type_kind(rhs_t);
+
+	if (is_bool_op) {
+		(void)cunify(TYPE_BOOL, lhs);
+		(void)cunify(TYPE_BOOL, rhs);
+		node->type = TYPE_BOOL;
+		return node->type;
 	}
 	
-	err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs), type_dbg_str(rhs));
+	// v :: *i32
+	// v + 20      becomes:      v + (20:usize * 4):*i32
+	// pointer arithmetic relies on underlying type
+	if (lhs_kind == TYPE_PTR) {
+		// disallow / and % on pointers? maybe not.
+		// subtracting two pointers should result in an isize? possibly.
+		assert_not_reached();
+	}
+
+	node->type = cunify(lhs_t, rhs);
+
+	// comparison operators
+	// ==  !=  <  >  <=  >= 
+	if (kind == TOK_EQ || kind == TOK_NEQ || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE) {
+		node->type = TYPE_BOOL;
+	}
+
+	return node->type;
 }
 
 void cfn(ir_node_t *node) {
@@ -567,24 +555,6 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			err_with_pos(expr->loc, "unknown ident `%s`", sv_from(expr->d_global_unresolved));
 		}
-		/* case NODE_VAR_DECL: {
-			ir_var_t *var = VAR_PTR(expr->d_var_decl.lhs);
-			if (var->type == TYPE_INFER) {
-				var->type = cexpr(s, upvalue, expr->d_var_decl.rhs);
-			} else {
-				type_t expr_type = cexpr(s, var->type, expr->d_var_decl.rhs);
-
-				// need to convert expression to variable type
-				if (expr_type != var->type) {
-					// implicitly convert
-					type_t ret = cimplcit_cast(expr->d_var_decl.rhs, var->type);
-					if (ret == TYPE_INFER) {
-						err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(var->type), type_dbg_str(expr_type));
-					}
-				}
-			}
-			return TYPE_UNIT;
-		} */
 		case NODE_LET_DECL: {
 			type_t expr_type = cexpr(s, TYPE_INFER, expr->d_let_decl.expr);
 			cpattern(s, &expr->d_let_decl.pattern, expr_type);
@@ -627,41 +597,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return expr->type;
 		}
 		case NODE_INFIX: {
-			ir_node_t *lhs = expr->d_infix.lhs;
-			ir_node_t *rhs = expr->d_infix.rhs;
-
-			// short circuting || and &&
-			bool both_be_bool = expr->d_infix.kind == TOK_AND || expr->d_infix.kind == TOK_OR;
-
-			if (!both_be_bool) {
-				// integer promotion rules for lhs and rhs
-				// TODO: don't check right expression without left expression
-				type_t lhs_type = cexpr(s, upvalue, lhs);
-				type_t rhs_type = cexpr(s, lhs_type, rhs);
-				// _ = x + y
-
-				if (expr->d_infix.kind == TOK_ASSIGN) {
-					expr->type = cunify(lhs_type, rhs_type, expr->d_infix.rhs->loc);
-				} else if ((expr->type = cinfix_type_resolution(lhs, rhs, expr->loc)) == TYPE_INFER) {
-					err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
-				}
-			} else {
-				type_t lhs_type = cexpr(s, TYPE_INFER, lhs);
-				type_t rhs_type = cexpr(s, TYPE_INFER, rhs);
-
-				if (lhs_type != TYPE_BOTTOM && lhs_type != TYPE_BOOL) {
-					err_with_pos(lhs->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(lhs_type));
-				}
-				if (rhs_type != TYPE_BOTTOM && rhs_type != TYPE_BOOL) {
-					err_with_pos(rhs->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(rhs_type));
-				}
-			}
-
-			if (TOK_IS_COND(expr->d_infix.kind)) {
-				expr->type = TYPE_BOOL;
-			}
-
-			return expr->type;
+			return cinfix(s, upvalue, expr);
 		}
 		case NODE_VAR: {
 			// we know this already
@@ -687,18 +623,17 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return TYPE_BOOL;
 		}
 		case NODE_CAST: {
-			type_t t = cexpr(s, expr->type, expr->d_cast);
+			(void)cexpr(s, expr->type, expr->d_cast);
 
-			if (expr->d_cast->kind == NODE_INTEGER_LIT) {
+			// ????????????
+			/* if (expr->d_cast->kind == NODE_INTEGER_LIT) {
 				if (sv_cmp_literal(expr->d_cast->d_integer_lit.lit, "0")) {
 					err_with_pos(expr->loc, "cannot cast `0` to `%s`", type_dbg_str(expr->type));
 				}
-			}
-			// ????????????
+			} */
 			
 			// TODO: check if this cast is even possible
 			// if (cconvert_implicit(expr->type, t) == TYPE_INFER)
-			(void)t;
 			return expr->type;
 		}
 		case NODE_SYM_UNRESOLVED: {
@@ -727,9 +662,15 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (type_kind(f_type) != TYPE_FN) {
 				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
 			}
+
+			// f :: ?1 -> ?2
+			// a :: i32
+			// - f a
+			// * ?1 = i32
+
 			tinfo_t *fn = type_get(f_type);
 			type_t arg_type = cexpr(s, fn->d_fn.arg, expr->d_call.arg);
-			assert(cunify(fn->d_fn.arg, arg_type, expr->loc) != TYPE_INFER); // TODO: use
+			(void)cunify(fn->d_fn.arg, expr->d_call.arg);
 
 			// infer the return value, no more functions left
 			if (type_kind(fn->d_fn.ret) == TYPE_VAR) {
@@ -805,19 +746,15 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (expr->d_if.els == NULL) {
 				upvalue = TYPE_INFER; // should be (), but does that even matter really?
 			}
+
 			type_t then_type = cexpr(s, upvalue, expr->d_if.then);
 
 			if (expr->d_if.els == NULL) {
 				// TODO: possibly ignore?
-				if (then_type != TYPE_UNIT) {
-					err_with_pos(expr->d_if.then->loc, "type mismatch: expected `()`, got `%s`", type_dbg_str(then_type));
-				}
-				expr->type = TYPE_UNIT;
+				expr->type = cunify(TYPE_UNIT, expr->d_if.then);
 			} else {
 				type_t else_type = cexpr(s, upvalue, expr->d_if.els);
-				if ((expr->type = cinfix_type_resolution(expr->d_if.then, expr->d_if.els, expr->loc)) == TYPE_INFER) {
-					err_with_pos(expr->d_if.els->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(then_type), type_dbg_str(else_type));
-				}
+				expr->type = cunify(then_type, expr->d_if.els);
 			}
 			return expr->type;
 		}
