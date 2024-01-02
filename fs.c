@@ -10,7 +10,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "stb_ds.h"
 
 // TODO: find name and extension
 #define FILE_EXTENSION "rec"

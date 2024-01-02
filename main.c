@@ -1,11 +1,9 @@
+#define STB_DS_IMPLEMENTATION
 #include "all.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <unistd.h>
-
-#define STB_DS_IMPLEMENTATION
-#include "stb_ds.h"
 
 const char* __asan_default_options(void) { return "detect_leaks=0"; }
 

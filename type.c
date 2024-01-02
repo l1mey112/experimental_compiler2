@@ -1,5 +1,4 @@
 #include "all.h"
-#include <assert.h>
 
 static tinfo_t types[1024];
 static u32 type_len;
@@ -105,6 +104,7 @@ type_t typevar_new(void) {
 }
 
 void typevar_replace(type_t typevar, type_t type) {
+	assert(type != TYPE_INFER);
 	assert(type_kind(typevar) == TYPE_VAR);
 
 	tinfo_t *typeinfo = type_get(typevar);
@@ -113,6 +113,7 @@ void typevar_replace(type_t typevar, type_t type) {
 
 // safe for comparisions
 ti_kind type_kind_raw(type_t type) {
+	assert(type != TYPE_INFER);
 	if (type < _TYPE_CONCRETE_MAX) {
 		return type;
 	}
@@ -123,6 +124,7 @@ ti_kind type_kind_raw(type_t type) {
 
 // safe for comparisions
 ti_kind type_kind(type_t type) {
+	assert(type != TYPE_INFER);
 	if (type < _TYPE_CONCRETE_MAX) {
 		return type;
 	}
@@ -139,6 +141,7 @@ ti_kind type_kind(type_t type) {
 
 // don't unwrap vars
 tinfo_t *type_get_raw(type_t type) {
+	assert(type != TYPE_INFER);
 	assert(type >= _TYPE_CONCRETE_MAX);
 	u32 idx = type - _TYPE_CONCRETE_MAX;
 	
@@ -147,6 +150,7 @@ tinfo_t *type_get_raw(type_t type) {
 }
 
 tinfo_t *type_get(type_t type) {
+	assert(type != TYPE_INFER);
 	assert(type >= _TYPE_CONCRETE_MAX);
 	u32 idx = type - _TYPE_CONCRETE_MAX;
 	
@@ -161,6 +165,7 @@ tinfo_t *type_get(type_t type) {
 
 // unwrap typevars where needed
 type_t type_underlying(type_t type) {
+	assert(type != TYPE_INFER);
 	if (type < _TYPE_CONCRETE_MAX) {
 		return type;
 	}
@@ -177,6 +182,7 @@ type_t type_underlying(type_t type) {
 
 // unwrap typevars where needed
 bool type_eq(type_t a, type_t b) {
+	assert(a != TYPE_INFER && b != TYPE_INFER);
 	return type_underlying(a) == type_underlying(b);
 }
 

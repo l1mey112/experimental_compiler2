@@ -9,6 +9,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <stdlib.h>
+#include "stb_ds.h"
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -52,6 +53,19 @@ void alloc_reset(u8 *p);
 #define MAYBE_UNUSED __attribute__((unused))
 #define NORETURN __attribute__ ((noreturn))
 #define ARRAYLEN(v) ((u32)(sizeof(v) / sizeof(*(v))))
+
+#ifdef __SANITIZE_ADDRESS__
+
+void __sanitizer_print_stack_trace(void);
+#undef assert
+#define assert(expr) do {                                             \
+	if (!(expr)) {                                                    \
+		__sanitizer_print_stack_trace();                              \
+		__assert_fail (#expr, __FILE__, __LINE__, __ASSERT_FUNCTION); \
+	}                                                                 \
+} while (0)
+
+#endif
 
 struct err_diag_t {
 	jmp_buf unwind;

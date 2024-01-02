@@ -1,7 +1,5 @@
 #include "all.h"
 
-#include "stb_ds.h"
-
 typedef struct cctx_t cctx_t;
 typedef struct cblk_t cblk_t;
 typedef struct cscope_t cscope_t;
@@ -94,6 +92,14 @@ void cir_unchecked_cast(type_t to, ir_node_t *node, loc_t loc) {
 		.type = to,
 		.d_cast = dup,
 	};
+}
+
+bool ctype_is_integer(type_t type) {
+	ti_kind kind = type_kind(type);
+	
+	// TODO: aliases etc
+	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
+		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END);
 }
 
 bool ctype_is_numeric(type_t type) {
@@ -353,7 +359,7 @@ type_t cinfix_type_resolution(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
 	bool rhs_numeric = ctype_is_numeric(rhs->type);
 
 	// no explicit cast because pointer arithmetic relies on underlying type
-	if (tkind_lhs == TYPE_PTR && rhs_numeric) {
+	if (tkind_lhs == TYPE_PTR && ctype_is_integer(rhs->type)) {
 		return lhs->type;
 	}
 
@@ -372,6 +378,8 @@ type_t cinfix_type_resolution(ir_node_t *lhs, ir_node_t *rhs, loc_t onerror) {
 	if (lt == TYPE_INFER) {
 		ret = rt;
 	} else if (rt == TYPE_INFER) {
+		ret = lt;
+	} else {
 		ret = lt;
 	}
 
@@ -632,11 +640,8 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				type_t rhs_type = cexpr(s, lhs_type, rhs);
 				// _ = x + y
 
-				if (lhs_type == rhs_type) {
-					expr->type = lhs_type;
-				} else if (expr->d_infix.kind == TOK_ASSIGN && type_kind(lhs_type) == TYPE_VAR) {
-					typevar_replace(lhs_type, rhs_type);
-					expr->type = lhs_type;
+				if (expr->d_infix.kind == TOK_ASSIGN) {
+					expr->type = cunify(lhs_type, rhs_type, expr->d_infix.rhs->loc);
 				} else if ((expr->type = cinfix_type_resolution(lhs, rhs, expr->loc)) == TYPE_INFER) {
 					err_with_pos(expr->loc, "type mismatch: cannot perform `%s` %s `%s`", type_dbg_str(lhs->type), tok_op_str(expr->d_infix.kind), type_dbg_str(rhs->type));
 				}
@@ -661,9 +666,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_VAR: {
 			// we know this already
 			ir_var_t *var = VAR_PTR(expr->d_var);
-			expr->type = var->type;
 			// only variables may contain typevars
-			return type_underlying(expr->type);
+			expr->type = type_underlying(var->type);
+			return expr->type;
 		}
 		case NODE_INTEGER_LIT: {
 			// default integer type is i32
@@ -753,6 +758,10 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			type_t brk_type;
 			switch (expr->kind) {
 				case NODE_BREAK_UNIT: {
+					if (expr->d_break.expr) {
+						(void)cexpr(s, blk->upvalue, expr->d_break.expr);
+					}
+					// ignore type from expr
 					brk_type = TYPE_UNIT;
 					break;
 				}

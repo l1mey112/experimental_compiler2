@@ -1,12 +1,5 @@
 #include "all.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <stddef.h>
-#include <assert.h>
-
-#include "stb_ds.h"
-
 typedef struct { char *key; } intern_key_t;
 static intern_key_t *interns = NULL;
 

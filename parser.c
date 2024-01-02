@@ -1,8 +1,5 @@
 #include "all.h"
 
-#include "stb_ds.h"
-#include <setjmp.h>
-
 typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
 typedef struct ptypedecl_t ptypedecl_t;
