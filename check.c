@@ -212,8 +212,6 @@ type_t cfn_args_to_tuple(type_t fn) {
 		tinfo = type_get(tinfo->d_fn.ret);
 	} while (tinfo->kind == TYPE_FN);
 
-	tuple.d_tuple.len = arrlenu(tuple.d_tuple.elems);
-
 	return type_new(tuple, NULL);
 }
 
@@ -229,20 +227,98 @@ type_t cfn_type_full_return(type_t fn) {
 	return fn;
 }
 
+bool ckind_is_numeric(ti_kind kind) {
+	// TODO: aliases etc
+	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
+		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END) ||
+		(kind == TYPE_F32 || kind == TYPE_F64);
+}
+
+// TYPE_INFER on error
+// don't call this
+type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
+	ti_kind lhs_kind = type_kind(lhs_t);
+	ti_kind rhs_kind = type_kind(rhs_t);
+
+	if (lhs_t == rhs_t) {
+		return lhs_t;
+	}
+
+	// ? = lhs
+	if (lhs_kind == TYPE_VAR) {
+		typevar_replace(lhs_t, rhs_t);
+		return rhs_t;
+	}
+
+	// ? = rhs
+	if (rhs_kind == TYPE_VAR) {
+		typevar_replace(rhs_t, lhs_t);
+		return lhs_t;
+	}
+
+	// ! coerces to everything
+	if (rhs_kind == TYPE_BOTTOM) {
+		return lhs_t;
+	}
+
+	return TYPE_INFER;
+}
+
+// lhs_t <- rhs_t
+// doesn't apply implicit casts like cunify does
+type_t cunify_type(type_t lhs_t, type_t rhs_t, loc_t onerror) {
+	type_t t;
+	if ((t = cunify_innards(lhs_t, rhs_t)) != TYPE_INFER) {
+		return t;
+	}
+
+	err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs_t), type_dbg_str(rhs_t));
+}
+
+// lhs <- rhs
+type_t cunify(type_t lhs_t, ir_node_t *rhs) {
+	type_t rhs_t = type_underlying(rhs->type);
+	ti_kind lhs_kind = type_kind(lhs_t);
+	ti_kind rhs_kind = type_kind(rhs_t);
+
+	type_t t;
+	if ((t = cunify_innards(lhs_t, rhs_t)) != TYPE_INFER) {
+		return t;
+	}
+
+	if (ckind_is_numeric(lhs_kind) && ckind_is_numeric(rhs_kind)) {
+		type_t lhs_c = cconvert_integers(lhs_t, rhs_t);
+
+		if (lhs_c != TYPE_INFER) {
+			if (lhs_c != rhs_t) {
+				cir_cast(lhs_c, rhs, rhs->loc);
+			}
+
+			return lhs_c;
+		}
+	}
+
+	err_with_pos(rhs->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs_t), type_dbg_str(rhs_t));
+}
+
 // useful for determining a functions type, but not now
-void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
+void cpattern(ir_pattern_t *pattern, type_t type) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
 			tinfo_t *tinfo = type_get(type);
 			if (tinfo->kind != TYPE_TUPLE) {
 				err_with_pos(pattern->loc, "cannot match tuple pattern against non-tuple type `%s`", type_dbg_str(type));
 			}
-			if (tinfo->d_tuple.len != arrlenu(pattern->d_tuple.elems)) {
+			if (arrlenu(tinfo->d_tuple.elems) != arrlenu(pattern->d_tuple.elems)) {
 				err_with_pos(pattern->loc, "cannot match tuple pattern against tuple type `%s` of different length", type_dbg_str(type));
 			}
 			for (size_t i = 0; i < arrlenu(pattern->d_tuple.elems); i++) {
-				cpattern(s, &pattern->d_tuple.elems[i], tinfo->d_tuple.elems[i]);
+				cpattern(&pattern->d_tuple.elems[i], tinfo->d_tuple.elems[i]);
 			}
+			break;
+		}
+		case PATTERN_TUPLE_UNIT: {
+			(void)cunify_type(TYPE_UNIT, type, pattern->loc);
 			break;
 		}
 		case PATTERN_VAR: {
@@ -252,8 +328,9 @@ void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 					type = typevar_new();
 					cinfer_register(type, var->loc, NULL);
 				}
-				
 				var->type = type;
+			} else {
+				(void)cunify_type(var->type, type, pattern->loc);
 			}
 			break;
 		}
@@ -266,6 +343,47 @@ void cpattern(ir_scope_t *s, ir_pattern_t *pattern, type_t type) {
 		}
 		case PATTERN_UNDERSCORE: {
 			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+type_t cpattern_upvalue(ir_pattern_t *pattern) {
+	switch (pattern->kind) {
+		case PATTERN_TUPLE: {
+			type_t *types = NULL;
+
+			for (size_t i = 0; i < arrlenu(pattern->d_tuple.elems); i++) {
+				type_t type = cpattern_upvalue(&pattern->d_tuple.elems[i]);
+				arrpush(types, type);
+			}
+
+			tinfo_t tuple = {
+				.kind = TYPE_TUPLE,
+				.d_tuple = {
+					.elems = types,
+				}
+			};
+
+			return type_new(tuple, NULL);
+		}
+		case PATTERN_VAR: {
+			ir_var_t *var = VAR_PTR(pattern->d_var);
+			return var->type;
+		}
+		case PATTERN_INTEGER_LIT: {
+			return TYPE_INFER; // or TYPE_I32? i don't think it matters.
+		}
+		case PATTERN_UNDERSCORE: {
+			return TYPE_INFER;
+		}
+		case PATTERN_TUPLE_UNIT: {
+			return TYPE_UNIT;
+		}
+		default: {
+			assert_not_reached();
 		}
 	}
 }
@@ -332,61 +450,6 @@ type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 	}
 
 	return blk->brk_type;
-}
-
-bool ckind_is_numeric(ti_kind kind) {
-	// TODO: aliases etc
-	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
-		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END) ||
-		(kind == TYPE_F32 || kind == TYPE_F64);
-}
-
-// lhs <- rhs
-// don't disregard the return, sometimes explicit casts aren't inserted (for example, lhs being !)
-type_t cunify(type_t lhs_t, ir_node_t *rhs) {
-	type_t rhs_t = type_underlying(rhs->type);
-	ti_kind lhs_kind = type_kind(lhs_t);
-	ti_kind rhs_kind = type_kind(rhs_t);
-
-	if (lhs_t == rhs_t) {
-		return lhs_t;
-	}
-
-	// ? = lhs
-	if (lhs_kind == TYPE_VAR) {
-		typevar_replace(lhs_t, rhs_t);
-		return rhs_t;
-	}
-
-	// ? = rhs
-	if (rhs_kind == TYPE_VAR) {
-		typevar_replace(rhs_t, lhs_t);
-		return lhs_t;
-	}
-
-	// ! coerces to everything
-	if (lhs_kind == TYPE_BOTTOM) {
-		return rhs_t;
-	}
-
-	// ! coerces to everything
-	if (rhs_kind == TYPE_BOTTOM) {
-		return lhs_t;
-	}
-
-	if (ckind_is_numeric(lhs_kind) && ckind_is_numeric(rhs_kind)) {
-		type_t lhs_c = cconvert_integers(lhs_t, rhs_t);
-
-		if (lhs_c != TYPE_INFER) {
-			if (lhs_c != rhs_t) {
-				cir_cast(lhs_c, rhs, rhs->loc);
-			}
-
-			return lhs_c;
-		}
-	}
-
-	err_with_pos(rhs->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs_t), type_dbg_str(rhs_t));
 }
 
 type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
@@ -498,7 +561,7 @@ void cfn(ir_node_t *node) {
 		type_t args_tuple = cfn_args_to_tuple(varp->type);
 		type_t return_type = cfn_type_full_return(varp->type);
 		for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
-			cpattern(&node->d_proc_decl.scopes[i], &node->d_proc_decl.patterns[i], args_tuple);
+			cpattern(&node->d_proc_decl.patterns[i], args_tuple);
 		}
 		for (u32 i = 0, c = arrlenu(node->d_proc_decl.exprs); i < c; i++) {
 			cscope_enter();
@@ -518,7 +581,7 @@ void cfn_calculate_return(ir_node_t *node) {
 	type_t return_type = TYPE_INFER;
 
 	for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
-		cpattern(&node->d_proc_decl.scopes[i], &node->d_proc_decl.patterns[i], args_tuple);
+		cpattern(&node->d_proc_decl.patterns[i], args_tuple);
 	}
 	for (u32 i = 0, c = arrlenu(node->d_proc_decl.exprs); i < c; i++) {
 		cscope_enter();
@@ -531,12 +594,6 @@ void cfn_calculate_return(ir_node_t *node) {
 		ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
 	}
 }
-
-// TODO: eventually?
-enum : u8 {
-	CEXPR_NONE,
-	CEXPR_LVALUE,
-};
 
 // upvalue only makes sense for number literals, which may have a lot of types
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
@@ -556,8 +613,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			err_with_pos(expr->loc, "unknown ident `%s`", sv_from(expr->d_global_unresolved));
 		}
 		case NODE_LET_DECL: {
-			type_t expr_type = cexpr(s, TYPE_INFER, expr->d_let_decl.expr);
-			cpattern(s, &expr->d_let_decl.pattern, expr_type);
+			type_t upvalue = cpattern_upvalue(&expr->d_let_decl.pattern);
+			type_t expr_type = cexpr(s, upvalue, expr->d_let_decl.expr);
+			cpattern(&expr->d_let_decl.pattern, expr_type);
 			return TYPE_UNIT;
 		}
 		case NODE_PROC_DECL: {
@@ -760,6 +818,36 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_UNDEFINED: {
 			return TYPE_UNDEFINED;
+		}
+		case NODE_TUPLE: {
+			// unpack upvalue if applicable
+			type_t *upvales = NULL;
+			if (upvalue != TYPE_INFER && type_kind(upvalue) == TYPE_TUPLE) {
+				upvales = type_get(upvalue)->d_tuple.elems;
+				if (arrlenu(upvales) != arrlenu(expr->d_tuple.elems)) {
+					upvales = NULL;
+				}
+			}
+
+			type_t *types = NULL;
+
+			for (u32 i = 0, c = arrlenu(expr->d_tuple.elems); i < c; i++) {
+				type_t upvalue = TYPE_INFER;
+				if (upvales) {
+					upvalue = upvales[i];
+				}
+				type_t type = cexpr(s, upvalue, &expr->d_tuple.elems[i]);
+				arrpush(types, type);
+			}
+
+			expr->type = type_new((tinfo_t){
+				.kind = TYPE_TUPLE,
+				.d_tuple = {
+					.elems = types,
+				}
+			}, NULL);
+
+			return expr->type;
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 

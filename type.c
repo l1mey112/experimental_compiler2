@@ -26,10 +26,10 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			return true;
 		}
 		case TYPE_TUPLE: {
-			if (a->d_tuple.len != b->d_tuple.len) {
+			if (arrlenu(a->d_tuple.elems) != arrlenu(b->d_tuple.elems)) {
 				return false;
 			}
-			for (u32 i = 0; i < a->d_tuple.len; i++) {
+			for (u32 i = 0, c = arrlenu(a->d_tuple.elems); i < c; i++) {
 				if (a->d_tuple.elems[i] != b->d_tuple.elems[i]) {
 					return false;
 				}
@@ -219,10 +219,10 @@ static void _type_dbg_str(type_t type) {
 			return;
 		case TYPE_TUPLE:
 			COMMIT(sprintf((char *)p, "("));
-			for (u32 i = 0; i < typeinfo->d_tuple.len; i++) {
+			for (u32 i = 0, c = arrlenu(typeinfo->d_tuple.elems); i < c; i++) {
 				type_t elem = typeinfo->d_tuple.elems[i];
 				_type_dbg_str(elem);
-				if (i + 1 < typeinfo->d_tuple.len) {
+				if (i + 1 < c) {
 					COMMIT(sprintf((char *)p, ", "));
 				}
 			}

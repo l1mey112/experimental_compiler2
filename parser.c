@@ -200,7 +200,7 @@ static ir_node_t *ir_sym_find_uses(ir_node_t *exprs, istr_t name) {
 
 // NULL meaning toplevel
 // `scope` MUST refer to `previous_exprs`
-static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t onerror, ir_node_t *previous_exprs) {
+static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, loc_t onerror, ir_node_t *previous_exprs) {
 	int idx;
 	if ((idx = pimport_ident(name)) != -1) {
 		print_err_with_pos(onerror, "variable `%s` cannot shadow import `%s`", sv_from(name), sv_from(name));
@@ -226,7 +226,7 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, type_t type, loc_t o
 	ir_var_t var = {
 		.loc = onerror,
 		.name = name,
-		.type = type,
+		.type = TYPE_INFER,
 	};
 	arrpush(ir_vars, var);
 
@@ -609,7 +609,6 @@ type_t ptype_unit(void) {
 			type = type_new((tinfo_t){
 				.kind = TYPE_TUPLE,
 				.d_tuple.elems = elems,
-				.d_tuple.len = arrlen(elems),
 			}, NULL);
 			break;
 		}
@@ -984,7 +983,7 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		name = VAR_PTR(lhs.d_var)->name;
 	}
 
-	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, lhs.loc, previous_exprs);
+	ir_rvar_t var = ir_new_var(s, name, lhs.loc, previous_exprs);
 
 	// creation of a variable is ()
 	// should keep? i don't know
@@ -1014,7 +1013,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs) {
 			istr_t name = p.token.lit;
 			loc_t name_loc = p.token.loc;
 			pnext();
-			ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc, previous_exprs);
+			ir_rvar_t var = ir_new_var(s, name, name_loc, previous_exprs);
 			return (ir_pattern_t){
 				.loc = name_loc,
 				.kind = PATTERN_VAR,
@@ -1030,6 +1029,48 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs) {
 				.kind = PATTERN_INTEGER_LIT,
 				.d_integer_lit = val,
 			};
+		}
+		case TOK_OPAR: {
+			loc_t oloc = p.token.loc;
+			pnext();
+			if (p.token.kind == TOK_CPAR) {
+				pnext();
+				return (ir_pattern_t){
+					.kind = PATTERN_TUPLE_UNIT,
+					.loc = oloc,
+				};
+			}
+			bool first = true;
+			ir_pattern_t *elems = NULL;
+			ir_pattern_t pattern;
+			while (p.token.kind != TOK_CPAR) {
+				if (first) {
+					pattern = ppattern(s, previous_exprs);
+				} else {
+					if (elems == NULL) {
+						arrpush(elems, pattern);
+					}
+					pattern = ppattern(s, previous_exprs);
+					arrpush(elems, pattern);					
+				}
+
+				if (p.token.kind == TOK_COMMA) {
+					pnext();
+				} else if (p.token.kind != TOK_CPAR) {
+					punexpected("expected `,` or `)`");
+				}
+
+				first = false;
+			}
+			pnext();
+			if (elems != NULL) {
+				pattern = (ir_pattern_t){
+					.kind = PATTERN_TUPLE,
+					.loc = oloc,
+					.d_tuple.elems = elems,
+				};
+			}
+			return pattern;
 		}
 		default: {
 			punexpected("expected pattern");
@@ -1519,7 +1560,6 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 			.loc = patterns[0].loc,
 			.d_tuple = {
 				.elems = patterns,
-				.len = arrlen(patterns),
 			},
 		};
 	}
@@ -1542,7 +1582,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	}
 
 	// create new var before evaluation so it can be referenced recursively
-	ir_rvar_t var = ir_new_var(s, name, TYPE_INFER, name_loc, previous_exprs);
+	ir_rvar_t var = ir_new_var(s, name, name_loc, previous_exprs);
 
 	ir_node_t *exprs = NULL;
 	arrpush(exprs, expr);
@@ -1790,13 +1830,17 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 		}
 		case PATTERN_TUPLE: {
 			printf("(");
-			for (u32 i = 0; i < pattern.d_tuple.len; i++) {
+			for (u32 i = 0; i < arrlen(pattern.d_tuple.elems); i++) {
 				_ir_dump_pattern(modp, s, pattern.d_tuple.elems[i]);
-				if (i != pattern.d_tuple.len - 1) {
+				if (i != arrlen(pattern.d_tuple.elems) - 1) {
 					printf(", ");
 				}
 			}
 			printf(")");
+			break;
+		}
+		case PATTERN_TUPLE_UNIT: {
+			printf("()");
 			break;
 		}
 		default: {
@@ -1973,14 +2017,19 @@ void _ir_dump_newvar_pattern(ir_pattern_t pattern) {
 			break;
 		}
 		case PATTERN_TUPLE: {
-			for (u32 i = 0; i < pattern.d_tuple.len; i++) {
+			for (u32 i = 0; i < arrlen(pattern.d_tuple.elems); i++) {
 				_ir_dump_newvar_pattern(pattern.d_tuple.elems[i]);
 			}
 			break;
 		}
+		case PATTERN_TUPLE_UNIT:
 		case PATTERN_UNDERSCORE:
-		case PATTERN_INTEGER_LIT:
+		case PATTERN_INTEGER_LIT: {
 			break;
+		}
+		default: {
+			assert_not_reached();
+		}
 	}
 }
 

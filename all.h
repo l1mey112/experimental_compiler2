@@ -371,6 +371,7 @@ struct ir_pattern_t {
 		PATTERN_VAR,
 		PATTERN_UNDERSCORE,
 		PATTERN_TUPLE,
+		PATTERN_TUPLE_UNIT,
 		PATTERN_INTEGER_LIT,
 	} kind;
 
@@ -380,7 +381,6 @@ struct ir_pattern_t {
 		ir_rvar_t d_var;
 		struct {
 			ir_pattern_t *elems;
-			u32 len;
 		} d_tuple;
 		istr_t d_integer_lit;
 	};
@@ -560,7 +560,6 @@ struct tinfo_t {
 		} d_fn;
 		struct {
 			type_t *elems;
-			u32 len;
 		} d_tuple;
 		struct {
 			type_t ref;
