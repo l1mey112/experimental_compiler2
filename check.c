@@ -261,16 +261,6 @@ type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
 		return lhs_t;
 	}
 
-	// TODO: explicit cast
-	if (lhs_kind == TYPE_SLICE && rhs_kind == TYPE_ARRAY) {
-		tinfo_t *lhs_tinfo = type_get(lhs_t);
-		tinfo_t *rhs_tinfo = type_get(rhs_t);
-		// []T <- [_]T
-		if (lhs_tinfo->d_slice.elem == rhs_tinfo->d_array.elem) {
-			return lhs_t;
-		}
-	}
-
 	return TYPE_INFER;
 }
 
@@ -862,13 +852,10 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_ARRAY_LIT: {
 			assert(expr->d_array_lit.elems != NULL); // TODO: handle []
 
-			// []u8
-			// [10]u8
-
-			// []T   -> TYPE_SLICE
-			// [10]T -> TYPE_ARRAY
-
+			// never implicit, always demote to slice when upvalue only 
+			//
 			type_t elem_upvale = TYPE_INFER;
+			bool is_slice = false;
 			if (upvalue != TYPE_INFER) {
 				switch (type_kind(upvalue)) {
 					case TYPE_ARRAY: {
@@ -877,6 +864,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 					}
 					case TYPE_SLICE: {
 						elem_upvale = type_get(upvalue)->d_slice.elem;
+						is_slice = true;
 						break;
 					}
 					default: {
@@ -897,15 +885,26 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				(void)cunify(elem_type, inner);
 			}
 
-			tinfo_t info = {
-				.kind = TYPE_ARRAY,
-				.d_array = {
-					.elem = elem_type,
-					.length = length,
-				}
-			};
+			tinfo_t info;
+			if (is_slice) {
+				info = (tinfo_t){
+					.kind = TYPE_SLICE,
+					.d_slice = {
+						.elem = elem_type,
+					}
+				};
+			} else {
+				info = (tinfo_t){
+					.kind = TYPE_ARRAY,
+					.d_array = {
+						.elem = elem_type,
+						.length = length,
+					}
+				};
+			}
 
-			return type_new(info, NULL); 
+			expr->type = type_new(info, NULL);
+			return expr->type; 
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 

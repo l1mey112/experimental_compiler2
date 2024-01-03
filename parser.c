@@ -2086,7 +2086,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 					printf(", ");
 				}
 			}
-			printf("]");
+			printf("]:%s", type_dbg_str(node.type));
 			break;
 		}
 		default: {
