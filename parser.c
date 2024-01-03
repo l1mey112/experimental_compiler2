@@ -612,43 +612,6 @@ type_t ptype_unit(void) {
 			}, NULL);
 			break;
 		}
-		case TOK_OSQ: {
-			pnext();
-			// [5]i32
-			// []i32
-
-			bool is_array = false;
-			token_t int_size;
-
-
-			if (p.token.kind == TOK_INTEGER) {
-				int_size = p.token;
-				is_array = true;
-				pnext();
-			} else if (p.token.kind != TOK_CSQ) {
-				punexpected("expected integer or `]`");
-			}
-			pexpect(TOK_CSQ);
-			
-			// []i32
-			//   ^^^
-
-			type_t elem = ptype();
-
-			if (is_array) {
-				type = type_new((tinfo_t){
-					.kind = TYPE_ARRAY,
-					.d_array.length = strtoull(sv_from(int_size.lit), NULL, 10),
-					.d_array.elem = elem,
-				}, NULL);
-			} else {
-				type = type_new((tinfo_t){
-					.kind = TYPE_SLICE,
-					.d_slice.elem = elem,
-				}, NULL);
-			}
-			break;
-		}
 		default: {
 			if ((type = ptok_to_type(p.token.kind)) != TYPE_INFER) {
 				pnext();
@@ -672,6 +635,43 @@ type_t ptype(void) {
 			pnext();
 			type = ptype_unit();
 			type = type_new_inc_mul(type);
+			break;
+		}
+		case TOK_OSQ: {
+			pnext();
+			// [5]i32
+			// []i32
+
+			bool is_array = false;
+			token_t int_size;
+
+
+			if (p.token.kind == TOK_INTEGER) {
+				int_size = p.token;
+				is_array = true;
+				pnext();
+			} else if (p.token.kind != TOK_CSQ) {
+				punexpected("expected integer or `]`");
+			}
+			pexpect(TOK_CSQ);
+			
+			// []i32
+			//   ^^^
+
+			type_t elem = ptype_unit();
+
+			if (is_array) {
+				type = type_new((tinfo_t){
+					.kind = TYPE_ARRAY,
+					.d_array.length = strtoull(sv_from(int_size.lit), NULL, 10),
+					.d_array.elem = elem,
+				}, NULL);
+			} else {
+				type = type_new((tinfo_t){
+					.kind = TYPE_SLICE,
+					.d_slice.elem = elem,
+				}, NULL);
+			}
 			break;
 		}
 		default: {
@@ -1322,6 +1322,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 						.expr = ir_memdup(expr),
 					},
 				};
+				should_continue = false; // single expr
 				break;
 			}
 			case TOK_MUT: {
