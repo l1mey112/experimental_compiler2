@@ -612,6 +612,43 @@ type_t ptype_unit(void) {
 			}, NULL);
 			break;
 		}
+		case TOK_OSQ: {
+			pnext();
+			// [5]i32
+			// []i32
+
+			bool is_array = false;
+			token_t int_size;
+
+
+			if (p.token.kind == TOK_INTEGER) {
+				int_size = p.token;
+				is_array = true;
+				pnext();
+			} else if (p.token.kind != TOK_CSQ) {
+				punexpected("expected integer or `]`");
+			}
+			pexpect(TOK_CSQ);
+			
+			// []i32
+			//   ^^^
+
+			type_t elem = ptype();
+
+			if (is_array) {
+				type = type_new((tinfo_t){
+					.kind = TYPE_ARRAY,
+					.d_array.length = strtoull(sv_from(int_size.lit), NULL, 10),
+					.d_array.elem = elem,
+				}, NULL);
+			} else {
+				type = type_new((tinfo_t){
+					.kind = TYPE_SLICE,
+					.d_slice.elem = elem,
+				}, NULL);
+			}
+			break;
+		}
 		default: {
 			if ((type = ptok_to_type(p.token.kind)) != TYPE_INFER) {
 				pnext();
@@ -1159,6 +1196,7 @@ ir_node_t pident(ir_scope_t *s) {
 enum : u8 {
 	PEXPR_ET_NONE,
 	PEXPR_ET_PAREN,
+	PEXPR_ET_ARRAY,
 	PEXPR_ET_THEN,
 	PEXPR_ET_ELSE,
 };
@@ -1347,6 +1385,39 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				}
 				break;
 			}
+			case TOK_OSQ: {
+				loc_t oloc = p.token.loc;
+				ir_node_t *nodes = NULL;
+
+				// [ 1, 2, 3, 4, 5 ]
+				// ^
+
+				pnext();
+				while (p.token.kind != TOK_CSQ) {
+					ir_node_t node = pexpr(s, 0, PEXPR_ET_ARRAY, previous_exprs);
+					arrpush(nodes, node);				
+
+					if (p.token.kind == TOK_COMMA) {
+						pnext();
+					} else if (p.token.kind != TOK_CSQ) {
+						punexpected("expected `,` or `]`");
+					}
+				}
+
+				// [ 1, 2, 3, 4, 5 ]
+				//                 ^
+				pnext();
+
+				node = (ir_node_t){
+					.kind = NODE_ARRAY_LIT,
+					.loc = oloc,
+					.type = TYPE_INFER,
+					.d_array_lit = {
+						.elems = nodes,
+					},
+				};
+				break;
+			}
 			case TOK_INTEGER: {
 				node = (ir_node_t){
 					.kind = NODE_INTEGER_LIT,
@@ -1394,6 +1465,12 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			case PEXPR_ET_NONE: break;
 			case PEXPR_ET_PAREN: {
 				if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
+					should_continue = false;
+				}
+				break;
+			}
+			case PEXPR_ET_ARRAY: {
+				if (p.token.kind == TOK_CSQ || p.token.kind == TOK_COMMA) {
 					should_continue = false;
 				}
 				break;
@@ -1999,6 +2076,17 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		}
 		case NODE_UNDEFINED: {
 			printf("undefined");
+			break;
+		}
+		case NODE_ARRAY_LIT: {
+			printf("[");
+			for (int i = 0, c = arrlen(node.d_array_lit.elems); i < c; i++) {
+				_ir_dump_expr(modp, s, node.d_array_lit.elems[i]);
+				if (i != c - 1) {
+					printf(", ");
+				}
+			}
+			printf("]");
 			break;
 		}
 		default: {

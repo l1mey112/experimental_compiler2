@@ -43,6 +43,12 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			// types with different typevar types are not equal
 			return false;
 		}
+		case TYPE_SLICE: {
+			return a->d_slice.elem == b->d_slice.elem;
+		}
+		case TYPE_ARRAY: {
+			return a->d_array.elem == b->d_array.elem && a->d_array.length == b->d_array.length;
+		}
 		default: {
 			assert_not_reached();
 		}
@@ -243,6 +249,14 @@ static void _type_dbg_str(type_t type) {
 			} else {
 				_type_dbg_str(typeinfo->d_typevar_type);
 			}
+			return;
+		case TYPE_ARRAY:
+			COMMIT(sprintf((char *)p, "[%zu]", typeinfo->d_array.length));
+			_type_dbg_str(typeinfo->d_array.elem);
+			return;
+		case TYPE_SLICE:
+			COMMIT(sprintf((char *)p, "[]"));
+			_type_dbg_str(typeinfo->d_slice.elem);
 			return;
 		default:
 			assert_not_reached();

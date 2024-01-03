@@ -261,6 +261,16 @@ type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
 		return lhs_t;
 	}
 
+	// TODO: explicit cast
+	if (lhs_kind == TYPE_SLICE && rhs_kind == TYPE_ARRAY) {
+		tinfo_t *lhs_tinfo = type_get(lhs_t);
+		tinfo_t *rhs_tinfo = type_get(rhs_t);
+		// []T <- [_]T
+		if (lhs_tinfo->d_slice.elem == rhs_tinfo->d_array.elem) {
+			return lhs_t;
+		}
+	}
+
 	return TYPE_INFER;
 }
 
@@ -848,6 +858,54 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}, NULL);
 
 			return expr->type;
+		}
+		case NODE_ARRAY_LIT: {
+			assert(expr->d_array_lit.elems != NULL); // TODO: handle []
+
+			// []u8
+			// [10]u8
+
+			// []T   -> TYPE_SLICE
+			// [10]T -> TYPE_ARRAY
+
+			type_t elem_upvale = TYPE_INFER;
+			if (upvalue != TYPE_INFER) {
+				switch (type_kind(upvalue)) {
+					case TYPE_ARRAY: {
+						elem_upvale = type_get(upvalue)->d_array.elem;
+						break;
+					}
+					case TYPE_SLICE: {
+						elem_upvale = type_get(upvalue)->d_slice.elem;
+						break;
+					}
+					default: {
+						break;
+					}
+				}
+			}
+
+			type_t elem_type = cexpr(s, elem_upvale, &expr->d_array_lit.elems[0]);
+			// []elem_type
+
+			u32 length = arrlenu(expr->d_array_lit.elems);
+
+			for (u32 i = 1; i < length; i++) {
+				ir_node_t *inner = &expr->d_array_lit.elems[i];
+				
+				type_t type = cexpr(s, elem_type, inner);
+				(void)cunify(elem_type, inner);
+			}
+
+			tinfo_t info = {
+				.kind = TYPE_ARRAY,
+				.d_array = {
+					.elem = elem_type,
+					.length = length,
+				}
+			};
+
+			return type_new(info, NULL); 
 		}
 		default: {
 			printf("unhandled expression kind: %d\n", expr->kind); 

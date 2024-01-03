@@ -299,6 +299,9 @@ enum tok_t {
     #undef X
 };
 
+// []i32   -> TYPE_SLICE
+// [10]i32 -> TYPE_ARRAY
+
 // types
 enum ti_kind {
 	#define X(name, _) name,
@@ -312,6 +315,8 @@ enum ti_kind {
 	TYPE_TUPLE,
 	TYPE_FN,
 	TYPE_PTR,
+	TYPE_SLICE,
+	TYPE_ARRAY,
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
 	// TYPE_ENUM,
@@ -407,6 +412,7 @@ struct ir_node_t {
 		NODE_CALL,
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
+		NODE_ARRAY_LIT,
 		NODE_BREAK_UNIT, // always !. may have expr which argument is ignored to return ()
 		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
@@ -486,6 +492,9 @@ struct ir_node_t {
 			ir_node_t *elems;
 		} d_tuple;
 		struct {
+			ir_node_t *elems; // if NULL the size if 0
+		} d_array_lit;
+		struct {
 			ir_node_t *expr; // in use with NODE_BREAK*
 			u8 blk_id;
 		} d_break;
@@ -557,7 +566,16 @@ struct tinfo_t {
 			// curried representation
 			type_t arg;
 			type_t ret;
+			// executing this function will cause an `io` effect
+			// bool is_effect;
 		} d_fn;
+		struct  {
+			type_t elem;
+		} d_slice;
+		struct {
+			size_t length;
+			type_t elem;
+		} d_array;
 		struct {
 			type_t *elems;
 		} d_tuple;
