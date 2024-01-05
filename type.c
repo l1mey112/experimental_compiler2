@@ -200,7 +200,7 @@ static const char *ctinfo_str[] = {
 	#undef X
 };
 
-static void _type_dbg_str(type_t type) {
+static void _type_dbg_str(type_t type, bool inner) {
 	#define COMMIT(expr) \
 		do { \
 			p += (expr); \
@@ -227,7 +227,7 @@ static void _type_dbg_str(type_t type) {
 			COMMIT(sprintf((char *)p, "("));
 			for (u32 i = 0, c = arrlenu(typeinfo->d_tuple.elems); i < c; i++) {
 				type_t elem = typeinfo->d_tuple.elems[i];
-				_type_dbg_str(elem);
+				_type_dbg_str(elem, false);
 				if (i + 1 < c) {
 					COMMIT(sprintf((char *)p, ", "));
 				}
@@ -235,28 +235,34 @@ static void _type_dbg_str(type_t type) {
 			COMMIT(sprintf((char *)p, ")"));
 			return;
 		case TYPE_FN:
-			_type_dbg_str(typeinfo->d_fn.arg);
+			if (!inner) {
+				COMMIT(sprintf((char *)p, "("));
+			}
+			_type_dbg_str(typeinfo->d_fn.arg, false);
 			COMMIT(sprintf((char *)p, " -> "));
-			_type_dbg_str(typeinfo->d_fn.ret);
+			_type_dbg_str(typeinfo->d_fn.ret, true);
+			if (!inner) {
+				COMMIT(sprintf((char *)p, ")"));
+			}
 			return;
 		case TYPE_PTR:
 			COMMIT(sprintf((char *)p, "*"));
-			_type_dbg_str(typeinfo->d_ptr.ref);
+			_type_dbg_str(typeinfo->d_ptr.ref, false);
 			return;
 		case TYPE_VAR:
 			if (typeinfo->d_typevar_type == TYPE_INFER) {
 				COMMIT(sprintf((char *)p, "?%u", type));
 			} else {
-				_type_dbg_str(typeinfo->d_typevar_type);
+				_type_dbg_str(typeinfo->d_typevar_type, false);
 			}
 			return;
 		case TYPE_ARRAY:
 			COMMIT(sprintf((char *)p, "[%zu]", typeinfo->d_array.length));
-			_type_dbg_str(typeinfo->d_array.elem);
+			_type_dbg_str(typeinfo->d_array.elem, false);
 			return;
 		case TYPE_SLICE:
 			COMMIT(sprintf((char *)p, "[]"));
-			_type_dbg_str(typeinfo->d_slice.elem);
+			_type_dbg_str(typeinfo->d_slice.elem, false);
 			return;
 		default:
 			assert_not_reached();
@@ -273,7 +279,7 @@ const char *type_dbg_str(type_t type) {
 	p = alloc_scratch(256);
 	u8 *oldp = p;
 
-	_type_dbg_str(type);
+	_type_dbg_str(type, true);
 
 	u32 nwritten = p - oldp;
 

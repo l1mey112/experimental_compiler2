@@ -1,4 +1,6 @@
-f :: i32 -> i32
-f: v = v
+ap :: (i32 -> i32) -> i32 -> i32
+ap: f x = f x
 
-f -10 - 20
+addsome: x = x + 1
+
+v = ap addsome 1

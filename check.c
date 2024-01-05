@@ -206,7 +206,7 @@ type_t cfn_args_to_tuple(type_t fn) {
 	do {
 		type_t arg = tinfo->d_fn.arg;
 		arrpush(tuple.d_tuple.elems, arg);
-		if (tinfo->d_fn.ret < _TYPE_CONCRETE_MAX) {
+		if (type_kind(tinfo->d_fn.ret) < _TYPE_CONCRETE_MAX) {
 			break;
 		}
 		tinfo = type_get(tinfo->d_fn.ret);
@@ -234,6 +234,8 @@ bool ckind_is_numeric(ti_kind kind) {
 		(kind == TYPE_F32 || kind == TYPE_F64);
 }
 
+void cfn_calculate_return(ir_node_t *node);
+
 // TYPE_INFER on error
 // don't call this
 type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
@@ -259,6 +261,46 @@ type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
 	// ! coerces to everything
 	if (rhs_kind == TYPE_BOTTOM) {
 		return lhs_t;
+	}
+
+	// functions
+	if (lhs_kind == TYPE_FN && rhs_kind == TYPE_FN) {
+		tinfo_t *lhs_tinfo = type_get(lhs_t);
+		tinfo_t *rhs_tinfo = type_get(rhs_t);
+
+		bool sub_lhs = type_kind_raw(lhs_tinfo->d_fn.ret) == TYPE_VAR;
+		bool sub_rhs = type_kind_raw(rhs_tinfo->d_fn.ret) == TYPE_VAR;
+
+		assert(!(sub_lhs && sub_rhs));
+
+		type_t arg = cunify_innards(lhs_tinfo->d_fn.arg, rhs_tinfo->d_fn.arg);
+		type_t ret = cunify_innards(lhs_tinfo->d_fn.ret, rhs_tinfo->d_fn.ret);
+
+		if (arg == TYPE_INFER || ret == TYPE_INFER) {
+			return TYPE_INFER;
+		}
+
+		if (sub_lhs) {
+			cinfer_vars_t *ifvars;
+			assert((ifvars = cinfer_get(lhs_tinfo->d_fn.ret)) != NULL);
+			cfn_calculate_return(ifvars->def);
+		}
+
+		if (sub_rhs) {
+			cinfer_vars_t *ifvars;
+			assert((ifvars = cinfer_get(rhs_tinfo->d_fn.ret)) != NULL);
+			cfn_calculate_return(ifvars->def);
+		}
+
+		tinfo_t fn = {
+			.kind = TYPE_FN,
+			.d_fn = {
+				.arg = arg,
+				.ret = ret,
+			}
+		};
+
+		return type_new(fn, NULL);
 	}
 
 	return TYPE_INFER;
@@ -577,8 +619,12 @@ void cfn_calculate_return(ir_node_t *node) {
 
 	type_t args_tuple = cfn_args_to_tuple(varp->type);
 	type_t return_var = cfn_type_full_return(varp->type);
-	assert(type_kind_raw(return_var) == TYPE_VAR);
 	type_t return_type = TYPE_INFER;
+
+	if (type_kind(return_var) != TYPE_VAR) {
+		return_type = return_var;
+		return_var = TYPE_INFER;
+	}
 
 	for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
 		cpattern(&node->d_proc_decl.patterns[i], args_tuple);
@@ -587,9 +633,10 @@ void cfn_calculate_return(ir_node_t *node) {
 		cscope_enter();
 		type_t type = cexpr(&node->d_proc_decl.scopes[i], return_type, &node->d_proc_decl.exprs[i]);
 		cscope_leave();
-		if (return_type == TYPE_INFER) {
+		if (return_var != TYPE_INFER) {
 			typevar_replace(return_var, type);
 			return_type = return_var;
+			return_var = TYPE_INFER;
 		}
 		ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
 	}
