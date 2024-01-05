@@ -30,6 +30,7 @@ struct pctx_t {
 	u8 *pend;
 	u8 *plast_nl;
 	u32 line_nr;
+	token_t prev;
 	token_t token;
 	token_t peek;
 	pimport_t is[64]; // import stack
@@ -493,8 +494,17 @@ const char *tok_dbg_str(token_t tok) {
 }
 
 void pnext(void) {
+	p.prev = p.token;
 	p.token = p.peek;
 	p.peek = plex();
+}
+
+bool pprev_next_to(void) {
+	return p.prev.loc.pos + p.prev.loc.len == p.token.loc.pos;
+}
+
+bool ppeek_next_to(void) {
+	return p.token.loc.pos + p.token.loc.len == p.peek.loc.pos;
 }
 
 #define DEFAULT_DBG_TOK(expected) (token_t){.kind = expected, .lit = ISTR_NONE}
@@ -720,7 +730,7 @@ enum : u8 {
 // mut x.thing    -> (mut x).thing
 // mut x[y].thing -> (mut x[y]).thing
 
-static u8 ptok_prec(tok_t kind) {
+u8 ptok_prec(tok_t kind) {
 	// PREC_PREFIX is determined elsewhere
 	// PREC_MUT : PREC_PREFIX
 
@@ -767,6 +777,37 @@ static u8 ptok_prec(tok_t kind) {
 		default:
 			return PREC_UNKNOWN;
 	}
+}
+
+// solve syntax ambiguities by looking at whitespace
+// 1. f [1, 2, 3] -> parsed as a function call, not index
+// 2. f -20       -> parsed as a function call with a negative integer literal, not a subtraction
+u8 ptok_prec_ambiguities(void) {
+	if (!pprev_next_to()) {
+		switch (p.token.kind) {
+			case TOK_OSQ: {
+				// f [1, 2, 3]
+				return 0;
+			}
+			default: {
+				break;
+			}
+		}
+	}
+
+	if (ppeek_next_to()) {
+		switch (p.token.kind) {
+			case TOK_SUB: {
+				// f -20
+				return 0;
+			}
+			default: {
+				break;
+			}
+		}
+	}
+	
+	return ptok_prec(p.token.kind);
 }
 
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs);
@@ -1509,7 +1550,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			return node;
 		}
 
-		if (ptok_prec(p.token.kind) == 0 && p.token.loc.line_nr == line_nr) {
+		if (ptok_prec_ambiguities() == 0 && p.token.loc.line_nr == line_nr) {
 			continue;
 		}
 		break;
@@ -1526,7 +1567,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			return node;
 		}
 
-		if (prec < ptok_prec(p.token.kind)) {
+		if (prec < ptok_prec_ambiguities()) {
 			switch (token.kind) {
 				case TOK_INC:
 				case TOK_DEC: {
