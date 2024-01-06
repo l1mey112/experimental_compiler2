@@ -1625,17 +1625,16 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	return node;
 }
 
+// desugar `a: x y = x + y` into
+//
+// ```
+// let a = \x y -> match (x, y)
+//     (x, y) -> x + y
+// ```
+//
 // function declarations:
-// - io <name>            = ...
 // - <name>:    <pattern> = ...
 bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
-	bool is_io = false;
-
-	if (p.token.kind == TOK_IO) {
-		is_io = true;
-		pnext();
-	}
-
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
@@ -1652,14 +1651,11 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	// name: <pattern> =
 	//     ^
 
-	// io name =
-	//         ^
-
 	ir_scope_t enclosing_scope = ir_new_scope(s);
 	ir_pattern_t pattern;
 	
 	// remember, `io fn` has no patterns
-	if (!is_io && p.token.kind == TOK_COLON) {
+	if (p.token.kind == TOK_COLON) {
 		pnext();
 		ir_pattern_t *patterns = NULL;
 
@@ -1689,7 +1685,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	ir_node_t expr = pexpr(&enclosing_scope, 0, 0, NULL);
 
 	ir_node_t *other_def;
-	if (!is_io && (other_def = ir_find_proc_decl(previous_exprs, name))) {
+	if ((other_def = ir_find_proc_decl(previous_exprs, name))) {
 		if (other_def->kind != NODE_PROC_DECL) {
 			err_with_pos(name_loc, "redefinition of `%s`", sv_from(name));
 		}
@@ -1707,9 +1703,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	arrpush(exprs, expr);
 
 	ir_pattern_t *patterns = NULL;
-	if (!is_io) {
-		arrpush(patterns, pattern);
-	}
+	arrpush(patterns, pattern);
 
 	ir_scope_t *scopes = NULL;
 	arrpush(scopes, enclosing_scope);
