@@ -363,6 +363,7 @@ struct ir_var_t {
 	loc_t loc;
 	type_t type;
 	bool is_pub;
+	bool is_arg;
 };
 
 struct ir_scope_t {
@@ -391,10 +392,16 @@ struct ir_pattern_t {
 	};
 };
 
+// - NODE_PROC_DECL
+// + NODE_LAMBDA
+// + NODE_MATCH
+
 struct ir_node_t {
 	enum node_kind_t {
 		NODE_PROC_DECL,
 		NODE_LET_DECL,
+		NODE_LAMBDA,
+		NODE_MATCH,
 		NODE_DO_BLOCK,
 		NODE_LOOP,
 		NODE_IF,
@@ -477,9 +484,20 @@ struct ir_node_t {
 			ir_rvar_t var;
 			ir_scope_t *scopes;
 			//
-			ir_pattern_t *patterns; // NULL meaning single expr single scope
+			ir_pattern_t *patterns;
 			ir_node_t *exprs;
 		} d_proc_decl;
+		struct {
+			ir_rvar_t *args;
+			ir_scope_t *scope;
+			ir_node_t *expr;
+		} d_lambda;
+		struct {
+			ir_node_t *expr;
+			ir_scope_t *scopes;
+			ir_pattern_t *patterns;
+			ir_node_t *exprs;
+		} d_match;
 		struct {
 			ir_pattern_t pattern;
 			ir_node_t *expr;
