@@ -362,8 +362,9 @@ struct ir_var_t {
 	istr_t name;
 	loc_t loc;
 	type_t type;
-	bool is_pub;
-	bool is_arg;
+	bool is_proc_decl; // is a desugared proc decl
+	bool is_arg; // is lambda argument
+	bool is_pub; // is exposed to other modules
 };
 
 struct ir_scope_t {
@@ -392,13 +393,8 @@ struct ir_pattern_t {
 	};
 };
 
-// - NODE_PROC_DECL
-// + NODE_LAMBDA
-// + NODE_MATCH
-
 struct ir_node_t {
 	enum node_kind_t {
-		NODE_PROC_DECL,
 		NODE_LET_DECL,
 		NODE_LAMBDA,
 		NODE_MATCH,
@@ -420,7 +416,7 @@ struct ir_node_t {
 		NODE_TUPLE_UNIT,
 		NODE_TUPLE,
 		NODE_ARRAY_LIT,
-		NODE_BREAK_UNIT, // always !. may have expr which argument is ignored to return ()
+		NODE_BREAK_UNIT, // always !. ignore expr
 		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_MUT,
@@ -480,13 +476,6 @@ struct ir_node_t {
 			bool negate;
 		} d_integer_lit;
 		bool d_bool_lit;
-		struct {
-			ir_rvar_t var;
-			ir_scope_t *scopes;
-			//
-			ir_pattern_t *patterns;
-			ir_node_t *exprs;
-		} d_proc_decl;
 		struct {
 			ir_rvar_t *args;
 			ir_scope_t *scope;

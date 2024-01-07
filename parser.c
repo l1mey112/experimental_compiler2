@@ -887,17 +887,18 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	//
 	// if the last expression is (), its most likely one of those expressions.
 
+	// okay to invalidate pointers in the parser
+
 	ir_node_t *last = &arrlast(exprs);
 	u32 blk_id = p.blks_len - 1; // top blk
 	if (last->type == TYPE_UNIT && last->kind != NODE_TUPLE_UNIT) {
-		ir_node_t node = *last;
-		*last = (ir_node_t){
+		ir_node_t new_last = (ir_node_t){
 			.kind = NODE_BREAK_UNIT, // unary shorthand
-			.loc = node.loc,
+			.loc = last->loc,
 			.type = TYPE_BOTTOM,
 			.d_break.blk_id = blk_id,
-			.d_break.expr = ir_memdup(node),
 		};
+		arrpush(exprs, new_last);
 	} else if (last->kind == NODE_TUPLE_UNIT) {
 		*last = (ir_node_t){
 			.kind = NODE_BREAK_UNIT, // unary shorthand
@@ -1665,6 +1666,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *s0, ir_scope_t *s1, u32 args_len, ir_node_t *previous_exprs) {
 	// create new var before evaluation so it can be referenced recursively
 	ir_rvar_t proc_var = ir_new_var(s0, name, name_loc, previous_exprs);
+	VAR_PTR(proc_var)->is_proc_decl = true; // is a desugared proc decl
 
 	ir_node_t tuple_expr = {
 		.kind = NODE_TUPLE,
@@ -1675,15 +1677,15 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 
 	// add: x y = x + y
 	//
-	// let add = \a0 a1 -> match
-	//     (a0, a1) -> x + y
+	// let add = \_0 _1 -> match (_0, _1)
+	//     (x, y) -> x + y
 
 	// create variable list
 	ir_rvar_t *vars = NULL;
 	for (u32 i = 0; i < args_len; i++) {
 		// convert `i` to string
 		char *varname;
-		asprintf(&varname, "__arg%u", i);
+		asprintf(&varname, "_%u", i);
 		ir_rvar_t var = ir_new_var(s1, sv_move(varname), (loc_t){}, NULL);
 		VAR_PTR(var)->is_arg = true; // is an argument
 		
@@ -1743,7 +1745,7 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 // desugar `a: x y = x + y` into
 //
 // ```
-// s0:let a = [s0<s1]:\x y -> match (x, y)
+// s0:let a = [s0<s1]:\_0 _1 -> match (_0, _1)
 //     [s0<s1<s2]:(x, y) -> x + y
 // ```
 //
@@ -2167,6 +2169,10 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf(")");
 			break;
 		}
+		case NODE_BREAK_UNIT: {
+			printf("brk :%u ()", node.d_break.blk_id);
+			break;
+		}
 		case NODE_BREAK_INFERRED:
 		case NODE_BREAK: {
 			printf("brk :%u ", node.d_break.blk_id);
@@ -2180,7 +2186,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_CAST: {
-			printf("[%s]:cast(", type_dbg_str(node.type));
+			printf("cast[%s](", type_dbg_str(node.type));
 			_ir_dump_expr(modp, s, *node.d_cast);
 			printf(")");
 			break;
@@ -2293,31 +2299,6 @@ void _ir_dump_newvar_pattern(ir_pattern_t pattern) {
 
 void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
-		case NODE_PROC_DECL: {
-			ir_var_t *var = VAR_PTR(node.d_proc_decl.var);
-			type_t fn_type = var->type;
-			istr_t name = var->name;
-			
-			TAB_PRINTF("%s.%u :: %s\n", sv_from(name), node.d_proc_decl.var, type_dbg_str(fn_type));
-			if (node.d_proc_decl.patterns) {
-				TAB_PRINTF("%s.%u _ = switch\n", sv_from(name), node.d_proc_decl.var);
-				_ir_tabcnt++;
-				for (u32 i = 0, c = arrlenu(node.d_proc_decl.exprs); i < c; i++) {
-					// _ir_dump_scope(modp, &node.d_proc_decl.scopes[i]);
-					_ir_tabs();
-					_ir_dump_pattern(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.patterns[i]);
-					printf(" -> ");
-					_ir_dump_expr(modp, &node.d_proc_decl.scopes[i], node.d_proc_decl.exprs[i]);
-					printf("\n");
-				}
-				_ir_tabcnt--;
-			} else {
-				TAB_PRINTF("%s _ = ", sv_from(name));
-				_ir_dump_expr(modp, &node.d_proc_decl.scopes[0], node.d_proc_decl.exprs[0]);
-				printf("\n");
-			}
-			break;
-		}
 		case NODE_LET_DECL: {
 			_ir_dump_newvar_pattern(node.d_let_decl.pattern);
 			TAB_PRINTF("let ");
@@ -2325,13 +2306,6 @@ void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf(" = ");
 			_ir_dump_expr(modp, s, *node.d_let_decl.expr);
 			printf("\n");
-			break;
-		}
-		case NODE_BREAK_UNIT: {
-			if (node.d_break.expr != NULL) {
-				_ir_dump_stmt(modp, s, *node.d_break.expr);
-			}
-			TAB_PRINTF("brk :%u ()", node.d_break.blk_id);
 			break;
 		}
 		default: {
