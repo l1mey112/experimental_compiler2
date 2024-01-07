@@ -1,4 +1,5 @@
-f: 0 = 0
-f: x = x
+f: t = if t
+    then undefined
+    else 0
 
 v = f false

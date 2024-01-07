@@ -234,6 +234,35 @@ bool ckind_is_numeric(ti_kind kind) {
 		(kind == TYPE_F32 || kind == TYPE_F64);
 }
 
+// signal that node is used, raise errors if needed
+// cuse() should be called when you're
+//
+// 1. mutating an expr
+// 2. need to know the type of something to perform an action
+//
+// + reading a variable isn't a use
+//
+// so then, the rhs of an assignment is not a use, brk with a value
+// isn't a use, and so on. adding values and calling are definitely uses though.
+//
+// all variables that aren't used or are simply () are removed entirely.
+// TODO: a simple flag on a var to indicate if it's used or not should be good
+//       enough to weed out undefined and etc. although you should check types.
+void cuse(ir_node_t *node) {
+	assert(node->type != TYPE_INFER);
+
+	if (node->type == TYPE_UNDEFINED) {
+		err_with_pos(node->loc, "use will cause undefined behaviour");
+	}
+
+	if (node->type == TYPE_VAR) {
+		// TODO: search for typevar in infer vars, then get `onerror` loc
+		//       will probably have to walk down the function types to find it
+		//       or just simply walk the `let decls`
+		printf("TODO: cuse() TYPE_VAR\n");
+	}
+}
+
 void clambda_body(ir_node_t *lambda);
 
 // TYPE_INFER on error
@@ -261,6 +290,23 @@ type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
 	// ! coerces to everything
 	if (rhs_kind == TYPE_BOTTOM) {
 		return lhs_t;
+	}
+
+	// ! coerces to everything
+	if (lhs_kind == TYPE_BOTTOM) {
+		return rhs_t;
+	}
+
+	// before undefined coercing, make sure to cuse() to ensure this is a safe unification
+
+	// undefined coerces to everything
+	if (rhs_kind == TYPE_UNDEFINED) {
+		return lhs_t;
+	}
+
+	// undefined coerces to everything
+	if (lhs_kind == TYPE_UNDEFINED) {
+		return rhs_t;
 	}
 
 	// functions
@@ -366,10 +412,6 @@ void cpattern(ir_pattern_t *pattern, type_t type) {
 		case PATTERN_VAR: {
 			ir_var_t *var = VAR_PTR(pattern->d_var);
 			if (var->type == TYPE_INFER) {
-				if (type == TYPE_UNDEFINED) {
-					type = typevar_new();
-					cinfer_register(type, var->loc, NULL);
-				}
 				var->type = type;
 			} else {
 				(void)cunify_type(var->type, type, pattern->loc);
@@ -504,14 +546,38 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 	type_t lhs_t;
 	type_t rhs_t;
 
-	if (!is_bool_op) {
+	// ignore `upvalue`, the only places where a var doesn't have an underlying type is when it's `undefined`
+	// undefined means it's an error to read, so upvalues don't really matter anyway.
+	//
+	// no need for a cuse() on the assignments, we're only reading here
+	// further uses of possible unknown copies will be caught by cuse()
+	if (kind == TOK_ASSIGN) {
+		// TODO: do lvalue checks here
+		// TODO: extract place, but it would probably just be a var anyway
+
+		// unification of TYPE_UNDEFINED if posed with such
+		if (lhs->kind != NODE_VAR) {
+			err_with_pos(lhs->loc, "cannot assign to non-variable, TODO: lvalue checks");
+		}
+
+		ir_var_t *var = VAR_PTR(lhs->d_var);
+		if (var->type == TYPE_UNDEFINED) {
+			var->type = rhs_t;
+		}
+
+		lhs_t = var->type;
+		rhs_t = cexpr(s, lhs_t, rhs);
+	} else if (!is_bool_op) {
 		lhs_t = cexpr(s, upvalue, lhs);
 		rhs_t = cexpr(s, lhs_t, rhs);
+		cuse(lhs);
+		cuse(rhs);
 	} else {
 		lhs_t = cexpr(s, TYPE_BOOL, lhs);
 		rhs_t = cexpr(s, TYPE_BOOL, rhs);
+		cuse(lhs);
+		cuse(rhs);
 	}
-
 	// small sanity checks
 	assert(type_underlying(lhs_t) == lhs_t);
 	assert(type_underlying(rhs_t) == rhs_t);
@@ -549,8 +615,6 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 type_t cmatch(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 	type_t expr_type = cexpr(s, TYPE_INFER, node->d_match.expr);
 
-	printf("expr_type: %s\n", type_dbg_str(expr_type));
-
 	for (u32 i = 0, c = arrlenu(node->d_match.patterns); i < c; i++) {
 		cpattern(&node->d_match.patterns[i], expr_type);
 	}
@@ -568,8 +632,6 @@ type_t cmatch(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 
 		(void)cunify(ret_type, arm);
 	}
-
-	printf("ret_type: %s\n", type_dbg_str(ret_type));
 
 	return node->type = ret_type;
 }
@@ -722,6 +784,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			switch (expr->d_prefix.kind) {
 				case TOK_SUB: {
 					type_t type = cexpr(s, upvalue, expr->d_prefix.expr);
+					cuse(expr->d_prefix.expr);
 					if (!ctype_is_numeric(type)) {
 						err_with_pos(expr->loc, "type mismatch: expected numeric type, got `%s`", type_dbg_str(type));
 					}
@@ -730,6 +793,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				}
 				case TOK_NOT: {
 					type_t type = cexpr(s, TYPE_INFER, expr->d_prefix.expr);
+					cuse(expr->d_prefix.expr);
 					if (type != TYPE_BOOL) {
 						err_with_pos(expr->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(type));
 					}
@@ -744,6 +808,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_POSTFIX: {
 			type_t type = cexpr(s, upvalue, expr->d_postfix.expr);
+			cuse(expr->d_postfix.expr);
 			if (!ctype_is_numeric(type)) {
 				err_with_pos(expr->loc, "type mismatch: expected numeric type, got `%s`", type_dbg_str(type));
 			}
@@ -778,6 +843,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_CAST: {
 			type_t type = cexpr(s, expr->type, expr->d_cast);
+			cuse(expr->d_cast);
 
 			if (type == expr->type) {
 				*expr = *expr->d_cast;
@@ -817,6 +883,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_CALL: {
 			type_t f_type = cexpr(s, TYPE_INFER, expr->d_call.f);
+			cuse(expr->d_call.f);
 			if (type_kind(f_type) != TYPE_FN) {
 				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
 			}
@@ -828,6 +895,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 
 			tinfo_t *fn = type_get(f_type);
 			type_t arg_type = cexpr(s, fn->d_fn.arg, expr->d_call.arg);
+			cuse(expr->d_call.arg);
 			(void)cunify(fn->d_fn.arg, expr->d_call.arg);
 
 			// infer the return value, no more functions left
@@ -936,7 +1004,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				if (upvales) {
 					upvalue = upvales[i];
 				}
-				type_t type = cexpr(s, upvalue, &expr->d_tuple.elems[i]);
+				ir_node_t *inner = &expr->d_tuple.elems[i];
+				type_t type = cexpr(s, upvalue, inner);
+				cuse(inner);
 				arrpush(types, type);
 			}
 
@@ -982,6 +1052,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				ir_node_t *inner = &expr->d_array_lit.elems[i];
 				
 				type_t type = cexpr(s, elem_type, inner);
+				cuse(inner);
 				(void)cunify(elem_type, inner);
 			}
 
