@@ -234,11 +234,7 @@ bool ckind_is_numeric(ti_kind kind) {
 		(kind == TYPE_F32 || kind == TYPE_F64);
 }
 
-void cfn_calculate_return(ir_node_t *node);
-
-void cfn_calculate_return(ir_node_t *node) {
-	assert_not_reached();
-}
+void clambda_body(ir_node_t *lambda);
 
 // TYPE_INFER on error
 // don't call this
@@ -287,13 +283,13 @@ type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
 		if (sub_lhs) {
 			cinfer_vars_t *ifvars;
 			assert((ifvars = cinfer_get(lhs_tinfo->d_fn.ret)) != NULL);
-			cfn_calculate_return(ifvars->def);
+			clambda_body(ifvars->def);
 		}
 
 		if (sub_rhs) {
 			cinfer_vars_t *ifvars;
 			assert((ifvars = cinfer_get(rhs_tinfo->d_fn.ret)) != NULL);
-			cfn_calculate_return(ifvars->def);
+			clambda_body(ifvars->def);
 		}
 
 		tinfo_t fn = {
@@ -383,7 +379,7 @@ void cpattern(ir_pattern_t *pattern, type_t type) {
 		case PATTERN_INTEGER_LIT: {
 			// TODO: check integer is inbounds for type
 			if (!ctype_is_numeric(type)) {
-				err_with_pos(pattern->loc, "cannot match integer literal against non-numeric type `%s`", type_dbg_str(type));
+				err_with_pos(pattern->loc, "type mismatch: expected integer, got `%s`", type_dbg_str(type));
 			}
 			break;
 		}
@@ -683,102 +679,6 @@ type_t clambda(ir_node_t *lambda, type_t upvalue, ir_var_t *opt_decl) {
 	return lambda->type;
 }
 
-/* void cfn(ir_node_t *node) {
-	// 1. check if return type is infer, IT SHOULD NOT BE
-	//    err_with_pos("complex inference and generics aren't implemented yet")
-	// 2. cpattern_to_type(...) for each pattern
-	ir_var_t *varp = VAR_PTR(node->d_proc_decl.var);
-	
-	// create the typevars
-	if (varp->type == TYPE_INFER) {
-		// make sure they have the same argument length
-		int plen = -1;
-		for (u32 i = 0, c = arrlenu(node->d_proc_decl.patterns); i < c; i++) {
-			if (plen == (u32)-1) {
-				plen = arrlenu(node->d_proc_decl.patterns[i].d_tuple.elems);
-			} else {
-				if (plen != arrlenu(node->d_proc_decl.patterns[i].d_tuple.elems)) {
-					err_with_pos(node->d_proc_decl.patterns[i].loc, "function argument length mismatch on pattern");
-				}
-			}
-		}
-
-		assert(plen > 0); // all functions take a single argument
-
-		// plen: 2
-		//     ? -> ? -> ?
-		//     ^    ^
-
-		// TODO: ?18 -> ?16 -> ?15
-		// TODO: do not create a typevar for the return value
-		type_t last = typevar_new();
-		type_t fn_type = last;
-		for (u32 i = 0; i < plen; i++) {
-			tinfo_t typeinfo = {
-				.kind = TYPE_FN,
-				.d_fn = {
-					.arg = typevar_new(),
-					.ret = fn_type,
-				}
-			};
-			
-			fn_type = type_new(typeinfo, NULL);
-		}
-		// add to infer vars
-		c.ifvars[c.ifvars_len++] = (cinfer_vars_t){
-			.type = last,
-			.def = node,
-			.onerror = node->loc,
-		};
-		varp->type = fn_type;
-	} else {
-		if (type_kind(varp->type) != TYPE_FN) {
-			err_with_pos(node->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(varp->type));
-		}
-		// you know, a function being a bunch of patterns matching
-		// on a tuple of args is a pretty good abstraction
-		type_t args_tuple = cfn_args_to_tuple(varp->type);
-		type_t return_type = cfn_type_full_return(varp->type);
-		for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
-			cpattern(&node->d_proc_decl.patterns[i], args_tuple);
-		}
-		for (u32 i = 0, c = arrlenu(node->d_proc_decl.exprs); i < c; i++) {
-			cscope_enter();
-			type_t type = cexpr(&node->d_proc_decl.scopes[i], return_type, &node->d_proc_decl.exprs[i]);
-			cscope_leave();
-			ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
-		}
-	}
-}
-
-void cfn_calculate_return(ir_node_t *node) {
-	ir_var_t *varp = VAR_PTR(node->d_proc_decl.var);
-
-	type_t args_tuple = cfn_args_to_tuple(varp->type);
-	type_t return_var = cfn_type_full_return(varp->type);
-	type_t return_type = TYPE_INFER;
-
-	if (type_kind(return_var) != TYPE_VAR) {
-		return_type = return_var;
-		return_var = TYPE_INFER;
-	}
-
-	for (u32 i = 0, c = arrlenu(node->d_proc_decl.scopes); i < c; i++) {
-		cpattern(&node->d_proc_decl.patterns[i], args_tuple);
-	}
-	for (u32 i = 0, c = arrlenu(node->d_proc_decl.exprs); i < c; i++) {
-		cscope_enter();
-		type_t type = cexpr(&node->d_proc_decl.scopes[i], return_type, &node->d_proc_decl.exprs[i]);
-		cscope_leave();
-		if (return_var != TYPE_INFER) {
-			typevar_replace(return_var, type);
-			return_type = return_var;
-			return_var = TYPE_INFER;
-		}
-		ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
-	}
-} */
-
 // upvalue only makes sense for number literals, which may have a lot of types
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 	switch (expr->kind) {
@@ -935,7 +835,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				// ?1 -> ?2 -> ?3
 				cinfer_vars_t *ifvars;
 				assert((ifvars = cinfer_get(fn->d_fn.ret)) != NULL);
-				cfn_calculate_return(ifvars->def);
+				clambda_body(ifvars->def);
 			}
 			expr->type = fn->d_fn.ret;
 			return expr->type;

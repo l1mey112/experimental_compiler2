@@ -1,3 +1,4 @@
-f :: i32 -> i32
 f: 0 = 0
 f: x = x
+
+v = f false
