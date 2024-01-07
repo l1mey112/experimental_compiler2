@@ -1782,7 +1782,7 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 // desugar `a: x y = x + y` into
 //
 // ```
-// s0:let a = [s0<s1]:\_0 _1 -> match (_0, _1)
+// [s0]:let a = [s0<s1]:\_0 _1 -> match (_0, _1)
 //     [s0<s1<s2]:(x, y) -> x + y
 // ```
 //
@@ -1791,6 +1791,9 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 //
 // pproc_create() when function doesn't exist
 // pproc() when assign a new match overload
+//
+// the desugared match asserts that the number of arguments are all the same
+// i.e x == arrlenu(lambda.args)
 bool pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
@@ -1805,7 +1808,7 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 	// name: <pattern> =
 	//     ^
 
-	u32 args_len;
+	u32 pattern_len;
 	
 	bool create_proc = false;
 	ir_node_t *other_def = ir_find_proc_decl(previous_exprs, name);
@@ -1841,13 +1844,17 @@ bool pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 				.elems = patterns,
 			},
 		};
-		args_len = arrlenu(patterns);
+		pattern_len = arrlenu(patterns);
 	}
 
 	if (other_def == NULL) {
-		pproc_create(out_expr, name, name_loc, s0, s1, args_len, previous_exprs);
+		pproc_create(out_expr, name, name_loc, s0, s1, pattern_len, previous_exprs);
 		create_proc = true;
 		other_def = out_expr->d_let_decl.expr;
+	} else {
+		if (pattern_len != arrlenu(other_def->d_lambda.args)) {
+			err_with_pos(name_loc, "function pattern matching with different number of arguments", sv_from(name));
+		}
 	}
 
 	pexpect(TOK_ASSIGN);

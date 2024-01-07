@@ -236,6 +236,10 @@ bool ckind_is_numeric(ti_kind kind) {
 
 void cfn_calculate_return(ir_node_t *node);
 
+void cfn_calculate_return(ir_node_t *node) {
+	assert_not_reached();
+}
+
 // TYPE_INFER on error
 // don't call this
 type_t cunify_innards(type_t lhs_t, type_t rhs_t) {
@@ -546,7 +550,140 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 	return node->type;
 }
 
-void cfn(ir_node_t *node) {
+type_t cmatch(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
+	type_t expr_type = cexpr(s, TYPE_INFER, node->d_match.expr);
+
+	printf("expr_type: %s\n", type_dbg_str(expr_type));
+
+	for (u32 i = 0, c = arrlenu(node->d_match.patterns); i < c; i++) {
+		cpattern(&node->d_match.patterns[i], expr_type);
+	}
+
+	cscope_enter();
+	type_t ret_type = cexpr(&node->d_match.scopes[0], upvalue, &node->d_match.exprs[0]);
+	cscope_leave();
+
+	for (u32 i = 1, c = arrlenu(node->d_match.exprs); i < c; i++) {
+		ir_node_t *arm = &node->d_match.exprs[i];
+
+		cscope_enter();
+		(void)cexpr(&node->d_match.scopes[i], upvalue, arm);
+		cscope_leave();
+
+		(void)cunify(ret_type, arm);
+	}
+
+	printf("ret_type: %s\n", type_dbg_str(ret_type));
+
+	return node->type = ret_type;
+}
+
+// 0 on error
+u32 cfn_length(type_t fn) {
+	u32 len = 0;
+	while (type_kind(fn) == TYPE_FN) {
+		len++;
+		tinfo_t *tinfo = type_get(fn);
+		fn = tinfo->d_fn.ret;
+	}
+	return len;
+}
+
+// apply types to args and return ret type
+type_t clambda_apply_type(ir_node_t *lambda) {
+	u32 plen = arrlenu(lambda->d_lambda.args);
+
+	type_t type = lambda->type;
+	for (u32 i = 0; i < plen; i++) {
+		assert(type_kind(type) == TYPE_FN);
+		type_t arg = type_get(type)->d_fn.arg;
+		VAR_PTR(lambda->d_lambda.args[i])->type = arg;
+		type = type_get(type)->d_fn.ret;
+	}
+
+	return type;
+}
+
+void clambda_body(ir_node_t *lambda) {
+	type_t ret = clambda_apply_type(lambda);
+	type_t upvalue = TYPE_INFER;
+
+	if (type_kind(ret) != TYPE_VAR) {
+		upvalue = ret;
+	}
+
+	// type_t type = cexpr(lambda->d_lambda.scope, upvalue, lambda->d_lambda.expr);
+	assert(lambda->d_lambda.expr->kind == NODE_MATCH);
+	type_t type = cmatch(lambda->d_lambda.scope, lambda->d_lambda.expr, upvalue);
+
+	if (type_kind(ret) == TYPE_VAR) {
+		typevar_replace(ret, type);
+	} else {
+		// the type of a match is determined by the type of the first expression in the arm
+		// if there is a type mismatch, we need to raise an error with the loc of that expr
+
+		// what a mouthful...
+		loc_t onerror = lambda->d_lambda.expr->d_match.exprs[0].loc;
+		(void)cunify_type(ret, type, onerror);
+	}
+}
+
+// if `opt_decl` is nonnull, it's a proc decl
+type_t clambda(ir_node_t *lambda, type_t upvalue, ir_var_t *opt_decl) {
+	loc_t onerror = lambda->loc;
+
+	if (opt_decl) {
+		onerror = opt_decl->loc;
+	}
+
+	// TODO: normal lambdas will always have a match expression just like decls
+	//       build up the most generic type from a match expression
+
+	u32 plen = arrlenu(lambda->d_lambda.args);
+
+	// plen: 2
+	//     ? -> ? -> ?
+	//     ^    ^
+
+	// `>= plen` because we can return functions
+	if (upvalue != TYPE_INFER && cfn_length(upvalue) >= plen) {
+		// we have type
+		lambda->type = upvalue;
+		clambda_body(lambda);
+	} else {
+		// no type, infer please
+
+		// TODO: do not create a typevar for the return value
+		//       simple as `last = TYPE_INFER`
+		//       however you'll have to match on the arg typevar
+		type_t last = typevar_new();
+		type_t fn_type = last;
+		for (u32 i = 0; i < plen; i++) {
+			tinfo_t typeinfo = {
+				.kind = TYPE_FN,
+				.d_fn = {
+					.arg = typevar_new(),
+					.ret = fn_type,
+				}
+			};
+
+			fn_type = type_new(typeinfo, NULL);
+		}
+
+		// add to infer vars
+		c.ifvars[c.ifvars_len++] = (cinfer_vars_t){
+			.type = last,
+			.def = lambda,
+			.onerror = onerror,
+		};
+
+		lambda->type = fn_type;
+	}
+
+	return lambda->type;
+}
+
+/* void cfn(ir_node_t *node) {
 	// 1. check if return type is infer, IT SHOULD NOT BE
 	//    err_with_pos("complex inference and generics aren't implemented yet")
 	// 2. cpattern_to_type(...) for each pattern
@@ -640,7 +777,7 @@ void cfn_calculate_return(ir_node_t *node) {
 		}
 		ctype_assert(type, return_type, node->d_proc_decl.exprs[i].loc);
 	}
-}
+} */
 
 // upvalue only makes sense for number literals, which may have a lot of types
 type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
@@ -660,15 +797,27 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			err_with_pos(expr->loc, "unknown ident `%s`", sv_from(expr->d_global_unresolved));
 		}
 		case NODE_LET_DECL: {
-			type_t upvalue = cpattern_upvalue(&expr->d_let_decl.pattern);
-			type_t expr_type = cexpr(s, upvalue, expr->d_let_decl.expr);
+			type_t expr_type;
+			
+			ir_var_t *varp;
+			if (expr->d_let_decl.pattern.kind == PATTERN_VAR && (varp = VAR_PTR(expr->d_let_decl.pattern.d_var))->is_proc_decl) {
+				assert(expr->d_let_decl.expr->kind == NODE_LAMBDA);
+				expr_type = clambda(expr->d_let_decl.expr, varp->type, varp);
+			} else {
+				type_t upvalue = cpattern_upvalue(&expr->d_let_decl.pattern);
+				expr_type = cexpr(s, upvalue, expr->d_let_decl.expr);			
+			}
+			
 			cpattern(&expr->d_let_decl.pattern, expr_type);
 			return TYPE_UNIT;
 		}
-		case NODE_PROC_DECL: {
+		case NODE_MATCH: {
+			return cmatch(s, expr, upvalue);
+		}
+		/* case NODE_PROC_DECL: {
 			cfn(expr);
 			return TYPE_UNIT;
-		}
+		} */
 		case NODE_PREFIX: {
 			switch (expr->d_prefix.kind) {
 				case TOK_SUB: {
@@ -728,7 +877,11 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			return TYPE_BOOL;
 		}
 		case NODE_CAST: {
-			(void)cexpr(s, expr->type, expr->d_cast);
+			type_t type = cexpr(s, expr->type, expr->d_cast);
+
+			if (type == expr->type) {
+				*expr = *expr->d_cast;
+			}
 
 			// ????????????
 			/* if (expr->d_cast->kind == NODE_INTEGER_LIT) {
@@ -962,7 +1115,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 
 void ctoplevel_exprs(ir_scope_t *s, ir_node_t *exprs) {
 	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
-		cexpr(s, TYPE_INFER, &exprs[i]);
+		(void)cexpr(s, TYPE_INFER, &exprs[i]);
 	}
 }
 
