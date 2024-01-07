@@ -27,7 +27,8 @@ struct ptypedecl_t {
 };
 
 struct pscope_desc_t {
-	u32 pproc_decl_idx;
+	u32 pproc_decls_idx;
+	u32 ptype_decls_idx;
 };
 
 struct pproc_decls_t {
@@ -64,12 +65,21 @@ pctx_t p;
 
 void pscope_enter(void) {
 	p.scope_desc[p.scope_desc_len++] = (pscope_desc_t){
-		.pproc_decl_idx = p.procs_len,
+		.pproc_decls_idx = p.procs_len,
+		.ptype_decls_idx = p.tds_len,
 	};
 }
 
+void papply_typedecls(void);
+
 void pscope_leave(void) {
+	papply_typedecls();
+
 	p.scope_desc_len--;
+
+	pscope_desc_t *desc = &p.scope_desc[p.scope_desc_len];
+	p.procs_len = desc->pproc_decls_idx;
+	p.tds_len = desc->ptype_decls_idx;
 }
 
 // -1 for not found
@@ -129,6 +139,33 @@ static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
 	}
 
 	return NULL;
+}
+
+void papply_typedecls(void) {
+	pscope_desc_t *desc = &p.scope_desc[p.scope_desc_len - 1];
+	
+	// for (u32 i = desc->pproc_decls_idx; i < p.procs_len; i++) {
+	for (u32 i = desc->ptype_decls_idx; i < p.tds_len; i++) {
+		ptypedecl_t *td = &p.tds[i];
+		ir_var_t *varp = ir_name_in(td->scope, td->name);
+
+		if (!varp) {
+			err_with_pos(td->loc, "cannot find variable `%s`", sv_from(td->name));
+		}
+
+		assert(varp->type == TYPE_INFER);
+		varp->type = td->type;
+	}
+}
+
+void papply_pub(void) {
+	// pubs all have types, i don't want to sort modules... global exprs is enough
+	for (u32 i = 0, c = arrlenu(p.modp->toplevel.locals); i < c; i++) {
+		ir_var_t *varp = VAR_PTR(p.modp->toplevel.locals[i]);
+		if (varp->is_pub && varp->type == TYPE_INFER) {
+			err_with_pos(varp->loc, "cannot make expression with inferred type public");
+		}
+	}
 }
 
 // find uses in expressions that are apart of the same scope
@@ -325,7 +362,7 @@ static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
 	
 	// desc[]: [..., ...] [...]
 	
-	for (u32 i = desc->pproc_decl_idx; i < p.procs_len; i++) {
+	for (u32 i = desc->pproc_decls_idx; i < p.procs_len; i++) {
 		pproc_decls_t *proc = &p.procs[i];
 		if (proc->name == name) {
 			return proc->expr;
@@ -858,21 +895,21 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 		punexpected("expected indented block");
 	} */
 
+	pscope_enter();
 	while (p.token.kind != TOK_EOF) {
 		u32 cln = p.token.loc.line_nr;
 
-		pscope_enter();
 		ir_node_t expr;
 		bool set = pstmt(&expr, s, exprs);
 		if (set) {
 			arrpush(exprs, expr);
 		}
-		pscope_leave();
 
 		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
 			break;
 		}
 	}
+	pscope_leave();
 
 	if (exprs == NULL) {
 		return NULL;
@@ -1107,7 +1144,7 @@ ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_nod
 		.kind = NODE_LET_DECL,
 		.loc = loc,
 		.type = TYPE_UNIT,
-		.d_let_decl.pattern = (ir_pattern_t){
+		.d_let_decl.pattern = {
 			.kind = PATTERN_VAR,
 			.loc = lhs.loc,
 			.d_var = var,
@@ -1728,7 +1765,7 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 		.kind = NODE_LET_DECL,
 		.loc = name_loc,
 		.type = TYPE_UNIT,
-		.d_let_decl.pattern = (ir_pattern_t){
+		.d_let_decl.pattern = {
 			.kind = PATTERN_VAR,
 			.loc = name_loc,
 			.d_var = proc_var,
@@ -1868,6 +1905,7 @@ void ptypedecl(ir_scope_t *s) {
 // `previous_exprs` is used when multiple function declarations are in the same scope
 // can be null
 // IT IS VERY IMPORTANT THAT `previous_exprs` HAS SCOPE `s`
+// remember: the `ir_node_t *expr` WILL ALWAYS BE INVALIDATED. ALWAYS.
 bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	bool set = false;
 
@@ -1986,28 +2024,6 @@ void ptop_stmt(void) {
 	}
 }
 
-void papply_typedecls(void) {
-	for (u32 i = 0; i < p.tds_len; i++) {
-		ptypedecl_t *td = &p.tds[i];
-		ir_var_t *varp = ir_name_in(td->scope, td->name);
-
-		if (!varp) {
-			err_with_pos(td->loc, "cannot find variable `%s`", sv_from(td->name));
-		}
-
-		assert(varp->type == TYPE_INFER);
-		varp->type = td->type;
-	}
-
-	// pubs all have types, i don't want to sort modules... global exprs is enough
-	for (u32 i = 0, c = arrlenu(p.modp->toplevel.locals); i < c; i++) {
-		ir_var_t *varp = VAR_PTR(p.modp->toplevel.locals[i]);
-		if (varp->is_pub && varp->type == TYPE_INFER) {
-			err_with_pos(varp->loc, "cannot make expression with inferred type public");
-		}
-	}
-}
-
 void pentry(rfile_t file) {
 	file_t *f = FILE_PTR(file);
 	
@@ -2030,7 +2046,7 @@ void pentry(rfile_t file) {
 	}
 	pscope_leave();
 
-	papply_typedecls();
+	papply_pub();
 }
 
 void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {

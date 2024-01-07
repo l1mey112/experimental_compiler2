@@ -1,7 +1,4 @@
 f: x = 0
 f: 0 = 1
 
-let f = \arg0 -> match (arg0)
-    (x) -> 0
-    (0) -> 1
-
+k: y = y
