@@ -177,7 +177,6 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_PUB, "pub") \
 	X(TOK_BREAK, "brk") \
 	X(TOK_IF, "if") \
-	X(TOK_THEN, "then") \
 	X(TOK_ELSE, "else")
 
 //	X(TOK_IN, "in")
@@ -396,7 +395,6 @@ struct ir_node_t {
 		NODE_DO_BLOCK,
 		NODE_LOOP,
 		NODE_IF,
-		// NODE_IN_BLOCK,
 		NODE_INFIX,
 		NODE_POSTFIX,
 		NODE_PREFIX,
@@ -415,6 +413,7 @@ struct ir_node_t {
 		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_UNDEFINED,
+		NODE_VOIDING, // evaluates expr, possible effects. discards return value, returning ()
 	} kind;
 	
 	type_t type;
@@ -426,6 +425,7 @@ struct ir_node_t {
 	union {
 		ir_rvar_t d_var;
 		istr_t d_global_unresolved;
+		ir_node_t *d_voiding;
 		struct {
 			rmod_t mod;
 			istr_t name;
@@ -451,13 +451,6 @@ struct ir_node_t {
 			ir_node_t *expr;
 			u8 blk_id;
 		} d_loop;
-		/* struct {
-			ir_scope_t *scope;
-			// do we even need labels? does that make sense?
-			// istr_t label; // -1 for none
-			ir_node_t *head;
-			ir_node_t *exprs;
-		} d_in_block; */
 		struct {
 			ir_node_t *lhs;
 			ir_node_t *rhs;

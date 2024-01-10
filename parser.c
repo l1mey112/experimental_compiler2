@@ -1157,7 +1157,6 @@ enum : u8 {
 	PEXPR_ET_NONE,
 	PEXPR_ET_PAREN,
 	PEXPR_ET_ARRAY,
-	PEXPR_ET_THEN,
 	PEXPR_ET_ELSE,
 };
 
@@ -1204,17 +1203,30 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			}
 			// TODO: labels
 			case TOK_IF: {
-				// if ... then ... else ...
-				// if ... then ...            (will evaluate to unit)
+				// if (...) ... else ...
 				pnext();
-				ir_node_t cond = pexpr(s, 0, PEXPR_ET_THEN, previous_exprs);
-				pexpect(TOK_THEN);
+				pexpect(TOK_OPAR);
+				ir_node_t cond = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
+				pexpect(TOK_CPAR);
+
+				// if (...) ... else ...
+				//          ^^^
+
 				ir_node_t then = pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs);
+
+				// if (...) ... else ...
+				//              ^^^^
+				//            optional
+
 				ir_node_t *els = NULL;
 				if (p.token.kind == TOK_ELSE) {
 					pnext();
 					els = ir_memdup(pexpr(s, 0, 0, previous_exprs));
 				}
+
+				// TODO: else == NULL, then undefined?
+				//       pass into NODE_VOIDING
+
 				node = (ir_node_t){
 					.kind = NODE_IF,
 					.type = TYPE_INFER,
@@ -1421,12 +1433,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			}
 			case PEXPR_ET_ARRAY: {
 				if (p.token.kind == TOK_CSQ || p.token.kind == TOK_COMMA) {
-					should_continue = false;
-				}
-				break;
-			}
-			case PEXPR_ET_THEN: {
-				if (p.token.kind == TOK_THEN) {
 					should_continue = false;
 				}
 				break;
@@ -2013,9 +2019,9 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_IF: {
-			printf("if ");
+			printf("if (");
 			_ir_dump_expr(modp, s, *node.d_if.cond);
-			printf(" then ");
+			printf(") ");
 			_ir_dump_expr(modp, s, *node.d_if.then);
 			printf(" else ");
 			if (node.d_if.els == NULL) {
