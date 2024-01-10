@@ -1,8 +1,9 @@
 #include "all.h"
+#include <assert.h>
+#include <stdbool.h>
 
 typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
-typedef struct ptypedecl_t ptypedecl_t;
 typedef struct pblk_t pblk_t;
 typedef struct pproc_decls_t pproc_decls_t;
 typedef struct pscope_desc_t pscope_desc_t;
@@ -19,21 +20,8 @@ struct pimport_t {
 	loc_t loc;
 };
 
-struct ptypedecl_t {
-	ir_scope_t *scope;
-	istr_t name;
-	type_t type;
-	loc_t loc;
-};
-
+// TODO: remove?
 struct pscope_desc_t {
-	u32 pproc_decls_idx;
-	u32 ptype_decls_idx;
-};
-
-struct pproc_decls_t {
-	istr_t name;
-	ir_node_t *expr; // points to the NODE_LAMBDA	
 };
 
 struct pctx_t {
@@ -47,12 +35,8 @@ struct pctx_t {
 	token_t peek;
 	pimport_t is[64]; // import stack
 	u32 is_len;
-	ptypedecl_t tds[256]; // type decl stack
-	u32 tds_len;
 	pblk_t blks[256]; // block stack, idx encoded in a u8
 	u32 blks_len;
-	pproc_decls_t procs[64]; // proc stack to find desugared procs
-	u32 procs_len;
 	pscope_desc_t scope_desc[128]; // scope stack to scope scope level context
 	u32 scope_desc_len;
 	rfile_t file;
@@ -65,21 +49,17 @@ pctx_t p;
 
 void pscope_enter(void) {
 	p.scope_desc[p.scope_desc_len++] = (pscope_desc_t){
-		.pproc_decls_idx = p.procs_len,
-		.ptype_decls_idx = p.tds_len,
 	};
 }
 
 void papply_typedecls(void);
 
 void pscope_leave(void) {
-	papply_typedecls();
-
 	p.scope_desc_len--;
 
+	// TODO: remove or find better use
 	pscope_desc_t *desc = &p.scope_desc[p.scope_desc_len];
-	p.procs_len = desc->pproc_decls_idx;
-	p.tds_len = desc->ptype_decls_idx;
+	(void)desc;
 }
 
 // -1 for not found
@@ -139,23 +119,6 @@ static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
 	}
 
 	return NULL;
-}
-
-void papply_typedecls(void) {
-	pscope_desc_t *desc = &p.scope_desc[p.scope_desc_len - 1];
-	
-	// for (u32 i = desc->pproc_decls_idx; i < p.procs_len; i++) {
-	for (u32 i = desc->ptype_decls_idx; i < p.tds_len; i++) {
-		ptypedecl_t *td = &p.tds[i];
-		ir_var_t *varp = ir_name_in(td->scope, td->name);
-
-		if (!varp) {
-			err_with_pos(td->loc, "cannot find variable `%s`", sv_from(td->name));
-		}
-
-		assert(varp->type == TYPE_INFER);
-		varp->type = td->type;
-	}
 }
 
 void papply_pub(void) {
@@ -354,25 +317,8 @@ static ir_scope_t ir_new_scope(ir_scope_t *parent) {
 	return scope;
 }
 
-// find declaration in exprs, or NULL
-// locates the NODE_LAMBDA
-static ir_node_t *ir_find_proc_decl(ir_node_t *exprs, istr_t name) {
-	// top scope
-	pscope_desc_t *desc = &p.scope_desc[p.scope_desc_len - 1];
-	
-	// desc[]: [..., ...] [...]
-	
-	for (u32 i = desc->pproc_decls_idx; i < p.procs_len; i++) {
-		pproc_decls_t *proc = &p.procs[i];
-		if (proc->name == name) {
-			return proc->expr;
-		}
-	}
-	return NULL;
-}
-
 static bool is_id_begin(u8 ch) {
-    return isalpha(ch) || ch == '_' || ch == '\'';
+    return isalpha(ch) || ch == '_';
 }
 
 static bool is_id(u8 ch) {
@@ -402,7 +348,6 @@ static token_t plex(void) {
 
 		if (is_id_begin(ch)) {
 			u8 *start = p.pc;
-			bool is_tack = *start == '\'';
 			bool is_underscore = *start == '_';
 
 			token_t token = {
@@ -416,10 +361,6 @@ static token_t plex(void) {
 				p.pc++;
 			} while (p.pc < p.pend && is_id(*p.pc));
 
-			if (is_tack && p.pc - start == 1) {
-				err_with_pos(token.loc, "invalid identifier `\'`");
-			}
-
 			if (is_underscore && p.pc - start == 1) {
 				token.loc.len = 1;
 				token.kind = TOK_UNDERSCORE;
@@ -432,21 +373,13 @@ static token_t plex(void) {
 
 			// TODO: this should be optimised to a static hash table
 
-			if (is_tack) {
-				goto lit;
-			}
-
 			if (0);
 			#define X(val, lit) \
 				else if (ptr_cmp_literal(start, len, lit)) token.kind = val;
 			TOK_X_KEYWORDS_LIST
 			#undef X
 			else {
-			lit:;
-				istr_t istr = sv_intern(start, len);
-				if (is_tack) {
-					istr = ISTR_SET_T(istr);
-				}				
+				istr_t istr = sv_intern(start, len);		
 				token.kind = TOK_IDENT;
 				token.lit = istr;
 			}
@@ -795,7 +728,6 @@ enum : u8 {
 	PREC_PREFIX,  // - * ! &
 	PREC_POSTFIX, // ++ --
 	PREC_DOT,     // .x
-	PREC_MUT,     // mut x
 	PREC_INDEX,   // x[]
 };
 
@@ -804,7 +736,6 @@ enum : u8 {
 
 u8 ptok_prec(tok_t kind) {
 	// PREC_PREFIX is determined elsewhere
-	// PREC_MUT : PREC_PREFIX
 
 	switch (kind) {
 		case TOK_OSQ:
@@ -959,58 +890,6 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	return exprs;
 }
 
-// in v -> expr
-// in v do
-//     ...
-//     ...
-/* ir_node_t pin(ir_scope_t *s) {
-	loc_t oloc = p.token.loc;
-	pnext();
-
-	pexpr()
-
-	ir_node_t *exprs = NULL;
-	ir_scope_t scope = ir_new_scope(s);
-
-	if (p.token.loc.line_nr == oloc.line_nr) {
-		// single expression
-		ir_node_t expr = pexpr(&scope, 0, 0, NULL);
-		arrpush(exprs, expr);
-
-		ir_node_t node = {
-			.kind = NODE_IN_BLOCK,
-			.loc = oloc,
-			.type = TYPE_INFER,
-			.d_in_block.scope = scope,
-			.d_in_block.head = ir_memdup(head),
-			.d_in_block.exprs = exprs,
-		};
-
-		return node;
-	} else {
-		// indented block
-		exprs = pindented_do_block(&scope, oloc);
-		if (exprs == NULL) {
-			return (ir_node_t){
-				.kind = NODE_TUPLE_UNIT,
-				.loc = oloc,
-				.type = TYPE_UNIT,
-			};
-		}
-
-		ir_node_t node = {
-			.kind = NODE_IN_BLOCK,
-			.loc = oloc,
-			.type = TYPE_INFER,
-			.d_in_block.scope = scope,
-			.d_in_block.head = ir_memdup(head),
-			.d_in_block.exprs = exprs,
-		};
-
-		return node;
-	}
-} */
-
 // if `opt_label != ISTR_NONE` then `onerror` points to label otherwise the `brk` expr
 u8 pblk_locate(istr_t opt_label, loc_t onerror) {
 	for (u32 i = p.blks_len; i-- > 0;) {
@@ -1103,58 +982,9 @@ ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t op
 	return loop;
 }
 
-// do complex logic here, so that when typechecking all local variables are resolved
-// and it only has to deal with global symbols by resolving them
-ir_node_t passign(ir_scope_t *s, ir_node_t lhs, ir_node_t rhs, loc_t loc, ir_node_t *previous_exprs) {
-	// is this a variable declaration?
-
-	// x = 40  (variable declaration)
-
-	bool is_decl = false;
-
-	if (lhs.kind == NODE_VAR) {
-		is_decl = !VAR_PTR_IS_T(VAR_PTR(lhs.d_var));
-	} else if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
-		is_decl = !ISTR_IS_T(lhs.d_global_unresolved);
-	}
-
-	if (!is_decl) {
-		return (ir_node_t){
-			.kind = NODE_INFIX,
-			.loc = loc,
-			.type = TYPE_INFER,
-			.d_infix.lhs = ir_memdup(lhs),
-			.d_infix.rhs = ir_memdup(rhs),
-			.d_infix.kind = TOK_ASSIGN,
-		};
-	}
-
-	istr_t name;
-	if (lhs.kind == NODE_GLOBAL_UNRESOLVED) {
-		name = lhs.d_global_unresolved;
-	} else {
-		name = VAR_PTR(lhs.d_var)->name;
-	}
-
-	ir_rvar_t var = ir_new_var(s, name, lhs.loc, previous_exprs);
-
-	// creation of a variable is ()
-	// should keep? i don't know
-	return (ir_node_t){
-		.kind = NODE_LET_DECL,
-		.loc = loc,
-		.type = TYPE_UNIT,
-		.d_let_decl.pattern = {
-			.kind = PATTERN_VAR,
-			.loc = lhs.loc,
-			.d_var = var,
-		},
-		.d_let_decl.expr = ir_memdup(rhs),
-	};
-}
-
 // will create vars it cannot find
-ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs) {
+ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay) {
+	bool is_mut = false;
 	switch (p.token.kind) {
 		case TOK_UNDERSCORE: {
 			pnext();
@@ -1162,11 +992,25 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs) {
 				.kind = PATTERN_UNDERSCORE,
 			};
 		}
+		case TOK_TACK: {
+			is_mut = true;
+			pnext();
+		}
 		case TOK_IDENT: {
 			istr_t name = p.token.lit;
 			loc_t name_loc = p.token.loc;
 			pnext();
 			ir_rvar_t var = ir_new_var(s, name, name_loc, previous_exprs);
+			VAR_PTR(var)->is_mut = is_mut;
+
+			if (allow_inlay && p.token.kind == TOK_COLON) {
+				pnext();
+				// parse type inlay
+
+				type_t type = ptype();
+				VAR_PTR(var)->type = type;
+			}
+
 			return (ir_pattern_t){
 				.loc = name_loc,
 				.kind = PATTERN_VAR,
@@ -1198,12 +1042,12 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs) {
 			ir_pattern_t pattern;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
-					pattern = ppattern(s, previous_exprs);
+					pattern = ppattern(s, previous_exprs, allow_inlay);
 				} else {
 					if (elems == NULL) {
 						arrpush(elems, pattern);
 					}
-					pattern = ppattern(s, previous_exprs);
+					pattern = ppattern(s, previous_exprs, allow_inlay);
 					arrpush(elems, pattern);					
 				}
 
@@ -1240,7 +1084,7 @@ ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
 	// let x = 20
 	//     ^
 
-	ir_pattern_t pattern = ppattern(s, previous_exprs);
+	ir_pattern_t pattern = ppattern(s, previous_exprs, true);
 	pexpect(TOK_ASSIGN);
 	// let x = 20
 	//         ^^
@@ -1439,17 +1283,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					},
 				};
 				should_continue = false; // single expr
-				break;
-			}
-			case TOK_MUT: {
-				pnext();
-				ir_node_t lhs = pexpr(s, PREC_MUT, cfg, previous_exprs);
-				node = (ir_node_t){
-					.kind = NODE_MUT,
-					.loc = token.loc,
-					.type = TYPE_INFER,
-					.d_mut = ir_memdup(lhs),
-				};
 				break;
 			}
 			case TOK_IDENT: {
@@ -1674,12 +1507,6 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 
 						ir_node_t rhs = pexpr(s, ptok_prec(token.kind), cfg, previous_exprs);
 
-						// assign
-						if (token.kind == TOK_ASSIGN) {
-							node = passign(s, node, rhs, token.loc, previous_exprs);
-							continue;
-						}
-
 						// random infix
 						node = (ir_node_t){
 							.kind = NODE_INFIX,
@@ -1700,10 +1527,100 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	return node;
 }
 
-void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *s0, ir_scope_t *s1, u32 args_len, ir_node_t *previous_exprs) {
+// desugar `a: x y = x + y` into
+//
+// ```
+// [s0]:let a = [s0<s1]:\_0 _1 -> match (_0, _1)
+//     [s0<s1<s2]:(x, y) -> x + y
+// ```
+//
+// function declarations:
+// - <name>:    <pattern> = ...
+//
+// pproc_create() when function doesn't exist
+// pproc() when assign a new match overload
+//
+// the desugared match asserts that the number of arguments are all the same
+// i.e x == arrlenu(lambda.args)
+void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
 	// create new var before evaluation so it can be referenced recursively
 	ir_rvar_t proc_var = ir_new_var(s0, name, name_loc, previous_exprs);
 	VAR_PTR(proc_var)->is_proc_decl = true; // is a desugared proc decl
+
+	pnext();
+	pexpect(TOK_COLON);
+
+	// add: ...
+	//      ^^^
+
+	type_t proc_type = ptype();
+	VAR_PTR(proc_var)->type = proc_type;
+
+	// add: ...
+	// add: ...
+	// ^^^
+
+	u32 pattern_len = 0; // zero is invalid, all functions have arity >= 1
+
+	ir_pattern_t *match_patterns = NULL;
+	ir_node_t *match_exprs = NULL;
+	ir_scope_t *match_scopes = NULL;
+	ir_scope_t *s1 = ir_new_scope_ptr(s0);
+
+	while (p.token.kind == TOK_IDENT && p.token.lit == name) {
+		pnext();
+		pexpect(TOK_COLON);
+
+		// add: ...
+		//      ^^^ (patterns)
+
+		ir_pattern_t *patterns = NULL;
+
+		while (true) {
+			ir_pattern_t pattern = ppattern(s1, NULL, false);
+			arrpush(patterns, pattern);
+			if (p.token.kind == TOK_ASSIGN) {
+				break;
+			}
+		}
+
+		u32 plen = arrlenu(patterns);
+		if (pattern_len == 0) {
+			pattern_len = plen;
+		} else if (plen != pattern_len) {
+			err_with_pos(name_loc, "function pattern matching with different number of arguments", sv_from(name));
+		}
+
+		ir_pattern_t pattern = {
+			.kind = PATTERN_TUPLE,
+			.loc = patterns[0].loc,
+			.d_tuple = {
+				.elems = patterns,
+			},
+		};
+
+		// add: ... =
+		//          ^
+
+		pnext();
+
+		// scope of the match arm
+		ir_scope_t s2 = ir_new_scope(s1);
+
+		pscope_enter();
+		ir_node_t expr = pexpr(&s2, 0, 0, NULL);
+		pscope_leave();
+
+		arrpush(match_exprs, expr);
+		arrpush(match_scopes, s2);
+		arrpush(match_patterns, pattern);
+	}
+
+	// captured the types and all patterns, create function here
 
 	ir_node_t tuple_expr = {
 		.kind = NODE_TUPLE,
@@ -1719,7 +1636,7 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 
 	// create variable list
 	ir_rvar_t *vars = NULL;
-	for (u32 i = 0; i < args_len; i++) {
+	for (u32 i = 0; i < pattern_len; i++) {
 		// convert `i` to string
 		char *varname;
 		asprintf(&varname, "_%u", i);
@@ -1744,9 +1661,9 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 		.type = TYPE_INFER,
 		.d_match = {
 			.expr = ir_memdup(tuple_expr),
-			.patterns = NULL,
-			.exprs = NULL,
-			.scopes = NULL,
+			.patterns = match_patterns,
+			.exprs = match_exprs,
+			.scopes = match_scopes,
 		},
 	};
 
@@ -1772,141 +1689,6 @@ void pproc_create(ir_node_t *out_expr, istr_t name, loc_t name_loc, ir_scope_t *
 		},
 		.d_let_decl.expr = lamdba,
 	};
-
-	p.procs[p.procs_len++] = (pproc_decls_t){
-		.name = name,
-		.expr = lamdba,
-	};
-}
-
-// desugar `a: x y = x + y` into
-//
-// ```
-// [s0]:let a = [s0<s1]:\_0 _1 -> match (_0, _1)
-//     [s0<s1<s2]:(x, y) -> x + y
-// ```
-//
-// function declarations:
-// - <name>:    <pattern> = ...
-//
-// pproc_create() when function doesn't exist
-// pproc() when assign a new match overload
-//
-// the desugared match asserts that the number of arguments are all the same
-// i.e x == arrlenu(lambda.args)
-bool pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
-	pcheck(TOK_IDENT);
-	istr_t name = p.token.lit;
-	loc_t name_loc = p.token.loc;
-
-	if (ISTR_IS_T(name)) {
-		punexpected("expected a non mutable name");
-	}
-
-	pnext();
-
-	// name: <pattern> =
-	//     ^
-
-	u32 pattern_len;
-	
-	bool create_proc = false;
-	ir_node_t *other_def = ir_find_proc_decl(previous_exprs, name);
-	ir_scope_t *s1 = NULL;
-
-	if (other_def == NULL) {
-		s1 = ir_new_scope_ptr(s0);
-	} else {
-		s1 = other_def->d_lambda.scope;
-	}
-	
-	ir_pattern_t pattern;
-	
-	{
-		pexpect(TOK_COLON); // will always be true anyway
-		ir_pattern_t *patterns = NULL;
-
-		// <pattern> <pattern> <pattern> = ...
-		// ^^^^^^^^^
-
-		while (true) {
-			ir_pattern_t pattern = ppattern(s1, NULL);
-			arrpush(patterns, pattern);
-			if (p.token.kind == TOK_ASSIGN) {
-				break;
-			}
-		}
-
-		pattern = (ir_pattern_t){
-			.kind = PATTERN_TUPLE,
-			.loc = patterns[0].loc,
-			.d_tuple = {
-				.elems = patterns,
-			},
-		};
-		pattern_len = arrlenu(patterns);
-	}
-
-	if (other_def == NULL) {
-		pproc_create(out_expr, name, name_loc, s0, s1, pattern_len, previous_exprs);
-		create_proc = true;
-		other_def = out_expr->d_let_decl.expr;
-	} else {
-		if (pattern_len != arrlenu(other_def->d_lambda.args)) {
-			err_with_pos(name_loc, "function pattern matching with different number of arguments", sv_from(name));
-		}
-	}
-
-	pexpect(TOK_ASSIGN);
-
-	// scope of the match arm
-	ir_scope_t s2 = ir_new_scope(s1);
-
-	// `previous_exprs` doesn't share scope with `enclosing_scope`
-	pscope_enter();
-	ir_node_t expr = pexpr(&s2, 0, 0, NULL);
-	pscope_leave();
-
-	assert(other_def->kind == NODE_LAMBDA);
-	arrpush(other_def->d_lambda.expr->d_match.exprs, expr);
-	arrpush(other_def->d_lambda.expr->d_match.patterns, pattern);
-	arrpush(other_def->d_lambda.expr->d_match.scopes, s2);	
-
-	return create_proc; // if we assigned to `out_expr`
-}
-
-void ptypedecl(ir_scope_t *s) {
-	istr_t name = p.token.lit;
-	loc_t name_loc = p.token.loc;
-
-	pnext();
-	pnext();
-	
-	// v :: i32 -> i32 -> ...
-	//      ^^^
-
-	if (ir_name_exists_in(s, name)) {
-		err_with_pos(name_loc, "type decl must come before definition `%s`", sv_from(name));
-	}
-
-	// check if duplicate exists already in stack
-	for (u32 i = 0; i < p.tds_len; i++) {
-		if (p.tds[i].name == name && p.tds[i].scope == s) {
-			print_err_with_pos(name_loc, "duplicate type decl `%s`", sv_from(name));
-			print_hint_with_pos(p.tds[i].loc, "previous type decl was here");
-			err_unwind();
-		}
-	}
-
-	type_t type = ptype();
-
-	// add to stack
-	p.tds[p.tds_len++] = (ptypedecl_t){
-		.name = name,
-		.scope = s,
-		.loc = name_loc,
-		.type = type,
-	};
 }
 
 // `previous_exprs` is used when multiple function declarations are in the same scope
@@ -1919,11 +1701,8 @@ bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
 	switch (p.token.kind) {
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_COLON) {
-				set = pproc(expr, s, previous_exprs);
-				break;
-			}
-			if (p.peek.kind == TOK_DOUBLE_COLON) {
-				ptypedecl(s);
+				pproc(expr, s, previous_exprs);
+				set = true;
 				break;
 			}
 			// fall through
@@ -2056,6 +1835,23 @@ void pentry(rfile_t file) {
 	papply_pub();
 }
 
+void _ir_dump_var_w_type(ir_rvar_t var) {
+	ir_var_t *varp = VAR_PTR(var);
+	
+	const char *mut_str = varp->is_mut ? "'" : "";
+	printf("%s%s.%u", mut_str, sv_from(VAR_PTR(var)->name), var);
+
+	// remove noise on debug output before checker
+	if (varp->type != TYPE_INFER) {
+		printf(": %s", type_dbg_str(varp->type));
+	}
+}
+
+void _ir_dump_var(ir_rvar_t var) {
+	const char *mut_str = VAR_PTR(var)->is_mut ? "'" : "";
+	printf("%s%s.%u", mut_str, sv_from(VAR_PTR(var)->name), var);
+}
+
 void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 	switch (pattern.kind) {
 		case PATTERN_UNDERSCORE: {
@@ -2067,8 +1863,7 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 			break;
 		}
 		case PATTERN_VAR: {
-			ir_var_t *varp = VAR_PTR(pattern.d_var);
-			printf("%s.%u", sv_from(varp->name), pattern.d_var);
+			_ir_dump_var_w_type(pattern.d_var);
 			break;
 		}
 		case PATTERN_TUPLE: {
@@ -2118,7 +1913,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 
 	switch (node.kind) {
 		case NODE_VAR: {
-			printf("%s.%u", sv_from(VAR_PTR(node.d_var)->name), node.d_var);
+			_ir_dump_var(node.d_var);
 			break;
 		}
 		case NODE_GLOBAL_UNRESOLVED: {
@@ -2202,12 +1997,6 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			_ir_dump_expr(modp, s, *node.d_break.expr);
 			break;
 		}
-		case NODE_MUT: {
-			printf("(mut ");
-			_ir_dump_expr(modp, s, *node.d_mut);
-			printf(")");
-			break;
-		}
 		case NODE_CAST: {
 			printf("cast[%s](", type_dbg_str(node.type));
 			_ir_dump_expr(modp, s, *node.d_cast);
@@ -2256,8 +2045,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 
 			printf("\\");
 			for (u32 i = 0, c = arrlenu(node.d_lambda.args); i < c; i++) {
-				ir_var_t *varp = VAR_PTR(node.d_lambda.args[i]);
-				printf("%s.%u", sv_from(varp->name), node.d_lambda.args[i]);
+				_ir_dump_var_w_type(node.d_lambda.args[i]);
 				if (i != c - 1) {
 					printf(" ");
 				}
@@ -2296,34 +2084,9 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	}
 }
 
-void _ir_dump_newvar_pattern(ir_pattern_t pattern) {
-	switch (pattern.kind) {
-		case PATTERN_VAR: {
-			ir_var_t *var = VAR_PTR(pattern.d_var);
-			TAB_PRINTF("%s.%u :: %s\n", sv_from(var->name), pattern.d_var, type_dbg_str(var->type));
-			break;
-		}
-		case PATTERN_TUPLE: {
-			for (u32 i = 0; i < arrlen(pattern.d_tuple.elems); i++) {
-				_ir_dump_newvar_pattern(pattern.d_tuple.elems[i]);
-			}
-			break;
-		}
-		case PATTERN_TUPLE_UNIT:
-		case PATTERN_UNDERSCORE:
-		case PATTERN_INTEGER_LIT: {
-			break;
-		}
-		default: {
-			assert_not_reached();
-		}
-	}
-}
-
 void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	switch (node.kind) {
 		case NODE_LET_DECL: {
-			_ir_dump_newvar_pattern(node.d_let_decl.pattern);
 			TAB_PRINTF("let ");
 			_ir_dump_pattern(modp, s, node.d_let_decl.pattern);
 			printf(" = ");

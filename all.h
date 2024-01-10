@@ -37,9 +37,6 @@ typedef u32 istr_t;
 #define RMOD_NONE ((rmod_t)-1)
 
 #define ISTR_NONE ((istr_t)-1)
-#define ISTR_T_MASK 0x7fffffff
-#define ISTR_SET_T(v) ((v) | 0x80000000)
-#define ISTR_IS_T(v) ((v) & 0x80000000)
 
 istr_t sv_intern(u8 *sv, size_t len);
 istr_t sv_move(const char *p);
@@ -176,7 +173,6 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_DO, "do") \
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
-	X(TOK_MUT, "mut") \
 	X(TOK_IMPORT, "import") \
 	X(TOK_PUB, "pub") \
 	X(TOK_BREAK, "brk") \
@@ -188,6 +184,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 
 // in specific order due to how operators are parsed
 #define TOK_X_OPERATOR_LIST \
+	X(TOK_TACK, "'") \
 	X(TOK_UNDERSCORE, "_") \
 	X(TOK_ARROW, "->") \
 	X(TOK_INC, "++") \
@@ -224,7 +221,6 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_CPAR, ")") \
 	X(TOK_OSQ, "[") \
 	X(TOK_CSQ, "]") \
-	X(TOK_DOUBLE_COLON, "::") \
 	X(TOK_COLON, ":") \
 	X(TOK_QUESTION, "?")
 
@@ -355,13 +351,12 @@ typedef struct ir_pattern_t ir_pattern_t;
 extern ir_var_t *ir_vars;
 
 #define VAR_PTR(id) (&ir_vars[id])
-#define VAR_IS_T(v) ISTR_IS_T((v).name)
-#define VAR_PTR_IS_T(v) ISTR_IS_T((v)->name)
 
 struct ir_var_t {
 	istr_t name;
 	loc_t loc;
 	type_t type;
+	bool is_mut;
 	bool is_proc_decl; // is a desugared proc decl
 	bool is_arg; // is lambda argument
 	bool is_pub; // is exposed to other modules
@@ -419,7 +414,6 @@ struct ir_node_t {
 		NODE_BREAK_UNIT, // always !. ignore expr
 		NODE_BREAK_INFERRED, // always !. inserted by the parser
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
-		NODE_MUT,
 		NODE_UNDEFINED,
 	} kind;
 	
@@ -432,7 +426,6 @@ struct ir_node_t {
 	union {
 		ir_rvar_t d_var;
 		istr_t d_global_unresolved;
-		ir_node_t *d_mut;
 		struct {
 			rmod_t mod;
 			istr_t name;

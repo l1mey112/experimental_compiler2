@@ -42,13 +42,13 @@ istr_t sv_intern(u8 *sv, size_t len) {
 
 const char *sv_from(istr_t str) {
 	assert(str != ISTR_NONE);
-	str &= ISTR_T_MASK;
 	assert(str >= 0 && str < shlen(interns));
 	return interns[str].key;
 }
 
-#define sv_sprintf(u8ptr_name, len_name, fmt, ...) \
+/* #define sv_sprintf(u8ptr_name, len_name, fmt, ...) \
 	size_t len_name; \
 	u8 *u8ptr_name = alloc_scratch(0); \
 	len_name = sprintf((char *)u8ptr_name, fmt, __VA_ARGS__); \
 	(void)alloc_scratch(len_name)
+ */

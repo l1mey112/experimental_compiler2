@@ -413,6 +413,9 @@ type_t cunify(type_t lhs_t, ir_node_t *rhs) {
 void cpattern(ir_pattern_t *pattern, type_t type) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
+			if (type_kind(type) != TYPE_TUPLE) {
+				err_with_pos(pattern->loc, "type mismatch: expected tuple, got `%s`", type_dbg_str(type));
+			}
 			tinfo_t *tinfo = type_get(type);
 			if (tinfo->kind != TYPE_TUPLE) {
 				err_with_pos(pattern->loc, "cannot match tuple pattern against non-tuple type `%s`", type_dbg_str(type));
