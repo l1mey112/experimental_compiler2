@@ -1,1 +1,3 @@
-let v = if (true) 1
+k: bool -> i32
+k: false = 0
+k: true  = 1

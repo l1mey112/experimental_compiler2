@@ -1204,15 +1204,16 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			// TODO: labels
 			case TOK_IF: {
 				// if (...) ... else ...
+				loc_t oloc = token.loc;
 				pnext();
 				pexpect(TOK_OPAR);
-				ir_node_t cond = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
+				ir_node_t *cond = ir_memdup(pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs));
 				pexpect(TOK_CPAR);
 
 				// if (...) ... else ...
 				//          ^^^
 
-				ir_node_t then = pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs);
+				ir_node_t *then = ir_memdup(pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs));
 
 				// if (...) ... else ...
 				//              ^^^^
@@ -1222,18 +1223,34 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				if (p.token.kind == TOK_ELSE) {
 					pnext();
 					els = ir_memdup(pexpr(s, 0, 0, previous_exprs));
-				}
+				} else {
+					// desugar to () return using voiding
 
-				// TODO: else == NULL, then undefined?
-				//       pass into NODE_VOIDING
+					// if (t) effect
+					//
+					// if (t) void effect
+					// else   ()
+
+					els = ir_memdup((ir_node_t){
+						.kind = NODE_TUPLE_UNIT,
+						.loc = oloc,
+						.type = TYPE_UNIT,
+					});
+					then = ir_memdup((ir_node_t){
+						.kind = NODE_VOIDING,
+						.loc = then->loc,
+						.type = TYPE_UNIT,
+						.d_voiding = then,
+					});
+				}
 
 				node = (ir_node_t){
 					.kind = NODE_IF,
 					.type = TYPE_INFER,
 					.loc = token.loc,
 					.d_if = {
-						.cond = ir_memdup(cond),
-						.then = ir_memdup(then),
+						.cond = cond,
+						.then = then,
 						.els = els,
 					},
 				};
@@ -2070,7 +2087,6 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			_ir_dump_expr(modp, s, *node.d_match.expr);
 			printf("\n");
 
-
 			_ir_tabcnt++;
 			for (u32 i = 0, c = arrlenu(node.d_match.exprs); i < c; i++) {
 				_ir_tabs();
@@ -2080,6 +2096,11 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 				printf("\n");
 			}
 			_ir_tabcnt--;
+			break;
+		}
+		case NODE_VOIDING: {
+			printf("void ");
+			_ir_dump_expr(modp, s, *node.d_voiding);
 			break;
 		}
 		default: {

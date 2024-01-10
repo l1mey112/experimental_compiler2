@@ -494,7 +494,7 @@ struct ir_node_t {
 		struct {
 			ir_node_t *cond;
 			ir_node_t *then;
-			ir_node_t *els; // possible NULL, then whole evaluates to ()
+			ir_node_t *els;
 		} d_if;
 	};
 };
