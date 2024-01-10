@@ -235,7 +235,7 @@ bool ckind_is_numeric(ti_kind kind) {
 }
 
 // signal that node is used, raise errors if needed
-// cuse() should be called when you're
+// cuse() should be called when you're:
 //
 // 1. mutating an expr
 // 2. need to know the type of something to perform an action
@@ -245,21 +245,41 @@ bool ckind_is_numeric(ti_kind kind) {
 // so then, the rhs of an assignment is not a use, brk with a value
 // isn't a use, and so on. adding values and calling are definitely uses though.
 //
-// all variables that aren't used or are simply () are removed entirely.
+// what isn't a use but we need to know it's type, is casting.
+// call cuse_type() on that. it will then allow:
+//
+// let 'v = undefined:i32
+//
+// all variables that aren't used or are simply () are removed entirely,
+// which allows this to work.
+//
 // TODO: a simple flag on a var to indicate if it's used or not should be good
 //       enough to weed out undefined and etc. although you should check types.
+//
+void cuse_type(ir_node_t *node);
+//
 void cuse(ir_node_t *node) {
 	assert(node->type != TYPE_INFER);
 
-	if (node->type == TYPE_UNDEFINED) {
+	if (type_kind(node->type) == TYPE_UNDEFINED) {
 		err_with_pos(node->loc, "use will cause undefined behaviour");
 	}
 
-	if (node->type == TYPE_VAR) {
+	cuse_type(node);
+}
+
+void cuse_type(ir_node_t *node) {
+	if (type_kind(node->type) == TYPE_VAR) {
 		// TODO: search for typevar in infer vars, then get `onerror` loc
 		//       will probably have to walk down the function types to find it
 		//       or just simply walk the `let decls`
 		printf("TODO: cuse() TYPE_VAR\n");
+	}
+}
+
+void cmutable_lvalue(ir_node_t *node) {
+	if (node->kind != NODE_VAR) {
+		err_with_pos(node->loc, "cannot assign to non-variable");
 	}
 }
 
@@ -843,7 +863,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_CAST: {
 			type_t type = cexpr(s, expr->type, expr->d_cast);
-			cuse(expr->d_cast);
+			cuse_type(expr->d_cast);
 
 			if (type == expr->type) {
 				*expr = *expr->d_cast;

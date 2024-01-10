@@ -1,5 +1,22 @@
-f: t = if t
-    then undefined
-    else 0
+; let 'y = undefined:i32
+; 
+; k :: i32 -> i32 -> [2]i32
+; k: a b = [a, 'y]
 
-v = f false
+; editing this return value would cause a global effect
+; arena_slice :: mut_io [128]const i32
+
+type rmod_t = i32
+
+'arena :: [128]rmod_t
+'arena_part :: i32
+
+arena_slice: () = 'arena[0..'arena_part]
+
+is_root :: rmod_t -> bool
+
+is_root: mod = do
+    arena_slice
+        .for \x -> if x == mod then ret true
+    
+    ret false
