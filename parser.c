@@ -632,7 +632,7 @@ type_t ptype_unit(void) {
 				pnext();
 				break;
 			}
-			punexpected("expected type in definition");
+			punexpected("expected type");
 		}
 	}
 
@@ -647,9 +647,17 @@ type_t ptype(void) {
 
 	switch (p.token.kind) {
 		case TOK_MUL: {
+			// *T
 			pnext();
+
+			bool is_mut = false;
+			// *'T
+			if (p.token.kind == TOK_TACK) {
+				pnext();
+				is_mut = true;
+			}
 			type = ptype_unit();
-			type = type_new_inc_mul(type);
+			type = type_new_inc_mul(type, is_mut);
 			break;
 		}
 		case TOK_OSQ: {
@@ -1181,6 +1189,19 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 		token_t token = p.token;
 
 		switch (token.kind) {
+			case TOK_VOID: {
+				pnext();
+				// void expr
+				//      ^^^^
+				ir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+				node = (ir_node_t){
+					.kind = NODE_VOIDING,
+					.loc = token.loc,
+					.type = TYPE_UNIT,
+					.d_voiding = ir_memdup(expr),
+				};
+				break;
+			}
 			case TOK_UNDEFINED: {
 				pnext();
 				node = (ir_node_t){
@@ -1524,6 +1545,19 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 								.loc = token.loc,
 								.type = type,
 								.d_cast = ir_memdup(node),
+							};
+							continue;
+						}
+
+						// postfix deref: v.*
+						if (token.kind == TOK_DOT && p.token.kind == TOK_MUL) {
+							loc_t oloc = token.loc;
+							pnext();
+							node = (ir_node_t){
+								.kind = NODE_DEREF,
+								.loc = oloc,
+								.type = TYPE_INFER,
+								.d_deref = ir_memdup(node),
 							};
 							continue;
 						}
@@ -2101,6 +2135,12 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_VOIDING: {
 			printf("void ");
 			_ir_dump_expr(modp, s, *node.d_voiding);
+			break;
+		}
+		case NODE_DEREF: {
+			printf("(");
+			_ir_dump_expr(modp, s, *node.d_deref);
+			printf(").*");
 			break;
 		}
 		default: {

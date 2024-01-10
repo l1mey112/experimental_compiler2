@@ -91,10 +91,11 @@ type_t type_new(tinfo_t typeinfo, loc_t *onerror) {
 	return type;
 }
 
-type_t type_new_inc_mul(type_t type) {
+type_t type_new_inc_mul(type_t type, bool is_mut) {
 	tinfo_t typeinfo = {
 		.kind = TYPE_PTR,
 		.d_ptr.ref = type,
+		.d_ptr.is_mut = is_mut,
 	};
 
 	return type_new(typeinfo, NULL);
@@ -219,11 +220,12 @@ static void _type_dbg_str(type_t type, bool inner) {
 	tinfo_t *typeinfo = type_get_raw(type);
 
 	switch (typeinfo->kind) {
-		case TYPE_UNKNOWN:
+		case TYPE_UNKNOWN: {
 			assert(typeinfo->is_named);
 			COMMIT(sprintf((char *)p, "%s", fs_module_symbol_str(typeinfo->d_named.mod, typeinfo->d_named.name)));
-			return;
-		case TYPE_TUPLE:
+			break;
+		}
+		case TYPE_TUPLE: {
 			COMMIT(sprintf((char *)p, "("));
 			for (u32 i = 0, c = arrlenu(typeinfo->d_tuple.elems); i < c; i++) {
 				type_t elem = typeinfo->d_tuple.elems[i];
@@ -233,8 +235,9 @@ static void _type_dbg_str(type_t type, bool inner) {
 				}
 			}
 			COMMIT(sprintf((char *)p, ")"));
-			return;
-		case TYPE_FN:
+			break;
+		}
+		case TYPE_FN: {
 			if (!inner) {
 				COMMIT(sprintf((char *)p, "("));
 			}
@@ -244,26 +247,34 @@ static void _type_dbg_str(type_t type, bool inner) {
 			if (!inner) {
 				COMMIT(sprintf((char *)p, ")"));
 			}
-			return;
-		case TYPE_PTR:
+			break;
+		}
+		case TYPE_PTR: {
 			COMMIT(sprintf((char *)p, "*"));
+			if (typeinfo->d_ptr.is_mut) {
+				COMMIT(sprintf((char *)p, "'"));
+			}
 			_type_dbg_str(typeinfo->d_ptr.ref, false);
-			return;
-		case TYPE_VAR:
+			break;
+		}
+		case TYPE_VAR: {
 			if (typeinfo->d_typevar_type == TYPE_INFER) {
 				COMMIT(sprintf((char *)p, "?%u", type));
 			} else {
 				_type_dbg_str(typeinfo->d_typevar_type, false);
 			}
-			return;
-		case TYPE_ARRAY:
+			break;
+		}
+		case TYPE_ARRAY: {
 			COMMIT(sprintf((char *)p, "[%zu]", typeinfo->d_array.length));
 			_type_dbg_str(typeinfo->d_array.elem, false);
-			return;
-		case TYPE_SLICE:
+			break;
+		}
+		case TYPE_SLICE: {
 			COMMIT(sprintf((char *)p, "[]"));
 			_type_dbg_str(typeinfo->d_slice.elem, false);
-			return;
+			break;
+		}
 		default:
 			assert_not_reached();
 	}

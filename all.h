@@ -176,6 +176,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_IMPORT, "import") \
 	X(TOK_PUB, "pub") \
 	X(TOK_BREAK, "brk") \
+	X(TOK_VOID, "void") \
 	X(TOK_IF, "if") \
 	X(TOK_ELSE, "else")
 
@@ -398,6 +399,7 @@ struct ir_node_t {
 		NODE_INFIX,
 		NODE_POSTFIX,
 		NODE_PREFIX,
+		NODE_DEREF,
 		NODE_INTEGER_LIT,
 		NODE_BOOL_LIT,
 		NODE_VAR,
@@ -426,6 +428,7 @@ struct ir_node_t {
 		ir_rvar_t d_var;
 		istr_t d_global_unresolved;
 		ir_node_t *d_voiding;
+		ir_node_t *d_deref;
 		struct {
 			rmod_t mod;
 			istr_t name;
@@ -574,6 +577,7 @@ struct tinfo_t {
 		} d_tuple;
 		struct {
 			type_t ref;
+			bool is_mut;
 		} d_ptr;
 		struct {
 			rmod_t mod;
@@ -582,7 +586,7 @@ struct tinfo_t {
 	};
 };
 
-type_t type_new_inc_mul(type_t type);
+type_t type_new_inc_mul(type_t type, bool is_mut);
 type_t typevar_new(void);
 void typevar_replace(type_t typevar, type_t type);
 type_t type_new(tinfo_t typeinfo, loc_t *onerror);
