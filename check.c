@@ -18,7 +18,7 @@ struct cscope_t {
 struct cinfer_vars_t {
 	type_t type;
 	loc_t onerror;
-	ir_node_t *def;
+	hir_node_t *def;
 };
 
 struct cctx_t {
@@ -63,7 +63,7 @@ cinfer_vars_t *cinfer_get(type_t type) {
 	return NULL;
 }
 
-void cinfer_register(type_t type, loc_t onerror, ir_node_t *def) {
+void cinfer_register(type_t type, loc_t onerror, hir_node_t *def) {
 	assert(type_kind(type) == TYPE_VAR);
 	assert(cinfer_get(type) == NULL);
 
@@ -85,10 +85,10 @@ void ctype_assert(type_t src, type_t of, loc_t onerror) {
 	}
 }
 
-void cir_cast(type_t to, ir_node_t *node, loc_t loc) {
-	ir_node_t *dup = ir_memdup(*node);
+void chir_cast(type_t to, hir_node_t *node, loc_t loc) {
+	hir_node_t *dup = hir_memdup(*node);
 
-	*node = (ir_node_t) {
+	*node = (hir_node_t) {
 		.kind = NODE_CAST,
 		.loc = loc,
 		.type = to,
@@ -270,9 +270,9 @@ bool ctype_is_signed(type_t type) {
 // TODO: a simple flag on a var to indicate if it's used or not should be good
 //       enough to weed out undefined and etc. although you should check types.
 //
-void cuse_type(ir_node_t *node);
+void cuse_type(hir_node_t *node);
 //
-void cuse(ir_node_t *node) {
+void cuse(hir_node_t *node) {
 	assert(node->type != TYPE_INFER);
 
 	if (type_kind(node->type) == TYPE_UNDEFINED) {
@@ -282,7 +282,7 @@ void cuse(ir_node_t *node) {
 	cuse_type(node);
 }
 
-void cuse_type(ir_node_t *node) {
+void cuse_type(hir_node_t *node) {
 	if (type_kind(node->type) == TYPE_VAR) {
 		// TODO: search for typevar in infer vars, then get `onerror` loc
 		//       will probably have to walk down the function types to find it
@@ -292,10 +292,10 @@ void cuse_type(ir_node_t *node) {
 }
 
 // typecheck the nodes all the way down, then call this on it
-void clvalue(ir_node_t *node, bool is_mutable) {
+void clvalue(hir_node_t *node, bool is_mutable) {
 	switch (node->kind) {
 		case NODE_VAR: {
-			ir_var_t *var = VAR_PTR(node->d_var);
+			hir_var_t *var = VAR_PTR(node->d_var);
 			if (is_mutable && !var->is_mut) {
 				// TODO: then pull a rust and suggest on a loc_t?
 				print_err_with_pos(node->loc, "cannot mutate immutable variable");
@@ -320,7 +320,7 @@ void clvalue(ir_node_t *node, bool is_mutable) {
 	}
 }
 
-void clambda_body(ir_node_t *lambda);
+void clambda_body(hir_node_t *lambda);
 
 // TYPE_INFER on error
 // don't call this
@@ -421,7 +421,7 @@ type_t cunify_type(type_t lhs_t, type_t rhs_t, loc_t onerror) {
 }
 
 // lhs <- rhs
-type_t cunify(type_t lhs_t, ir_node_t *rhs) {
+type_t cunify(type_t lhs_t, hir_node_t *rhs) {
 	type_t rhs_t = type_underlying(rhs->type);
 	ti_kind lhs_kind = type_kind(lhs_t);
 	ti_kind rhs_kind = type_kind(rhs_t);
@@ -436,7 +436,7 @@ type_t cunify(type_t lhs_t, ir_node_t *rhs) {
 
 		if (lhs_c != TYPE_INFER) {
 			if (lhs_c != rhs_t) {
-				cir_cast(lhs_c, rhs, rhs->loc);
+				chir_cast(lhs_c, rhs, rhs->loc);
 			}
 
 			return lhs_c;
@@ -447,7 +447,7 @@ type_t cunify(type_t lhs_t, ir_node_t *rhs) {
 }
 
 // useful for determining a functions type, but not now
-void cpattern(ir_pattern_t *pattern, type_t type) {
+void cpattern(hir_pattern_t *pattern, type_t type) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
 			if (type_kind(type) != TYPE_TUPLE) {
@@ -468,7 +468,7 @@ void cpattern(ir_pattern_t *pattern, type_t type) {
 			break;
 		}
 		case PATTERN_VAR: {
-			ir_var_t *var = VAR_PTR(pattern->d_var);
+			hir_var_t *var = VAR_PTR(pattern->d_var);
 			if (var->type == TYPE_INFER) {
 				var->type = type;
 			} else {
@@ -539,7 +539,7 @@ void cpattern(ir_pattern_t *pattern, type_t type) {
 	}
 }
 
-type_t cpattern_upvalue(ir_pattern_t *pattern) {
+type_t cpattern_upvalue(hir_pattern_t *pattern) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
 			type_t *types = NULL;
@@ -559,7 +559,7 @@ type_t cpattern_upvalue(ir_pattern_t *pattern) {
 			return type_new(tuple, NULL);
 		}
 		case PATTERN_VAR: {
-			ir_var_t *var = VAR_PTR(pattern->d_var);
+			hir_var_t *var = VAR_PTR(pattern->d_var);
 			return var->type;
 		}
 		case PATTERN_INTEGER_LIT: {
@@ -577,9 +577,9 @@ type_t cpattern_upvalue(ir_pattern_t *pattern) {
 	}
 }
 
-type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr);
+type_t cexpr(hir_scope_t *s, type_t upvalue, hir_node_t *expr);
 
-type_t cdo(ir_node_t *node, type_t upvalue) {
+type_t cdo(hir_node_t *node, type_t upvalue) {
 	u8 blk_id = c.blocks_len++;
 	cblk_t *blk = &c.blocks[blk_id];
 
@@ -589,7 +589,7 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 	};
 	cscope_enter();
 	for (u32 i = 0, c = arrlenu(node->d_do_block.exprs); i < c; i++) {
-		ir_node_t *expr = &node->d_do_block.exprs[i];
+		hir_node_t *expr = &node->d_do_block.exprs[i];
 		// nonsensical to pass upvalue
 		type_t type = cexpr(node->d_do_block.scope, TYPE_INFER, expr);
 		if (type == TYPE_BOTTOM && i + 1 < c) {
@@ -617,10 +617,10 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 		// v = 20
 		// brk :0 ()
 		
-		ir_node_t last = *arrlast(node->d_do_block.exprs).d_break.expr;
+		hir_node_t last = *arrlast(node->d_do_block.exprs).d_break.expr;
 		arrlast(node->d_do_block.exprs) = last;
 
-		ir_node_t new_brk_unit = {
+		hir_node_t new_brk_unit = {
 			.kind = NODE_BREAK_UNIT,
 			.loc = last.loc,
 			.type = TYPE_BOTTOM,
@@ -636,7 +636,7 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 	return node->type;
 }
 
-type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
+type_t cloop(hir_scope_t *s, hir_node_t *node, type_t upvalue) {
 	cblk_t *blk = &c.blocks[c.blocks_len++];
 
 	*blk = (cblk_t){
@@ -656,9 +656,9 @@ type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 	return blk->brk_type;
 }
 
-type_t cassign(ir_scope_t *s, ir_node_t *node) {
-	ir_node_t *lhs = node->d_infix.lhs;
-	ir_node_t *rhs = node->d_infix.rhs;
+type_t cassign(hir_scope_t *s, hir_node_t *node) {
+	hir_node_t *lhs = node->d_infix.lhs;
+	hir_node_t *rhs = node->d_infix.rhs;
 
 	// ignore `upvalue`, the only places where a var doesn't have an underlying type is when it's `undefined`
 	// undefined means it's an error to read, so upvalues don't really matter anyway.
@@ -672,23 +672,25 @@ type_t cassign(ir_scope_t *s, ir_node_t *node) {
 
 	// unification of TYPE_UNDEFINED if posed with such
 	if (lhs->kind == NODE_VAR) {
-		ir_var_t *var = VAR_PTR(lhs->d_var);
+		hir_var_t *var = VAR_PTR(lhs->d_var);
 		if (var->type == TYPE_UNDEFINED) {
 			var->type = rhs_t;
 		}
+		lhs_t = var->type;
+		lhs->type = lhs_t;
 	}
 
-	cuse(lhs);
 	cuse(rhs);
+	cuse(lhs);
 
 	node->type = cunify(lhs_t, rhs);
 
 	return node->type;
 }
 
-type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
-	ir_node_t *lhs = node->d_infix.lhs;
-	ir_node_t *rhs = node->d_infix.rhs;
+type_t cinfix(hir_scope_t *s, type_t upvalue, hir_node_t *node) {
+	hir_node_t *lhs = node->d_infix.lhs;
+	hir_node_t *rhs = node->d_infix.rhs;
 	tok_t kind = node->d_infix.kind;
 
 	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
@@ -731,27 +733,27 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 		
 		// force type USIZE
 		// twos complement saves us
-		cir_cast(TYPE_USIZE, rhs, rhs->loc);
+		chir_cast(TYPE_USIZE, rhs, rhs->loc);
 
-		ir_node_t sizeof_type = {
+		hir_node_t sizeof_type = {
 			.kind = NODE_SIZEOF_TYPE,
 			.loc = rhs->loc,
 			.type = TYPE_USIZE,
 			.d_sizeof_type = type_get(lhs_t)->d_ptr.ref,
 		};
 
-		ir_node_t *mul = ir_memdup((ir_node_t){
+		hir_node_t *mul = hir_memdup((hir_node_t){
 			.kind = NODE_INFIX,
 			.loc = rhs->loc,
 			.type = TYPE_USIZE,
 			.d_infix = {
 				.kind = TOK_MUL,
 				.lhs = rhs,
-				.rhs = ir_memdup(sizeof_type),
+				.rhs = hir_memdup(sizeof_type),
 			},
 		});
 
-		cir_cast(lhs_t, mul, rhs->loc);
+		chir_cast(lhs_t, mul, rhs->loc);
 
 		node->d_infix.rhs = mul;
 		node->type = lhs_t;
@@ -774,7 +776,7 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 	return node->type;
 }
 
-type_t cmatch(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
+type_t cmatch(hir_scope_t *s, hir_node_t *node, type_t upvalue) {
 	type_t expr_type = cexpr(s, TYPE_INFER, node->d_match.expr);
 
 	for (u32 i = 0, c = arrlenu(node->d_match.patterns); i < c; i++) {
@@ -786,7 +788,7 @@ type_t cmatch(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 	cscope_leave();
 
 	for (u32 i = 1, c = arrlenu(node->d_match.exprs); i < c; i++) {
-		ir_node_t *arm = &node->d_match.exprs[i];
+		hir_node_t *arm = &node->d_match.exprs[i];
 
 		cscope_enter();
 		(void)cexpr(&node->d_match.scopes[i], upvalue, arm);
@@ -810,7 +812,7 @@ u32 cfn_length(type_t fn) {
 }
 
 // apply types to args and return ret type
-type_t clambda_apply_type(ir_node_t *lambda) {
+type_t clambda_apply_type(hir_node_t *lambda) {
 	u32 plen = arrlenu(lambda->d_lambda.args);
 
 	type_t type = lambda->type;
@@ -824,7 +826,7 @@ type_t clambda_apply_type(ir_node_t *lambda) {
 	return type;
 }
 
-void clambda_body(ir_node_t *lambda) {
+void clambda_body(hir_node_t *lambda) {
 	type_t ret = clambda_apply_type(lambda);
 	type_t upvalue = TYPE_INFER;
 
@@ -851,7 +853,7 @@ void clambda_body(ir_node_t *lambda) {
 // if `opt_decl` is nonnull, it's a proc decl
 // TODO: should ignore `upvalue` if `upvalue` is just straight wrong
 //       function chain length should be <= lambda arity
-type_t clambda(ir_node_t *lambda, type_t upvalue, ir_var_t *opt_decl) {
+type_t clambda(hir_node_t *lambda, type_t upvalue, hir_var_t *opt_decl) {
 	loc_t onerror = lambda->loc;
 
 	if (opt_decl) {
@@ -906,12 +908,12 @@ type_t clambda(ir_node_t *lambda, type_t upvalue, ir_var_t *opt_decl) {
 }
 
 // upvalue only makes sense for number literals, which may have a lot of types
-type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
+type_t cexpr(hir_scope_t *s, type_t upvalue, hir_node_t *expr) {
 	switch (expr->kind) {
 		case NODE_GLOBAL_UNRESOLVED: {
 			for (u32 i = 0; i < arrlenu(c.modp->toplevel.locals); i++) {
-				ir_rvar_t var = c.modp->toplevel.locals[i];
-				ir_var_t *varp = VAR_PTR(var);
+				hir_rvar_t var = c.modp->toplevel.locals[i];
+				hir_var_t *varp = VAR_PTR(var);
 				if (varp->name == expr->d_global_unresolved) {
 					assert(varp->type != TYPE_INFER && "global variable type not inferred");
 					expr->kind = NODE_VAR;
@@ -925,7 +927,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_LET_DECL: {
 			type_t expr_type;
 			
-			ir_var_t *varp;
+			hir_var_t *varp;
 			if (expr->d_let_decl.pattern.kind == PATTERN_VAR && (varp = VAR_PTR(expr->d_let_decl.pattern.d_var))->is_proc_decl) {
 				assert(expr->d_let_decl.expr->kind == NODE_LAMBDA);
 				expr_type = clambda(expr->d_let_decl.expr, varp->type, varp);
@@ -983,7 +985,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		}
 		case NODE_VAR: {
 			// we know this already
-			ir_var_t *var = VAR_PTR(expr->d_var);
+			hir_var_t *var = VAR_PTR(expr->d_var);
 			// only variables may contain typevars
 			expr->type = type_underlying(var->type);
 			return expr->type;
@@ -1027,9 +1029,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			rmod_t sym_mod = expr->d_sym_unresolved.mod;
 			mod_t *sym_modp = MOD_PTR(sym_mod);
 			for (u32 i = 0, c = arrlenu(sym_modp->toplevel.locals); i < c; i++) {
-				ir_var_t *var = VAR_PTR(sym_modp->toplevel.locals[i]);
+				hir_var_t *var = VAR_PTR(sym_modp->toplevel.locals[i]);
 				if (var->is_pub && var->name == expr->d_sym_unresolved.name) {
-					*expr = (ir_node_t){
+					*expr = (hir_node_t){
 						.kind = NODE_SYM,
 						.loc = expr->loc,
 						.type = var->type,
@@ -1163,7 +1165,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 				if (upvales) {
 					upvalue = upvales[i];
 				}
-				ir_node_t *inner = &expr->d_tuple.elems[i];
+				hir_node_t *inner = &expr->d_tuple.elems[i];
 				type_t type = cexpr(s, upvalue, inner);
 				cuse(inner);
 				arrpush(types, type);
@@ -1208,7 +1210,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			u32 length = arrlenu(expr->d_array_lit.elems);
 
 			for (u32 i = 1; i < length; i++) {
-				ir_node_t *inner = &expr->d_array_lit.elems[i];
+				hir_node_t *inner = &expr->d_array_lit.elems[i];
 				
 				type_t type = cexpr(s, elem_type, inner);
 				cuse(inner);
@@ -1266,7 +1268,7 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 	}
 }
 
-void ctoplevel_exprs(ir_scope_t *s, ir_node_t *exprs) {
+void ctoplevel_exprs(hir_scope_t *s, hir_node_t *exprs) {
 	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
 		(void)cexpr(s, TYPE_INFER, &exprs[i]);
 	}

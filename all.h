@@ -341,21 +341,21 @@ struct token_t {
 	istr_t lit;
 };
 
-typedef struct ir_scope_t ir_scope_t;
-typedef u32 ir_rvar_t;
-typedef struct ir_var_t ir_var_t;
-typedef struct ir_node_t ir_node_t;
-typedef struct ir_pattern_t ir_pattern_t;
+typedef struct hir_scope_t hir_scope_t;
+typedef u32 hir_rvar_t;
+typedef struct hir_var_t hir_var_t;
+typedef struct hir_node_t hir_node_t;
+typedef struct hir_pattern_t hir_pattern_t;
 
 // TODO: define helper function for invalid loc_t
 // TODO: fancy arena allocators? fuck that!
 //       we're going for a quick and dirty bootstrap
 
-extern ir_var_t *ir_vars;
+extern hir_var_t *hir_vars;
 
-#define VAR_PTR(id) (&ir_vars[id])
+#define VAR_PTR(id) (&hir_vars[id])
 
-struct ir_var_t {
+struct hir_var_t {
 	istr_t name;
 	loc_t loc;
 	type_t type;
@@ -366,13 +366,13 @@ struct ir_var_t {
 	bool is_pub; // is exposed to other modules
 };
 
-struct ir_scope_t {
-	ir_scope_t *parent;
-	ir_rvar_t *locals;
+struct hir_scope_t {
+	hir_scope_t *parent;
+	hir_rvar_t *locals;
 };
 
 // TODO: match on tuples and arrays
-struct ir_pattern_t {
+struct hir_pattern_t {
 	enum pattern_kind_t {
 		PATTERN_VAR,
 		PATTERN_UNDERSCORE,
@@ -385,20 +385,20 @@ struct ir_pattern_t {
 	loc_t loc;
 
 	union {
-		ir_rvar_t d_var;
+		hir_rvar_t d_var;
 		struct {
-			ir_pattern_t *elems;
+			hir_pattern_t *elems;
 		} d_tuple;
 		struct {
-			ir_pattern_t *elems;
-			ir_pattern_t *match; // single pattern, possible NULL
+			hir_pattern_t *elems;
+			hir_pattern_t *match; // single pattern, possible NULL
 			bool match_lhs; // else, rhs
 		} d_array;
 		istr_t d_integer_lit;
 	};
 };
 
-struct ir_node_t {
+struct hir_node_t {
 	enum node_kind_t {
 		NODE_LET_DECL,
 		NODE_LAMBDA,
@@ -438,17 +438,17 @@ struct ir_node_t {
 	// 	case NODE_DO_BLOCK: {typeof((expr).do_block) *v = &(expr).do_block; t break;}
 
 	union {
-		ir_rvar_t d_var;
+		hir_rvar_t d_var;
 		istr_t d_global_unresolved;
-		ir_node_t *d_voiding;
-		ir_node_t *d_deref;
+		hir_node_t *d_voiding;
+		hir_node_t *d_deref;
 		type_t d_sizeof_type;
 		struct {
-			ir_node_t *lhs;
-			ir_node_t *rhs;
+			hir_node_t *lhs;
+			hir_node_t *rhs;
 		} d_assign;
 		struct {
-			ir_node_t *ref;
+			hir_node_t *ref;
 			bool is_mut;
 		} d_addr_of;
 		struct {
@@ -457,69 +457,69 @@ struct ir_node_t {
 		} d_sym_unresolved;
 		struct {
 			rmod_t mod;
-			ir_rvar_t var;
+			hir_rvar_t var;
 		} d_sym;
 		struct {
-			ir_node_t *expr;
+			hir_node_t *expr;
 			tok_t kind;
 		} d_postfix;
 		struct {
-			ir_node_t *expr;
+			hir_node_t *expr;
 			tok_t kind;
 		} d_prefix;
 		struct {
-			ir_scope_t *scope; // scopes are pointers here for a reason
-			ir_node_t *exprs; // all do blocks have at least one expr, unless they become a NODE_TUPLE_UNIT
+			hir_scope_t *scope; // scopes are pointers here for a reason
+			hir_node_t *exprs; // all do blocks have at least one expr, unless they become a NODE_TUPLE_UNIT
 			u8 blk_id;
 		} d_do_block;
 		struct {
-			ir_node_t *expr;
+			hir_node_t *expr;
 			u8 blk_id;
 		} d_loop;
 		struct {
-			ir_node_t *lhs;
-			ir_node_t *rhs;
+			hir_node_t *lhs;
+			hir_node_t *rhs;
 			tok_t kind;
 		} d_infix;
-		ir_node_t *d_cast;
+		hir_node_t *d_cast;
 		struct {
 			istr_t lit;
 			bool negate;
 		} d_integer_lit;
 		bool d_bool_lit;
 		struct {
-			ir_rvar_t *args;
-			ir_scope_t *scope;
-			ir_node_t *expr;
+			hir_rvar_t *args;
+			hir_scope_t *scope;
+			hir_node_t *expr;
 		} d_lambda;
 		struct {
-			ir_node_t *expr;
-			ir_scope_t *scopes;
-			ir_pattern_t *patterns;
-			ir_node_t *exprs;
+			hir_node_t *expr;
+			hir_scope_t *scopes;
+			hir_pattern_t *patterns;
+			hir_node_t *exprs;
 		} d_match;
 		struct {
-			ir_pattern_t pattern;
-			ir_node_t *expr;
+			hir_pattern_t pattern;
+			hir_node_t *expr;
 		} d_let_decl;
 		struct {
-			ir_node_t *f;
-			ir_node_t *arg;
+			hir_node_t *f;
+			hir_node_t *arg;
 		} d_call;
 		struct {
-			ir_node_t *elems;
+			hir_node_t *elems;
 		} d_tuple;
 		struct {
-			ir_node_t *elems; // if NULL the size if 0
+			hir_node_t *elems; // if NULL the size if 0
 		} d_array_lit;
 		struct {
-			ir_node_t *expr; // in use with NODE_BREAK*
+			hir_node_t *expr; // in use with NODE_BREAK*
 			u8 blk_id;
 		} d_break;
 		struct {
-			ir_node_t *cond;
-			ir_node_t *then;
-			ir_node_t *els;
+			hir_node_t *cond;
+			hir_node_t *then;
+			hir_node_t *els;
 		} d_if;
 	};
 };
@@ -537,8 +537,8 @@ struct mod_t {
 		u32 files_count;
 	} on_disk;
 
-	ir_scope_t toplevel;
-	ir_node_t *exprs;
+	hir_scope_t toplevel;
+	hir_node_t *exprs;
 };
 
 struct file_t {
@@ -567,9 +567,9 @@ void fs_dump_tree(void);
 
 void cmodule(rmod_t mod);
 void pentry(rfile_t f);
-void ir_dump_module(rmod_t mod);
+void hir_dump_module(rmod_t mod);
 
-ir_node_t *ir_memdup(ir_node_t node);
+hir_node_t *hir_memdup(hir_node_t node);
 
 typedef struct tinfo_t tinfo_t;
 

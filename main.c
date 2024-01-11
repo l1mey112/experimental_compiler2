@@ -117,7 +117,7 @@ ret:
 		printf("\n");
 		mod_t *modp = MOD_PTR(i);
 		if (modp->exprs) {
-			ir_dump_module(i); // main module
+			hir_dump_module(i); // main module
 		}
 	}
 	printf("\n");

@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <stdbool.h>
 
+hir_var_t *hir_vars;
+
 typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
 typedef struct pblk_t pblk_t;
@@ -72,26 +74,26 @@ int pimport_ident(istr_t name) {
 	return -1;
 }
 
-ir_node_t *ir_memdup(ir_node_t node) {
-	ir_node_t *ptr = malloc(sizeof(ir_node_t));
+hir_node_t *hir_memdup(hir_node_t node) {
+	hir_node_t *ptr = malloc(sizeof(hir_node_t));
 	*ptr = node;
 	return ptr;
 }
 
-ir_pattern_t *pattern_memdup(ir_pattern_t pattern) {
-	ir_pattern_t *ptr = malloc(sizeof(ir_pattern_t));
+hir_pattern_t *pattern_memdup(hir_pattern_t pattern) {
+	hir_pattern_t *ptr = malloc(sizeof(hir_pattern_t));
 	*ptr = pattern;
 	return ptr;
 }
 
-static bool ir_name_exists_in(ir_scope_t *scope, istr_t name) {
+static bool hir_name_exists_in(hir_scope_t *scope, istr_t name) {
 	if (scope == NULL) {
 		scope = &p.modp->toplevel;
 	}
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
-		ir_rvar_t id = scope->locals[i];
-		ir_var_t *var = VAR_PTR(id);
+		hir_rvar_t id = scope->locals[i];
+		hir_var_t *var = VAR_PTR(id);
 
 		if (var->name == name) {
 			return true;
@@ -101,13 +103,13 @@ static bool ir_name_exists_in(ir_scope_t *scope, istr_t name) {
 	return false;
 }
 
-static bool ir_var_exists_in(ir_scope_t *scope, ir_rvar_t var) {
+static bool hir_var_exists_in(hir_scope_t *scope, hir_rvar_t var) {
 	if (scope == NULL) {
 		scope = &p.modp->toplevel;
 	}
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
-		ir_rvar_t id = scope->locals[i];
+		hir_rvar_t id = scope->locals[i];
 		if (id == var) {
 			return true;
 		}
@@ -116,14 +118,14 @@ static bool ir_var_exists_in(ir_scope_t *scope, ir_rvar_t var) {
 	return false;
 }
 
-static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
+static hir_var_t *hir_name_in(hir_scope_t *scope, istr_t name) {
 	if (scope == NULL) {
 		scope = &p.modp->toplevel;
 	}
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
-		ir_rvar_t id = scope->locals[i];
-		ir_var_t *var = VAR_PTR(id);
+		hir_rvar_t id = scope->locals[i];
+		hir_var_t *var = VAR_PTR(id);
 
 		if (var->name == name) {
 			return var;
@@ -136,7 +138,7 @@ static ir_var_t *ir_name_in(ir_scope_t *scope, istr_t name) {
 void papply_pub(void) {
 	// pubs all have types, i don't want to sort modules... global exprs is enough
 	for (u32 i = 0, c = arrlenu(p.modp->toplevel.locals); i < c; i++) {
-		ir_var_t *varp = VAR_PTR(p.modp->toplevel.locals[i]);
+		hir_var_t *varp = VAR_PTR(p.modp->toplevel.locals[i]);
 		if (varp->is_pub && varp->type == TYPE_INFER) {
 			err_with_pos(varp->loc, "cannot make expression with inferred type public");
 		}
@@ -148,8 +150,8 @@ void papply_pub(void) {
 // WILL ONLY FIND SYMBOLS
 // warning: possibly unstable pointer
 // WILL IGNORE EXISTING VARS RESOLVED FROM AN OLDER SCOPE, ITS JUST NAMES TO NAMES HERE
-static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
-	ir_node_t *r;
+static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
+	hir_node_t *r;
 	switch (expr->kind) {
 		case NODE_GLOBAL_UNRESOLVED: {
 			if (expr->d_global_unresolved == name) {
@@ -164,33 +166,33 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 			return NULL;
 		}
 		case NODE_POSTFIX: {
-			return ir_sym_find_use(expr->d_postfix.expr, name);
+			return hir_sym_find_use(expr->d_postfix.expr, name);
 		}
 		case NODE_PREFIX: {
-			return ir_sym_find_use(expr->d_prefix.expr, name);
+			return hir_sym_find_use(expr->d_prefix.expr, name);
 		}
 		case NODE_INFIX: {
-			if ((r = ir_sym_find_use(expr->d_infix.lhs, name))) {
+			if ((r = hir_sym_find_use(expr->d_infix.lhs, name))) {
 				return r;
 			}
-			if ((r = ir_sym_find_use(expr->d_infix.rhs, name))) {
+			if ((r = hir_sym_find_use(expr->d_infix.rhs, name))) {
 				return r;
 			}
 			return NULL;
 		}
 		case NODE_CALL: {
-			if ((r = ir_sym_find_use(expr->d_call.f, name))) {
+			if ((r = hir_sym_find_use(expr->d_call.f, name))) {
 				return r;
 			}
-			if ((r = ir_sym_find_use(expr->d_call.arg, name))) {
+			if ((r = hir_sym_find_use(expr->d_call.arg, name))) {
 				return r;
 			}
 			return NULL;
 		}
 		case NODE_TUPLE: {
 			for (u32 i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
-				ir_node_t *exprp = &expr->d_tuple.elems[i];
-				if ((r = ir_sym_find_use(exprp, name))) {
+				hir_node_t *exprp = &expr->d_tuple.elems[i];
+				if ((r = hir_sym_find_use(exprp, name))) {
 					return r;
 				}
 			}
@@ -198,46 +200,47 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 		}
 		// even though this doesn't make sense, include for completeness
 		case NODE_BREAK: {
-			if ((r = ir_sym_find_use(expr->d_break.expr, name))) {
+			if ((r = hir_sym_find_use(expr->d_break.expr, name))) {
 				return r;
 			}
 			return NULL;
 		}
-		case NODE_LAMBDA:
-		case NODE_DO_BLOCK:
-		case NODE_INTEGER_LIT: {
-			return NULL;
-		}
 		case NODE_LET_DECL: {
-			if ((r = ir_sym_find_use(expr->d_let_decl.expr, name))) {
+			if ((r = hir_sym_find_use(expr->d_let_decl.expr, name))) {
 				return r;
 			}
 			return NULL;
 		}
 		case NODE_ADDR_OF: {
-			if ((r = ir_sym_find_use(expr->d_addr_of.ref, name))) {
+			if ((r = hir_sym_find_use(expr->d_addr_of.ref, name))) {
 				return r;
 			}
 			return NULL;
 		}
 		case NODE_DEREF: {
-			if ((r = ir_sym_find_use(expr->d_deref, name))) {
+			if ((r = hir_sym_find_use(expr->d_deref, name))) {
 				return r;
 			}
 			return NULL;
 		}
 		case NODE_ASSIGN: {
-			if ((r = ir_sym_find_use(expr->d_infix.lhs, name))) {
+			if ((r = hir_sym_find_use(expr->d_infix.lhs, name))) {
 				return r;
 			}
-			if ((r = ir_sym_find_use(expr->d_infix.rhs, name))) {
+			if ((r = hir_sym_find_use(expr->d_infix.rhs, name))) {
 				return r;
 			}
 			return NULL;
 		}
+		case NODE_UNDEFINED:
+		case NODE_LAMBDA:
+		case NODE_DO_BLOCK:
+		case NODE_INTEGER_LIT: {
+			return NULL;
+		}
 		default: {
 			// TODO: be sure to be exhaustive
-			printf("ir_sym_find_use: unhandled node kind %d\n", expr->kind);
+			printf("hir_sym_find_use: unhandled node kind %d\n", expr->kind);
 			assert_not_reached();
 		}
 	}
@@ -247,14 +250,14 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 // don't recurse into deeper scopes
 // WILL ONLY FIND SYMBOLS
 // warning: possibly unstable pointer
-static ir_node_t *ir_sym_find_uses(ir_node_t *exprs, istr_t name) {
+static hir_node_t *hir_sym_find_uses(hir_node_t *exprs, istr_t name) {
 	if (exprs == NULL) {
 		return NULL;
 	}
 	
 	for (u32 i = 0, c = arrlenu(exprs); i < c; i++) {
-		ir_node_t *expr = &exprs[i];
-		if ((expr = ir_sym_find_use(expr, name))) {
+		hir_node_t *expr = &exprs[i];
+		if ((expr = hir_sym_find_use(expr, name))) {
 			return expr;
 		}
 	}
@@ -264,7 +267,7 @@ static ir_node_t *ir_sym_find_uses(ir_node_t *exprs, istr_t name) {
 
 // NULL meaning toplevel
 // `scope` MUST refer to `previous_exprs`
-static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, loc_t onerror, ir_node_t *previous_exprs) {
+static hir_rvar_t hir_new_var(hir_scope_t *scope, istr_t name, loc_t onerror, hir_node_t *previous_exprs) {
 	int idx;
 	if ((idx = pimport_ident(name)) != -1) {
 		print_err_with_pos(onerror, "variable `%s` cannot shadow import `%s`", sv_from(name), sv_from(name));
@@ -272,27 +275,27 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, loc_t onerror, ir_no
 		err_unwind();
 	}
 	
-	ir_var_t *ex_var;
-	if ((ex_var = ir_name_in(scope, name))) {
+	hir_var_t *ex_var;
+	if ((ex_var = hir_name_in(scope, name))) {
 		print_err_with_pos(onerror, "variable `%s` already exists in scope", sv_from(name));
 		print_hint_with_pos(ex_var->loc, "variable `%s` declared here", sv_from(name));
 		err_unwind();
 	}
 
-	ir_node_t *use;
-	if (scope != NULL && (use = ir_sym_find_uses(previous_exprs, name))) {
+	hir_node_t *use;
+	if (scope != NULL && (use = hir_sym_find_uses(previous_exprs, name))) {
 		print_err_with_pos(use->loc, "use of variable `%s` before declaration in same scope", sv_from(name));
 		print_hint_with_pos(onerror, "variable `%s` declared here", sv_from(name));
 		err_unwind();
 	}
 	
-	ir_rvar_t id = arrlen(ir_vars);
-	ir_var_t var = {
+	hir_rvar_t id = arrlen(hir_vars);
+	hir_var_t var = {
 		.loc = onerror,
 		.name = name,
 		.type = TYPE_INFER,
 	};
-	arrpush(ir_vars, var);
+	arrpush(hir_vars, var);
 
 	if (scope == NULL) {
 		scope = &p.modp->toplevel;
@@ -308,7 +311,7 @@ static ir_rvar_t ir_new_var(ir_scope_t *scope, istr_t name, loc_t onerror, ir_no
 // will search parent
 // TODO?: this searches the toplevel scope, which should only really
 //        be resolved at the end of parsing, so it doesn't really matter
-static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) {
+static bool hir_var_resolve_name(hir_scope_t *scope, istr_t name, hir_rvar_t *out) {
 	bool is_toplevel = false;
 	if (scope == NULL) {
 		is_toplevel = true;
@@ -316,8 +319,8 @@ static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) 
 	}
 
 	for (u32 i = 0; i < arrlen(scope->locals); i++) {
-		ir_rvar_t id = scope->locals[i];
-		ir_var_t *var = VAR_PTR(id);
+		hir_rvar_t id = scope->locals[i];
+		hir_var_t *var = VAR_PTR(id);
 
 		if (var->name == name && !var->is_in_decl) {
 			if (out) {
@@ -329,22 +332,22 @@ static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) 
 
 	// what an opportunity for tail recursion!
 	if (!is_toplevel) {
-		return ir_var_resolve_name(scope->parent, name, out);
+		return hir_var_resolve_name(scope->parent, name, out);
 	} else {
 		return false;
 	}
 }
 
-static ir_scope_t *ir_new_scope_ptr(ir_scope_t *parent) {
-	ir_scope_t *ptr = malloc(sizeof(ir_scope_t));
-	*ptr = (ir_scope_t){
+static hir_scope_t *hir_new_scope_ptr(hir_scope_t *parent) {
+	hir_scope_t *ptr = malloc(sizeof(hir_scope_t));
+	*ptr = (hir_scope_t){
 		.parent = parent,
 	};
 	return ptr;
 }
 
-static ir_scope_t ir_new_scope(ir_scope_t *parent) {
-	ir_scope_t scope = {
+static hir_scope_t hir_new_scope(hir_scope_t *parent) {
+	hir_scope_t scope = {
 		.parent = parent,
 	};
 	return scope;
@@ -861,13 +864,13 @@ u8 ptok_prec_ambiguities(void) {
 	return ptok_prec(p.token.kind);
 }
 
-bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs);
-ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs);
+bool pstmt(hir_node_t *expr, hir_scope_t *s, hir_node_t *previous_exprs);
+hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs);
 
 // MUST HAVE BLK ENTRY AS TOP BLK IN FIRST CALL
-ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
+hir_node_t *pindented_do_block(hir_scope_t *s, loc_t oloc) {
 	u32 bcol = p.token.loc.col;
-	ir_node_t *exprs = NULL;
+	hir_node_t *exprs = NULL;
 
 	// an indented block has columns greater than the column of the original location
 	/* if (oloc.col != bcol) {
@@ -878,7 +881,7 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 	while (p.token.kind != TOK_EOF) {
 		u32 cln = p.token.loc.line_nr;
 
-		ir_node_t expr;
+		hir_node_t expr;
 		bool set = pstmt(&expr, s, exprs);
 		if (set) {
 			arrpush(exprs, expr);
@@ -905,10 +908,10 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 
 	// okay to invalidate pointers in the parser
 
-	ir_node_t *last = &arrlast(exprs);
+	hir_node_t *last = &arrlast(exprs);
 	u32 blk_id = p.blks_len - 1; // top blk
 	if (last->type == TYPE_UNIT && last->kind != NODE_TUPLE_UNIT) {
-		ir_node_t new_last = (ir_node_t){
+		hir_node_t new_last = (hir_node_t){
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = last->loc,
 			.type = TYPE_BOTTOM,
@@ -916,7 +919,7 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 		};
 		arrpush(exprs, new_last);
 	} else if (last->kind == NODE_TUPLE_UNIT) {
-		*last = (ir_node_t){
+		*last = (hir_node_t){
 			.kind = NODE_BREAK_UNIT, // unary shorthand
 			.loc = last->loc,
 			.type = TYPE_BOTTOM,
@@ -924,14 +927,14 @@ ir_node_t *pindented_do_block(ir_scope_t *s, loc_t oloc) {
 			.d_break.expr = NULL,
 		};
 	} else if (last->type != TYPE_BOTTOM) {
-		ir_node_t node = *last;
+		hir_node_t node = *last;
 
-		*last = (ir_node_t){
+		*last = (hir_node_t){
 			.kind = NODE_BREAK_INFERRED,
 			.loc = node.loc,
 			.type = TYPE_BOTTOM, // not infer, breaking is a noreturn op
 			.d_break.blk_id = blk_id,
-			.d_break.expr = ir_memdup(node),
+			.d_break.expr = hir_memdup(node),
 		};
 	}
 
@@ -962,7 +965,7 @@ u8 pblk_locate(istr_t opt_label, loc_t onerror) {
 // do
 //     ...
 //     ...
-ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
+hir_node_t pdo(hir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 	if (p.token.kind == TOK_EOF || p.token.loc.line_nr == oloc.line_nr) {
@@ -970,12 +973,12 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 	}
 
 	u8 blk_id = p.blks_len++;
-	ir_node_t block = {
+	hir_node_t block = {
 		.kind = NODE_DO_BLOCK,
 		.loc = oloc,
 		.type = TYPE_INFER,
 		.d_do_block = {
-			.scope = ir_new_scope_ptr(s),
+			.scope = hir_new_scope_ptr(s),
 			.exprs = NULL,
 			.blk_id = blk_id,
 		},
@@ -986,11 +989,11 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 		.loc = opt_loc,
 		.always_brk = false,
 	};
-	ir_node_t *exprs = pindented_do_block(block.d_do_block.scope, oloc);
+	hir_node_t *exprs = pindented_do_block(block.d_do_block.scope, oloc);
 	p.blks_len--;
 
 	if (exprs == NULL) {
-		return (ir_node_t){
+		return (hir_node_t){
 			.kind = NODE_TUPLE_UNIT,
 			.loc = oloc,
 			.type = TYPE_UNIT,
@@ -1005,12 +1008,12 @@ ir_node_t pdo(ir_scope_t *s, istr_t opt_label, loc_t opt_loc) {
 // loop
 //     ...
 //     ...
-ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t opt_label, loc_t opt_loc) {
+hir_node_t ploop(hir_scope_t *s, u8 expr_cfg, hir_node_t *previous_exprs, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 
 	u8 blk_id = p.blks_len++;
-	ir_node_t loop = {
+	hir_node_t loop = {
 		.kind = NODE_LOOP,
 		.loc = oloc,
 		.type = TYPE_INFER,
@@ -1024,19 +1027,19 @@ ir_node_t ploop(ir_scope_t *s, u8 expr_cfg, ir_node_t *previous_exprs, istr_t op
 		.loc = opt_loc,
 		.always_brk = true,
 	};
-	loop.d_loop.expr = ir_memdup(pexpr(s, 0, expr_cfg, previous_exprs));
+	loop.d_loop.expr = hir_memdup(pexpr(s, 0, expr_cfg, previous_exprs));
 	p.blks_len--;
 
 	return loop;
 }
 
 // will create vars it cannot find
-ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay) {
+hir_pattern_t ppattern(hir_scope_t *s, hir_node_t *previous_exprs, bool allow_inlay) {
 	bool is_mut = false;
 	switch (p.token.kind) {
 		case TOK_UNDERSCORE: {
 			pnext();
-			return (ir_pattern_t){
+			return (hir_pattern_t){
 				.kind = PATTERN_UNDERSCORE,
 			};
 		}
@@ -1048,7 +1051,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 			istr_t name = p.token.lit;
 			loc_t name_loc = p.token.loc;
 			pnext();
-			ir_rvar_t var = ir_new_var(s, name, name_loc, previous_exprs);
+			hir_rvar_t var = hir_new_var(s, name, name_loc, previous_exprs);
 			VAR_PTR(var)->is_mut = is_mut;
 
 			if (allow_inlay && p.token.kind == TOK_COLON) {
@@ -1059,7 +1062,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 				VAR_PTR(var)->type = type;
 			}
 
-			return (ir_pattern_t){
+			return (hir_pattern_t){
 				.loc = name_loc,
 				.kind = PATTERN_VAR,
 				.d_var = var,
@@ -1069,7 +1072,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 			istr_t val = p.token.lit;
 			loc_t loc = p.token.loc;
 			pnext();
-			return (ir_pattern_t){
+			return (hir_pattern_t){
 				.loc = loc,
 				.kind = PATTERN_INTEGER_LIT,
 				.d_integer_lit = val,
@@ -1080,14 +1083,14 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 			pnext();
 			if (p.token.kind == TOK_CPAR) {
 				pnext();
-				return (ir_pattern_t){
+				return (hir_pattern_t){
 					.kind = PATTERN_TUPLE_UNIT,
 					.loc = oloc,
 				};
 			}
 			bool first = true;
-			ir_pattern_t *elems = NULL;
-			ir_pattern_t pattern;
+			hir_pattern_t *elems = NULL;
+			hir_pattern_t pattern;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
 					pattern = ppattern(s, previous_exprs, allow_inlay);
@@ -1109,7 +1112,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 			}
 			pnext();
 			if (elems != NULL) {
-				pattern = (ir_pattern_t){
+				pattern = (hir_pattern_t){
 					.kind = PATTERN_TUPLE,
 					.loc = oloc,
 					.d_tuple.elems = elems,
@@ -1121,9 +1124,9 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 			// [1, a, b]
 			// ^
 			loc_t oloc = p.token.loc;
-			ir_pattern_t *elems = NULL;
+			hir_pattern_t *elems = NULL;
 
-			ir_pattern_t pattern = {
+			hir_pattern_t pattern = {
 				.kind = PATTERN_ARRAY,
 				.loc = oloc,
 			};
@@ -1152,7 +1155,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 						err_with_pos(oloc, "a `...xs` in array pattern must reside at the end");
 					}
 				} else {
-					ir_pattern_t elem = ppattern(s, previous_exprs, allow_inlay);
+					hir_pattern_t elem = ppattern(s, previous_exprs, allow_inlay);
 
 					// [xs..., x]
 					if (p.token.kind == TOK_TRIPLE_DOTS) {
@@ -1197,7 +1200,7 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 	}
 }
 
-ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
+hir_node_t plet(hir_scope_t *s, u8 cfg, hir_node_t *previous_exprs) {
 	loc_t oloc = p.token.loc;
 
 	pnext();
@@ -1210,10 +1213,10 @@ ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
 	// let x = x
 	//
 	// avoid null refs
-	ir_scope_t *pl_scope = s == NULL ? &p.modp->toplevel : s;
+	hir_scope_t *pl_scope = s == NULL ? &p.modp->toplevel : s;
 
 	u32 olen = arrlenu(pl_scope->locals);
-	ir_pattern_t pattern = ppattern(s, previous_exprs, true);
+	hir_pattern_t pattern = ppattern(s, previous_exprs, true);
 	u32 rlen = arrlenu(pl_scope->locals);
 
 	// mask variables
@@ -1224,23 +1227,23 @@ ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
 	pexpect(TOK_ASSIGN);
 	// let x = 20
 	//         ^^
-	ir_node_t rhs = pexpr(s, 0, cfg, previous_exprs);
+	hir_node_t rhs = pexpr(s, 0, cfg, previous_exprs);
 
 	// unmask variables
 	for (u32 i = olen; i < rlen; i++) {
 		VAR_PTR(pl_scope->locals[i])->is_in_decl = false;
 	}
 
-	return (ir_node_t){
+	return (hir_node_t){
 		.kind = NODE_LET_DECL,
 		.loc = oloc,
 		.type = TYPE_UNIT,
 		.d_let_decl.pattern = pattern,
-		.d_let_decl.expr = ir_memdup(rhs),
+		.d_let_decl.expr = hir_memdup(rhs),
 	};
 }
 
-ir_node_t pident(ir_scope_t *s) {
+hir_node_t pident(hir_scope_t *s) {
 	pcheck(TOK_IDENT);
 
 	int id;
@@ -1257,7 +1260,7 @@ ir_node_t pident(ir_scope_t *s) {
 		istr_t lit = p.token.lit;
 		pnext();
 
-		return (ir_node_t){
+		return (hir_node_t){
 			.kind = NODE_SYM_UNRESOLVED,
 			.type = TYPE_INFER,
 			.loc = oloc,
@@ -1268,18 +1271,18 @@ ir_node_t pident(ir_scope_t *s) {
 		};
 	}
 
-	ir_node_t node;
+	hir_node_t node;
 
-	ir_rvar_t var;
-	if (ir_var_resolve_name(s, p.token.lit, &var)) {
-		node = (ir_node_t){
+	hir_rvar_t var;
+	if (hir_var_resolve_name(s, p.token.lit, &var)) {
+		node = (hir_node_t){
 			.kind = NODE_VAR,
 			.type = TYPE_INFER,
 			.loc = p.token.loc,
 			.d_var = var,
 		};
 	} else {
-		node = (ir_node_t){
+		node = (hir_node_t){
 			.kind = NODE_GLOBAL_UNRESOLVED,
 			.type = TYPE_INFER,
 			.loc = p.token.loc,
@@ -1303,10 +1306,10 @@ enum : u8 {
 
 // (                           a b                          )
 // ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break 
-ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
+hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 	token_t token = p.token;
 	u32 line_nr = token.loc.line_nr;
-	ir_node_t node;
+	hir_node_t node;
 	bool is_single = true;
 	bool should_continue = true;
 
@@ -1318,7 +1321,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 	label.name = ISTR_NONE;
 
 	while (should_continue) {
-		ir_node_t onode = node;
+		hir_node_t onode = node;
 		token_t token = p.token;
 
 		switch (token.kind) {
@@ -1326,18 +1329,18 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				pnext();
 				// void expr
 				//      ^^^^
-				ir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
-				node = (ir_node_t){
+				hir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+				node = (hir_node_t){
 					.kind = NODE_VOIDING,
 					.loc = token.loc,
 					.type = TYPE_UNIT,
-					.d_voiding = ir_memdup(expr),
+					.d_voiding = hir_memdup(expr),
 				};
 				break;
 			}
 			case TOK_UNDEFINED: {
 				pnext();
-				node = (ir_node_t){
+				node = (hir_node_t){
 					.kind = NODE_UNDEFINED,
 					.type = TYPE_UNDEFINED,
 					.loc = token.loc,
@@ -1347,7 +1350,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			case TOK_TRUE:
 			case TOK_FALSE: {
 				pnext();
-				node = (ir_node_t){
+				node = (hir_node_t){
 					.kind = NODE_BOOL_LIT,
 					.type = TYPE_BOOL,
 					.loc = token.loc,
@@ -1361,22 +1364,22 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				loc_t oloc = token.loc;
 				pnext();
 				pexpect(TOK_OPAR);
-				ir_node_t *cond = ir_memdup(pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs));
+				hir_node_t *cond = hir_memdup(pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs));
 				pexpect(TOK_CPAR);
 
 				// if (...) ... else ...
 				//          ^^^
 
-				ir_node_t *then = ir_memdup(pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs));
+				hir_node_t *then = hir_memdup(pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs));
 
 				// if (...) ... else ...
 				//              ^^^^
 				//            optional
 
-				ir_node_t *els = NULL;
+				hir_node_t *els = NULL;
 				if (p.token.kind == TOK_ELSE) {
 					pnext();
-					els = ir_memdup(pexpr(s, 0, 0, previous_exprs));
+					els = hir_memdup(pexpr(s, 0, 0, previous_exprs));
 				} else {
 					// desugar to () return using voiding
 
@@ -1385,12 +1388,12 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					// if (t) void effect
 					// else   ()
 
-					els = ir_memdup((ir_node_t){
+					els = hir_memdup((hir_node_t){
 						.kind = NODE_TUPLE_UNIT,
 						.loc = oloc,
 						.type = TYPE_UNIT,
 					});
-					then = ir_memdup((ir_node_t){
+					then = hir_memdup((hir_node_t){
 						.kind = NODE_VOIDING,
 						.loc = then->loc,
 						.type = TYPE_UNIT,
@@ -1398,7 +1401,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					});
 				}
 
-				node = (ir_node_t){
+				node = (hir_node_t){
 					.kind = NODE_IF,
 					.type = TYPE_INFER,
 					.loc = token.loc,
@@ -1463,14 +1466,14 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					pnext();
 				}
 				u8 blk_id = pblk_locate(label, onerror);
-				ir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
-				node = (ir_node_t){
+				hir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+				node = (hir_node_t){
 					.kind = NODE_BREAK,
 					.loc = token.loc,
 					.type = TYPE_BOTTOM,
 					.d_break = {
 						.blk_id = blk_id,
-						.expr = ir_memdup(expr),
+						.expr = hir_memdup(expr),
 					},
 				};
 				should_continue = false; // single expr
@@ -1484,7 +1487,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				loc_t oloc = p.token.loc;
 				pnext();
 				if (p.token.kind == TOK_CPAR) {
-					node = (ir_node_t){
+					node = (hir_node_t){
 						.kind = NODE_TUPLE_UNIT,
 						.loc = oloc,
 						.type = TYPE_UNIT,
@@ -1493,7 +1496,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 					break;
 				}
 				bool first = true;
-				ir_node_t *elems = NULL;
+				hir_node_t *elems = NULL;
 				while (p.token.kind != TOK_CPAR) {
 					if (first) {
 						node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
@@ -1515,7 +1518,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				}
 				pnext();
 				if (elems != NULL) {
-					node = (ir_node_t){
+					node = (hir_node_t){
 						.kind = NODE_TUPLE,
 						.loc = oloc,
 						.type = TYPE_INFER,
@@ -1528,14 +1531,14 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			}
 			case TOK_OSQ: {
 				loc_t oloc = p.token.loc;
-				ir_node_t *nodes = NULL;
+				hir_node_t *nodes = NULL;
 
 				// [ 1, 2, 3, 4, 5 ]
 				// ^
 
 				pnext();
 				while (p.token.kind != TOK_CSQ) {
-					ir_node_t node = pexpr(s, 0, PEXPR_ET_ARRAY, previous_exprs);
+					hir_node_t node = pexpr(s, 0, PEXPR_ET_ARRAY, previous_exprs);
 					arrpush(nodes, node);				
 
 					if (p.token.kind == TOK_COMMA) {
@@ -1549,7 +1552,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				//                 ^
 				pnext();
 
-				node = (ir_node_t){
+				node = (hir_node_t){
 					.kind = NODE_ARRAY_LIT,
 					.loc = oloc,
 					.type = TYPE_INFER,
@@ -1560,7 +1563,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				break;
 			}
 			case TOK_INTEGER: {
-				node = (ir_node_t){
+				node = (hir_node_t){
 					.kind = NODE_INTEGER_LIT,
 					.loc = p.token.loc,
 					.type = TYPE_INFER,
@@ -1575,7 +1578,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				if (TOK_IS_PREFIX(token.kind)) {
 					pnext();
 					if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
-						node = (ir_node_t){
+						node = (hir_node_t){
 							.kind = NODE_INTEGER_LIT,
 							.loc = token.loc,
 							.type = TYPE_INFER,
@@ -1593,21 +1596,21 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 								is_mut = true;
 								pnext();
 							}
-							ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
-							node = (ir_node_t){
+							hir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
+							node = (hir_node_t){
 								.kind = NODE_ADDR_OF,
 								.loc = token.loc,
 								.type = TYPE_INFER,
-								.d_addr_of.ref = ir_memdup(rhs),
+								.d_addr_of.ref = hir_memdup(rhs),
 								.d_addr_of.is_mut = is_mut,
 							};
 						} else {
-							ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
-							node = (ir_node_t){
+							hir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
+							node = (hir_node_t){
 								.kind = NODE_PREFIX,
 								.loc = token.loc,
 								.type = TYPE_INFER,
-								.d_prefix.expr = ir_memdup(rhs),
+								.d_prefix.expr = hir_memdup(rhs),
 								.d_prefix.kind = token.kind,
 							};
 						}
@@ -1647,12 +1650,12 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 		if (is_single) {
 			is_single = false;
 		} else {
-			node = (ir_node_t){
+			node = (hir_node_t){
 				.kind = NODE_CALL,
 				.loc = onode.loc,
 				.type = TYPE_INFER,
-				.d_call.f = ir_memdup(onode),
-				.d_call.arg = ir_memdup(node),
+				.d_call.f = hir_memdup(onode),
+				.d_call.arg = hir_memdup(node),
 			};
 		}
 
@@ -1683,11 +1686,11 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				case TOK_INC:
 				case TOK_DEC: {
 					pnext();
-					node = (ir_node_t){
+					node = (hir_node_t){
 						.kind = NODE_POSTFIX,
 						.loc = token.loc,
 						.type = TYPE_INFER,
-						.d_postfix.expr = ir_memdup(node),
+						.d_postfix.expr = hir_memdup(node),
 						.d_postfix.kind = token.kind,
 					};
 					continue;
@@ -1699,11 +1702,11 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 						// cast
 						if (token.kind == TOK_COLON) {
 							type_t type = ptype();
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_CAST,
 								.loc = token.loc,
 								.type = type,
-								.d_cast = ir_memdup(node),
+								.d_cast = hir_memdup(node),
 							};
 							continue;
 						}
@@ -1712,18 +1715,18 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 						if (token.kind == TOK_DOT && p.token.kind == TOK_MUL) {
 							loc_t oloc = token.loc;
 							pnext();
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_DEREF,
 								.loc = oloc,
 								.type = TYPE_INFER,
-								.d_deref = ir_memdup(node),
+								.d_deref = hir_memdup(node),
 							};
 							continue;
 						}
 
 						tok_t kind = token.kind;
 
-						ir_node_t rhs = pexpr(s, ptok_prec(kind), cfg, previous_exprs);
+						hir_node_t rhs = pexpr(s, ptok_prec(kind), cfg, previous_exprs);
 
 						bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
 
@@ -1736,11 +1739,11 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 							[TOK_ASSIGN_MOD] = TOK_MOD,
 						};
 
-						ir_node_t *p_node = ir_memdup(node);
-						ir_node_t *p_rhs = ir_memdup(rhs);
+						hir_node_t *p_node = hir_memdup(node);
+						hir_node_t *p_rhs = hir_memdup(rhs);
 
 						if (kind == TOK_ASSIGN) {
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_ASSIGN,
 								.loc = token.loc,
 								.type = TYPE_INFER,
@@ -1757,7 +1760,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 							// seems wildly unsafe to not do a deep copy of `p_node` here
 							// but most likely will be okay, since the lhs is used in a very similar context
 
-							ir_node_t op_node = {
+							hir_node_t op_node = {
 								.kind = NODE_INFIX,
 								.loc = token.loc,
 								.type = TYPE_INFER,
@@ -1765,51 +1768,51 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 								.d_infix.rhs = p_rhs,
 								.d_infix.kind = desugared_infix,
 							};
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_ASSIGN,
 								.loc = token.loc,
 								.type = TYPE_INFER,
 								.d_assign.lhs = p_node,
-								.d_assign.rhs = ir_memdup(op_node),
+								.d_assign.rhs = hir_memdup(op_node),
 							};
 						} else if (token.kind == TOK_AND) {
 							// a && b -> if a then b else false
 
-							ir_node_t false_node = (ir_node_t){
+							hir_node_t false_node = (hir_node_t){
 								.kind = NODE_BOOL_LIT,
 								.loc = token.loc,
 								.type = TYPE_BOOL,
 								.d_bool_lit = false,
 							};
 
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_IF,
 								.loc = token.loc,
 								.type = TYPE_BOOL, // force bool
 								.d_if.cond = p_node,
 								.d_if.then = p_rhs,
-								.d_if.els = ir_memdup(false_node),
+								.d_if.els = hir_memdup(false_node),
 							};
 						} else if (token.kind == TOK_OR) {
 							// a || b -> if a then true else b
 
-							ir_node_t true_node = (ir_node_t){
+							hir_node_t true_node = (hir_node_t){
 								.kind = NODE_BOOL_LIT,
 								.loc = token.loc,
 								.type = TYPE_BOOL,
 								.d_bool_lit = true,
 							};
 
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_IF,
 								.loc = token.loc,
 								.type = TYPE_BOOL,
 								.d_if.cond = p_node,
-								.d_if.then = ir_memdup(true_node),
+								.d_if.then = hir_memdup(true_node),
 								.d_if.els = p_rhs,
 							};
 						} else {
-							node = (ir_node_t){
+							node = (hir_node_t){
 								.kind = NODE_INFIX,
 								.loc = token.loc,
 								.type = TYPE_INFER,
@@ -1849,13 +1852,13 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 //
 // the desugared match asserts that the number of arguments are all the same
 // i.e x == arrlenu(lambda.args)
-void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
+void pproc(hir_node_t *out_expr, hir_scope_t *s0, hir_node_t *previous_exprs) {
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
 	// create new var before evaluation so it can be referenced recursively
-	ir_rvar_t proc_var = ir_new_var(s0, name, name_loc, previous_exprs);
+	hir_rvar_t proc_var = hir_new_var(s0, name, name_loc, previous_exprs);
 	VAR_PTR(proc_var)->is_proc_decl = true; // is a desugared proc decl
 
 	pnext();
@@ -1873,10 +1876,10 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 
 	u32 pattern_len = 0; // zero is invalid, all functions have arity >= 1
 
-	ir_pattern_t *match_patterns = NULL;
-	ir_node_t *match_exprs = NULL;
-	ir_scope_t *match_scopes = NULL;
-	ir_scope_t *s1 = ir_new_scope_ptr(s0);
+	hir_pattern_t *match_patterns = NULL;
+	hir_node_t *match_exprs = NULL;
+	hir_scope_t *match_scopes = NULL;
+	hir_scope_t *s1 = hir_new_scope_ptr(s0);
 
 	if (!(p.token.kind == TOK_IDENT && p.token.lit == name)) {
 		err_with_pos(name_loc, "expected function `%s` implementation after type", sv_from(name));
@@ -1889,13 +1892,13 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 		// add: ...
 		//      ^^^ (patterns)
 
-		ir_pattern_t *patterns = NULL;
+		hir_pattern_t *patterns = NULL;
 
 		// scope of the match arm
-		ir_scope_t s2 = ir_new_scope(s1);
+		hir_scope_t s2 = hir_new_scope(s1);
 
 		while (true) {
-			ir_pattern_t pattern = ppattern(&s2, NULL, false);
+			hir_pattern_t pattern = ppattern(&s2, NULL, false);
 			arrpush(patterns, pattern);
 			if (p.token.kind == TOK_ASSIGN) {
 				break;
@@ -1909,7 +1912,7 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 			err_with_pos(name_loc, "function pattern matching with different number of arguments", sv_from(name));
 		}
 
-		ir_pattern_t pattern = {
+		hir_pattern_t pattern = {
 			.kind = PATTERN_TUPLE,
 			.loc = patterns[0].loc,
 			.d_tuple = {
@@ -1922,7 +1925,7 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 		pnext();
 
 		pscope_enter();
-		ir_node_t expr = pexpr(&s2, 0, 0, NULL);
+		hir_node_t expr = pexpr(&s2, 0, 0, NULL);
 		pscope_leave();
 
 		arrpush(match_exprs, expr);
@@ -1932,7 +1935,7 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 
 	// captured the types and all patterns, create function here
 
-	ir_node_t tuple_expr = {
+	hir_node_t tuple_expr = {
 		.kind = NODE_TUPLE,
 		.type = TYPE_INFER,
 		.loc = name_loc,
@@ -1945,17 +1948,17 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 	//     (x, y) -> x + y
 
 	// create variable list
-	ir_rvar_t *vars = NULL;
+	hir_rvar_t *vars = NULL;
 	for (u32 i = 0; i < pattern_len; i++) {
 		// convert `i` to string
 		char *varname;
 		asprintf(&varname, "_%u", i);
-		ir_rvar_t var = ir_new_var(s1, sv_move(varname), (loc_t){}, NULL);
+		hir_rvar_t var = hir_new_var(s1, sv_move(varname), (loc_t){}, NULL);
 		VAR_PTR(var)->is_arg = true; // is an argument
 		
 		arrpush(vars, var);
 
-		ir_node_t get_var = {
+		hir_node_t get_var = {
 			.kind = NODE_VAR,
 			.type = TYPE_INFER,
 			.loc = name_loc,
@@ -1965,30 +1968,30 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 		arrpush(tuple_expr.d_tuple.elems, get_var);
 	}
 
-	ir_node_t match = {
+	hir_node_t match = {
 		.kind = NODE_MATCH,
 		.loc = name_loc,
 		.type = TYPE_INFER,
 		.d_match = {
-			.expr = ir_memdup(tuple_expr),
+			.expr = hir_memdup(tuple_expr),
 			.patterns = match_patterns,
 			.exprs = match_exprs,
 			.scopes = match_scopes,
 		},
 	};
 
-	ir_node_t *lamdba = ir_memdup((ir_node_t){
+	hir_node_t *lamdba = hir_memdup((hir_node_t){
 		.kind = NODE_LAMBDA,
 		.loc = name_loc,
 		.type = TYPE_INFER,
 		.d_lambda = {
 			.args = vars,
 			.scope = s1,
-			.expr = ir_memdup(match),
+			.expr = hir_memdup(match),
 		}
 	});
 
-	*out_expr = (ir_node_t){
+	*out_expr = (hir_node_t){
 		.kind = NODE_LET_DECL,
 		.loc = name_loc,
 		.type = TYPE_UNIT,
@@ -2004,8 +2007,8 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 // `previous_exprs` is used when multiple function declarations are in the same scope
 // can be null
 // IT IS VERY IMPORTANT THAT `previous_exprs` HAS SCOPE `s`
-// remember: the `ir_node_t *expr` WILL ALWAYS BE INVALIDATED. ALWAYS.
-bool pstmt(ir_node_t *expr, ir_scope_t *s, ir_node_t *previous_exprs) {
+// remember: the `hir_node_t *expr` WILL ALWAYS BE INVALIDATED. ALWAYS.
+bool pstmt(hir_node_t *expr, hir_scope_t *s, hir_node_t *previous_exprs) {
 	bool set = false;
 
 	switch (p.token.kind) {
@@ -2065,8 +2068,8 @@ void pimport(void) {
 	};
 }
 
-void pmake_pub(ir_node_t *node) {
-	ir_var_t *varp;
+void pmake_pub(hir_node_t *node) {
+	hir_var_t *varp;
 	
 	/* switch (node->kind) {
 		case NODE_PROC_DECL: {
@@ -2105,7 +2108,7 @@ void ptop_stmt(void) {
 			// fall through
 		}
 		default: {
-			ir_node_t expr;
+			hir_node_t expr;
 			bool set = pstmt(&expr, NULL, p.modp->exprs);
 			if (set) {
 				arrpush(p.modp->exprs, expr);
@@ -2145,8 +2148,8 @@ void pentry(rfile_t file) {
 	papply_pub();
 }
 
-void _ir_dump_var_w_type(ir_rvar_t var) {
-	ir_var_t *varp = VAR_PTR(var);
+void _hir_dump_var_w_type(hir_rvar_t var) {
+	hir_var_t *varp = VAR_PTR(var);
 	
 	const char *mut_str = varp->is_mut ? "'" : "";
 	printf("%s%s.%u", mut_str, sv_from(VAR_PTR(var)->name), var);
@@ -2157,11 +2160,11 @@ void _ir_dump_var_w_type(ir_rvar_t var) {
 	}
 }
 
-void _ir_dump_var(ir_rvar_t var) {
+void _hir_dump_var(hir_rvar_t var) {
 	printf("%s.%u", sv_from(VAR_PTR(var)->name), var);
 }
 
-void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
+void _hir_dump_pattern(mod_t *modp,hir_scope_t *s, hir_pattern_t pattern) {
 	switch (pattern.kind) {
 		case PATTERN_UNDERSCORE: {
 			printf("_");
@@ -2172,13 +2175,13 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 			break;
 		}
 		case PATTERN_VAR: {
-			_ir_dump_var_w_type(pattern.d_var);
+			_hir_dump_var_w_type(pattern.d_var);
 			break;
 		}
 		case PATTERN_TUPLE: {
 			printf("(");
 			for (u32 i = 0; i < arrlen(pattern.d_tuple.elems); i++) {
-				_ir_dump_pattern(modp, s, pattern.d_tuple.elems[i]);
+				_hir_dump_pattern(modp, s, pattern.d_tuple.elems[i]);
 				if (i != arrlen(pattern.d_tuple.elems) - 1) {
 					printf(", ");
 				}
@@ -2193,18 +2196,18 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 		case PATTERN_ARRAY: {
 			printf("[");
 			if (pattern.d_array.match && pattern.d_array.match_lhs) {
-				_ir_dump_pattern(modp, s, *pattern.d_array.match);
+				_hir_dump_pattern(modp, s, *pattern.d_array.match);
 				printf("..., ");
 			}
 			for (u32 i = 0; i < arrlen(pattern.d_array.elems); i++) {
-				_ir_dump_pattern(modp, s, pattern.d_array.elems[i]);
+				_hir_dump_pattern(modp, s, pattern.d_array.elems[i]);
 				if (i != arrlen(pattern.d_array.elems) - 1) {
 					printf(", ");
 				}
 			}
 			if (pattern.d_array.match && !pattern.d_array.match_lhs) {
 				printf(", ...");
-				_ir_dump_pattern(modp, s, *pattern.d_array.match);
+				_hir_dump_pattern(modp, s, *pattern.d_array.match);
 			}
 			printf("]");
 			break;
@@ -2215,33 +2218,33 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 	}
 }
 
-void _ir_dump_scope(mod_t *modp, ir_scope_t *s) {
+void _hir_dump_scope(mod_t *modp, hir_scope_t *s) {
 	for (int i = 0, c = arrlen(s->locals); i < c; i++) {
-		ir_rvar_t var = s->locals[i];
-		ir_var_t *varp = VAR_PTR(var);
+		hir_rvar_t var = s->locals[i];
+		hir_var_t *varp = VAR_PTR(var);
 		printf("  %s :: %s\n", sv_from(varp->name), type_dbg_str(varp->type));
 	}
 }
 
-static u32 _ir_tabcnt = 0;
-void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node);
+static u32 _hir_tabcnt = 0;
+void _hir_dump_stmt(mod_t *modp, hir_scope_t *s, hir_node_t node);
 
-void _ir_tabs(void) {
-	for (u32 i = 0; i < _ir_tabcnt; i++) {
+void _hir_tabs(void) {
+	for (u32 i = 0; i < _hir_tabcnt; i++) {
 		printf("  ");
 	}
 }
 
 #define TAB_PRINTF(...) \
-	_ir_tabs(); \
+	_hir_tabs(); \
 	printf(__VA_ARGS__);
 
-void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
+void _hir_dump_expr(mod_t *modp, hir_scope_t *s, hir_node_t node) {
 	// printf("[%s]:", type_dbg_str(node.type));
 
 	switch (node.kind) {
 		case NODE_VAR: {
-			_ir_dump_var(node.d_var);
+			_hir_dump_var(node.d_var);
 			break;
 		}
 		case NODE_GLOBAL_UNRESOLVED: {
@@ -2261,49 +2264,49 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_POSTFIX: {
-			_ir_dump_expr(modp, s, *node.d_postfix.expr);
+			_hir_dump_expr(modp, s, *node.d_postfix.expr);
 			printf("%s", node.d_postfix.kind == TOK_INC ? "++" : "--");
 			break;
 		}
 		case NODE_ASSIGN: {
-			_ir_dump_expr(modp, s, *node.d_assign.lhs);
+			_hir_dump_expr(modp, s, *node.d_assign.lhs);
 			printf(" = ");
-			_ir_dump_expr(modp, s, *node.d_assign.rhs);
+			_hir_dump_expr(modp, s, *node.d_assign.rhs);
 			break;
 		}
 		case NODE_INFIX: {
 			printf("(%s ", tok_op_str(node.d_infix.kind));
-			_ir_dump_expr(modp, s, *node.d_infix.lhs);
+			_hir_dump_expr(modp, s, *node.d_infix.lhs);
 			printf(" ");
-			_ir_dump_expr(modp, s, *node.d_infix.rhs);
+			_hir_dump_expr(modp, s, *node.d_infix.rhs);
 			printf(")");
 			break;
 		}
 		case NODE_PREFIX: {
 			printf("%s", tok_op_str(node.d_prefix.kind));
-			_ir_dump_expr(modp, s, *node.d_prefix.expr);
+			_hir_dump_expr(modp, s, *node.d_prefix.expr);
 			break;
 		}
 		case NODE_CALL: {
 			printf("(");
-			_ir_dump_expr(modp, s, *node.d_call.f);
+			_hir_dump_expr(modp, s, *node.d_call.f);
 			printf(" ");
-			_ir_dump_expr(modp, s, *node.d_call.arg);
+			_hir_dump_expr(modp, s, *node.d_call.arg);
 			printf(")");
 			break;
 		}
 		case NODE_LOOP: {
 			printf(":%u loop ", node.d_loop.blk_id);
-			_ir_dump_expr(modp, s, *node.d_loop.expr);
+			_hir_dump_expr(modp, s, *node.d_loop.expr);
 			break;
 		}
 		case NODE_DO_BLOCK: {
 			printf(":%u do\n", node.d_do_block.blk_id);
-			_ir_tabcnt++;
+			_hir_tabcnt++;
 			for (int i = 0, c = arrlen(node.d_do_block.exprs); i < c; i++) {
-				_ir_dump_stmt(modp, node.d_do_block.scope, node.d_do_block.exprs[i]);
+				_hir_dump_stmt(modp, node.d_do_block.scope, node.d_do_block.exprs[i]);
 			}
-			_ir_tabcnt--;
+			_hir_tabcnt--;
 			break;
 		}
 		case NODE_TUPLE_UNIT: {
@@ -2313,7 +2316,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_TUPLE: {
 			printf("(");
 			for (int i = 0, c = arrlen(node.d_tuple.elems); i < c; i++) {
-				_ir_dump_expr(modp, s, node.d_tuple.elems[i]);
+				_hir_dump_expr(modp, s, node.d_tuple.elems[i]);
 				if (i != c - 1) {
 					printf(", ");
 				}
@@ -2328,12 +2331,12 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_BREAK_INFERRED:
 		case NODE_BREAK: {
 			printf("brk :%u ", node.d_break.blk_id);
-			_ir_dump_expr(modp, s, *node.d_break.expr);
+			_hir_dump_expr(modp, s, *node.d_break.expr);
 			break;
 		}
 		case NODE_CAST: {
 			printf("cast[%s](", type_dbg_str(node.type));
-			_ir_dump_expr(modp, s, *node.d_cast);
+			_hir_dump_expr(modp, s, *node.d_cast);
 			printf(")");
 			break;
 		}
@@ -2342,20 +2345,20 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			break;
 		}
 		case NODE_SYM: {
-			ir_var_t *var = VAR_PTR(node.d_sym.var);
+			hir_var_t *var = VAR_PTR(node.d_sym.var);
 			printf("%s", fs_module_symbol_str(node.d_sym.mod, var->name));
 			break;
 		}
 		case NODE_IF: {
 			printf("if (");
-			_ir_dump_expr(modp, s, *node.d_if.cond);
+			_hir_dump_expr(modp, s, *node.d_if.cond);
 			printf(") ");
-			_ir_dump_expr(modp, s, *node.d_if.then);
+			_hir_dump_expr(modp, s, *node.d_if.then);
 			printf(" else ");
 			if (node.d_if.els == NULL) {
 				printf("()");
 			} else {
-				_ir_dump_expr(modp, s, *node.d_if.els);
+				_hir_dump_expr(modp, s, *node.d_if.els);
 			}
 			break;
 		}
@@ -2366,7 +2369,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_ARRAY_LIT: {
 			printf("[");
 			for (int i = 0, c = arrlen(node.d_array_lit.elems); i < c; i++) {
-				_ir_dump_expr(modp, s, node.d_array_lit.elems[i]);
+				_hir_dump_expr(modp, s, node.d_array_lit.elems[i]);
 				if (i != c - 1) {
 					printf(", ");
 				}
@@ -2379,7 +2382,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 
 			printf("\\");
 			for (u32 i = 0, c = arrlenu(node.d_lambda.args); i < c; i++) {
-				_ir_dump_var_w_type(node.d_lambda.args[i]);
+				_hir_dump_var_w_type(node.d_lambda.args[i]);
 				if (i != c - 1) {
 					printf(" ");
 				}
@@ -2387,7 +2390,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 
 			printf(" -> ");
 
-			_ir_dump_expr(modp, node.d_lambda.scope, *node.d_lambda.expr);
+			_hir_dump_expr(modp, node.d_lambda.scope, *node.d_lambda.expr);
 			break;
 		}
 		case NODE_MATCH: {
@@ -2395,28 +2398,28 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			//    (x, y) -> ...
 
 			printf("match ");
-			_ir_dump_expr(modp, s, *node.d_match.expr);
+			_hir_dump_expr(modp, s, *node.d_match.expr);
 			printf("\n");
 
-			_ir_tabcnt++;
+			_hir_tabcnt++;
 			for (u32 i = 0, c = arrlenu(node.d_match.exprs); i < c; i++) {
-				_ir_tabs();
-				_ir_dump_pattern(modp, &node.d_match.scopes[i], node.d_match.patterns[i]);
+				_hir_tabs();
+				_hir_dump_pattern(modp, &node.d_match.scopes[i], node.d_match.patterns[i]);
 				printf(" -> ");
-				_ir_dump_expr(modp, &node.d_match.scopes[i], node.d_match.exprs[i]);
+				_hir_dump_expr(modp, &node.d_match.scopes[i], node.d_match.exprs[i]);
 				printf("\n");
 			}
-			_ir_tabcnt--;
+			_hir_tabcnt--;
 			break;
 		}
 		case NODE_VOIDING: {
 			printf("void ");
-			_ir_dump_expr(modp, s, *node.d_voiding);
+			_hir_dump_expr(modp, s, *node.d_voiding);
 			break;
 		}
 		case NODE_DEREF: {
 			printf("(");
-			_ir_dump_expr(modp, s, *node.d_deref);
+			_hir_dump_expr(modp, s, *node.d_deref);
 			printf(").*");
 			break;
 		}
@@ -2425,7 +2428,7 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			if (node.d_addr_of.is_mut) {
 				printf("'");
 			}
-			_ir_dump_expr(modp, s, *node.d_addr_of.ref);
+			_hir_dump_expr(modp, s, *node.d_addr_of.ref);
 			break;
 		}
 		case NODE_SIZEOF_TYPE: {
@@ -2440,32 +2443,32 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 	}
 }
 
-void _ir_dump_stmt(mod_t *modp, ir_scope_t *s, ir_node_t node) {
+void _hir_dump_stmt(mod_t *modp, hir_scope_t *s, hir_node_t node) {
 	switch (node.kind) {
 		case NODE_LET_DECL: {
 			TAB_PRINTF("let ");
-			_ir_dump_pattern(modp, s, node.d_let_decl.pattern);
+			_hir_dump_pattern(modp, s, node.d_let_decl.pattern);
 			printf(" = ");
-			_ir_dump_expr(modp, s, *node.d_let_decl.expr);
+			_hir_dump_expr(modp, s, *node.d_let_decl.expr);
 			printf("\n");
 			break;
 		}
 		default: {
-			_ir_tabs();
-			_ir_dump_expr(modp, s, node);
+			_hir_tabs();
+			_hir_dump_expr(modp, s, node);
 			printf("\n");
 			break;
 		}
 	}
 }
 
-void ir_dump_module(rmod_t mod) {
+void hir_dump_module(rmod_t mod) {
 	void *_ = alloc_scratch(0);
 
 	mod_t *modp = MOD_PTR(mod);
 	printf("module %s\n\n", fs_module_symbol_str(mod, ISTR_NONE));
 	for (u32 i = 0, c = arrlenu(modp->exprs); i < c; i++) {
-		_ir_dump_stmt(modp, NULL, modp->exprs[i]);
+		_hir_dump_stmt(modp, NULL, modp->exprs[i]);
 	}
 
 	alloc_reset(_);
