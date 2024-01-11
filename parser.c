@@ -786,8 +786,8 @@ u8 ptok_prec(tok_t kind) {
 			return PREC_ADD;
 		/* case TOK_BAND:
 			return PREC_BAND; */
-		case TOK_XOR:
-			return PREC_XOR;
+		/* case TOK_XOR:
+			return PREC_XOR; */
 		/* case TOK_BOR:
 			return PREC_BOR; */
 		case TOK_EQ:
@@ -1117,16 +1117,18 @@ ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
 	//
 	// let x = x
 	//
-	
-	u32 olen = arrlenu(s->locals);
+	// avoid null refs
+	ir_scope_t *pl_scope = s == NULL ? &p.modp->toplevel : s;
+
+	u32 olen = arrlenu(pl_scope->locals);
 	ir_pattern_t pattern = ppattern(s, previous_exprs, true);
-	u32 rlen = arrlenu(s->locals);
+	u32 rlen = arrlenu(pl_scope->locals);
 
 	// mask variables
 	for (u32 i = olen; i < rlen; i++) {
-		VAR_PTR(s->locals[i])->is_in_decl = true;
+		VAR_PTR(pl_scope->locals[i])->is_in_decl = true;
 	}
-	
+
 	pexpect(TOK_ASSIGN);
 	// let x = 20
 	//         ^^
@@ -1134,7 +1136,7 @@ ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
 
 	// unmask variables
 	for (u32 i = olen; i < rlen; i++) {
-		VAR_PTR(s->locals[i])->is_in_decl = false;
+		VAR_PTR(pl_scope->locals[i])->is_in_decl = false;
 	}
 
 	return (ir_node_t){
@@ -1677,6 +1679,42 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 								.type = TYPE_INFER,
 								.d_assign.lhs = p_node,
 								.d_assign.rhs = ir_memdup(op_node),
+							};
+						} else if (token.kind == TOK_AND) {
+							// a && b -> if a then b else false
+
+							ir_node_t false_node = (ir_node_t){
+								.kind = NODE_BOOL_LIT,
+								.loc = token.loc,
+								.type = TYPE_BOOL,
+								.d_bool_lit = false,
+							};
+
+							node = (ir_node_t){
+								.kind = NODE_IF,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_if.cond = p_node,
+								.d_if.then = p_rhs,
+								.d_if.els = ir_memdup(false_node),
+							};
+						} else if (token.kind == TOK_OR) {
+							// a || b -> if a then true else b
+
+							ir_node_t true_node = (ir_node_t){
+								.kind = NODE_BOOL_LIT,
+								.loc = token.loc,
+								.type = TYPE_BOOL,
+								.d_bool_lit = true,
+							};
+
+							node = (ir_node_t){
+								.kind = NODE_IF,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_if.cond = p_node,
+								.d_if.then = ir_memdup(true_node),
+								.d_if.els = p_rhs,
 							};
 						} else {
 							node = (ir_node_t){

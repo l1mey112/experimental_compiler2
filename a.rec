@@ -1,27 +1,32 @@
-k: *'i32 -> ()
-k: ptr = void ptr.* += 256
+;k: *'i32 -> ()
+;k: ptr = void ptr.* += 256
+;
+;fib: usize -> usize
+;fib: 0 = 0
+;fib: 1 = 1
+;fib: n = fib (n - 1) + fib (n - 2)
+;
+;; fsum: []i32 -> i32
+;; fsum: [] = 0
+;; fsum: [x, ...xs] = x + sum xs
+;
+;t: () -> ()
+;t: () = do
+;    let 'k = 20
+;
+;    k += 20 + 20
+;
+;    let v = &'k
+;    v.* -= 20
+;
+;main: () -> ()
+;main: () = do
+;    let 'v = fib 10
+;    let k = &'v
+;    k.* = 24
+;    let c = k.*
 
-fib: usize -> usize
-fib: 0 = 0
-fib: 1 = 1
-fib: n = fib (n - 1) + fib (n - 2)
+let l = false
 
-; fsum: []i32 -> i32
-; fsum: [] = 0
-; fsum: [x, ...xs] = x + sum xs
-
-t: () -> ()
-t: () = do
-    let 'k = 20
-
-    k += 20 + 20
-
-    let v = &'k
-    v.* -= 20
-
-main: () -> ()
-main: () = do
-    let 'v = fib 10
-    let k = &'v
-    k.* = 24
-    let c = k.*
+c: bool -> bool
+c: t = t || l

@@ -203,9 +203,6 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_ASSIGN, "=") \
 	X(TOK_NEQ, "!=") \
 	X(TOK_NOT, "!") \
-	X(TOK_LSHIFT, "<<") \
-	X(TOK_RSHIFT, ">>") \
-	X(TOK_RUSHIFT, ">>>") \
 	X(TOK_LE, "<=") \
 	X(TOK_LT, "<") \
 	X(TOK_GE, ">=") \
@@ -213,7 +210,6 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_AND, "&&") \
 	X(TOK_OR, "||") \
 	X(TOK_PIPE, "|") \
-	X(TOK_XOR, "^") \
 	X(TOK_TILDE, "~") \
 	X(TOK_DOT, ".") \
 	X(TOK_COMMA, ",") \
@@ -225,7 +221,11 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_QUESTION, "?") \
 	X(TOK_SINGLE_AND, "&")
 
-//	X(TOK_BAND, "&") \
+// X(TOK_LSHIFT, "<<")
+// X(TOK_RSHIFT, ">>")
+// X(TOK_RUSHIFT, ">>>")
+// X(TOK_XOR, "^")
+// X(TOK_BAND, "&")
 
 #define TOK_HAS_LIT(t) \
 	((t) == TOK_IDENT || \
@@ -271,16 +271,16 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	(t) == TOK_GE || \
 	(t) == TOK_AND || \
 	(t) == TOK_OR || \
-	(t) == TOK_XOR || \
-	(t) == TOK_LSHIFT || \
-	(t) == TOK_RSHIFT || \
-	(t) == TOK_RUSHIFT || \
 	(t) == TOK_DOT || \
 	(t) == TOK_COLON)
 
 // TODO: impl pipe
-// (t) == TOK_BAND || \
-// (t) == TOK_BOR || \
+// (t) == TOK_BAND ||
+// (t) == TOK_BOR ||
+// (t) == TOK_XOR ||
+// (t) == TOK_LSHIFT ||
+// (t) == TOK_RSHIFT ||
+// (t) == TOK_RUSHIFT ||
 	
 
 #define TOK_X_LIST \

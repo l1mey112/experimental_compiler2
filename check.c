@@ -635,25 +635,15 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 	tok_t kind = node->d_infix.kind;
 
 	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
+	assert(!is_bool_op); // || and && get desugared into ternary expressions
+
 	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
 
-	type_t lhs_t;
-	type_t rhs_t;
+	type_t lhs_t = cexpr(s, TYPE_BOOL, lhs);
+	type_t rhs_t = cexpr(s, TYPE_BOOL, rhs);
+	cuse(lhs);
+	cuse(rhs);
 
-	if (!is_bool_op) {
-		lhs_t = cexpr(s, upvalue, lhs);
-		if (is_assign_op) {
-			clvalue(lhs, true);
-		}
-		rhs_t = cexpr(s, lhs_t, rhs);
-		cuse(lhs);
-		cuse(rhs);
-	} else {
-		lhs_t = cexpr(s, TYPE_BOOL, lhs);
-		rhs_t = cexpr(s, TYPE_BOOL, rhs);
-		cuse(lhs);
-		cuse(rhs);
-	}
 	// small sanity checks
 	assert(type_underlying(lhs_t) == lhs_t);
 	assert(type_underlying(rhs_t) == rhs_t);
