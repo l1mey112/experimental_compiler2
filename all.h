@@ -211,6 +211,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_OR, "||") \
 	X(TOK_PIPE, "|") \
 	X(TOK_TILDE, "~") \
+	X(TOK_TRIPLE_DOTS, "...") \
 	X(TOK_DOT, ".") \
 	X(TOK_COMMA, ",") \
 	X(TOK_OPAR, "(") \
@@ -375,6 +376,7 @@ struct ir_pattern_t {
 	enum pattern_kind_t {
 		PATTERN_VAR,
 		PATTERN_UNDERSCORE,
+		PATTERN_ARRAY,
 		PATTERN_TUPLE,
 		PATTERN_TUPLE_UNIT,
 		PATTERN_INTEGER_LIT,
@@ -387,6 +389,11 @@ struct ir_pattern_t {
 		struct {
 			ir_pattern_t *elems;
 		} d_tuple;
+		struct {
+			ir_pattern_t *elems;
+			ir_pattern_t *match; // single pattern, possible NULL
+			bool match_lhs; // else, rhs
+		} d_array;
 		istr_t d_integer_lit;
 	};
 };
@@ -599,6 +606,7 @@ struct tinfo_t {
 	};
 };
 
+type_t type_array_or_slice_to_slice(type_t type);
 type_t type_new_inc_mul(type_t type, bool is_mut);
 type_t typevar_new(void);
 void typevar_replace(type_t typevar, type_t type);

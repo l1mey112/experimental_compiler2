@@ -6,10 +6,6 @@
 ;fib: 1 = 1
 ;fib: n = fib (n - 1) + fib (n - 2)
 ;
-;; fsum: []i32 -> i32
-;; fsum: [] = 0
-;; fsum: [x, ...xs] = x + sum xs
-;
 ;t: () -> ()
 ;t: () = do
 ;    let 'k = 20
@@ -25,11 +21,15 @@
 ;    let k = &'v
 ;    k.* = 24
 ;    let c = k.*
+;
+;let l = false
+;
+;cond0: bool -> bool
+;cond0: t = t || l
+;
+;cond1: bool -> bool
+;cond1: t = t && l
 
-let l = false
-
-cond0: bool -> bool
-cond0: t = t || l
-
-cond1: bool -> bool
-cond1: t = t && l
+fsum: []i32 -> i32
+fsum: []         = 0
+fsum: [x, ...xs] = x + fsum xs

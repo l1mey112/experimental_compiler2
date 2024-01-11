@@ -442,10 +442,8 @@ void cpattern(ir_pattern_t *pattern, type_t type) {
 				err_with_pos(pattern->loc, "type mismatch: expected tuple, got `%s`", type_dbg_str(type));
 			}
 			tinfo_t *tinfo = type_get(type);
-			if (tinfo->kind != TYPE_TUPLE) {
-				err_with_pos(pattern->loc, "cannot match tuple pattern against non-tuple type `%s`", type_dbg_str(type));
-			}
 			if (arrlenu(tinfo->d_tuple.elems) != arrlenu(pattern->d_tuple.elems)) {
+				// TODO: printing pattern???
 				err_with_pos(pattern->loc, "cannot match tuple pattern against tuple type `%s` of different length", type_dbg_str(type));
 			}
 			for (size_t i = 0; i < arrlenu(pattern->d_tuple.elems); i++) {
@@ -474,6 +472,53 @@ void cpattern(ir_pattern_t *pattern, type_t type) {
 			break;
 		}
 		case PATTERN_UNDERSCORE: {
+			break;
+		}
+		case PATTERN_ARRAY: {
+			// [xs..., x] and [x, ...xs]
+			//
+			// never [xs...] and [...xs]
+			//
+			// []T and [3]T match [a, b, c]
+			// []T and [3]T match [a, b, ...c]
+
+			type_t elem_type;
+			size_t elems = 0; // can't be 0
+
+			switch (type_kind(type)) {
+				case TYPE_SLICE: {
+					elem_type = type_get(type)->d_slice.elem;
+					break;
+				}
+				case TYPE_ARRAY: {
+					elem_type = type_get(type)->d_array.elem;
+					elems = type_get(type)->d_array.length;
+					break;
+				}
+				default: {
+					err_with_pos(pattern->loc, "cannot match array pattern against non-array type `%s`", type_dbg_str(type));
+				}
+			}
+
+			size_t len = arrlenu(pattern->d_array.elems);
+
+			if (pattern->d_array.match) {
+				type_t make_slice = type_array_or_slice_to_slice(type);
+				cpattern(pattern->d_array.match, make_slice);
+
+				// error on:
+				//   [3]T -> [a, b, c, ...xs]
+				//   [3]T -> [xs..., a, b, c]
+				len++;
+			}
+
+			for (u32 i = 0, c = arrlenu(pattern->d_array.elems); i < c; i++) {
+				cpattern(&pattern->d_array.elems[i], elem_type);
+			}
+
+			if (elems != 0 && len != elems) {
+				err_with_pos(pattern->loc, "cannot match array pattern against array type `%s` of different length", type_dbg_str(type));
+			}
 			break;
 		}
 		default: {

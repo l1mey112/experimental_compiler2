@@ -72,6 +72,18 @@ int pimport_ident(istr_t name) {
 	return -1;
 }
 
+ir_node_t *ir_memdup(ir_node_t node) {
+	ir_node_t *ptr = malloc(sizeof(ir_node_t));
+	*ptr = node;
+	return ptr;
+}
+
+ir_pattern_t *pattern_memdup(ir_pattern_t pattern) {
+	ir_pattern_t *ptr = malloc(sizeof(ir_pattern_t));
+	*ptr = pattern;
+	return ptr;
+}
+
 static bool ir_name_exists_in(ir_scope_t *scope, istr_t name) {
 	if (scope == NULL) {
 		scope = &p.modp->toplevel;
@@ -705,9 +717,15 @@ type_t ptype(void) {
 			type_t elem = ptype_unit();
 
 			if (is_array) {
+				size_t len = strtoull(sv_from(int_size.lit), NULL, 10);
+
+				if (len == 0) {
+					err_with_pos(int_size.loc, "array length cannot be zero");
+				}
+				
 				type = type_new((tinfo_t){
 					.kind = TYPE_ARRAY,
-					.d_array.length = strtoull(sv_from(int_size.lit), NULL, 10),
+					.d_array.length = len,
 					.d_array.elem = elem,
 				}, NULL);
 			} else {
@@ -1097,6 +1115,80 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 					.d_tuple.elems = elems,
 				};
 			}
+			return pattern;
+		}
+		case TOK_OSQ: {
+			// [1, a, b]
+			// ^
+			loc_t oloc = p.token.loc;
+			ir_pattern_t *elems = NULL;
+
+			ir_pattern_t pattern = {
+				.kind = PATTERN_ARRAY,
+				.loc = oloc,
+			};
+
+			// [x, ...xs]
+			// [xs..., x]
+			//
+			// [a..., b, c, d]
+			// [a, b, c, ...d]
+			//
+			// [a..., b, ...c]     (impossible and ambiguous)
+			//
+			pnext();
+			while (p.token.kind != TOK_CSQ) {
+				// [x, ...xs]
+				if (p.token.kind == TOK_TRIPLE_DOTS) {
+					if (pattern.d_array.match) {
+						err_with_pos(p.token.loc, "cannot have multiple `...` in array pattern");
+					}
+					loc_t oloc = p.token.loc;
+					pnext();
+					pattern.d_array.match = pattern_memdup(ppattern(s, previous_exprs, allow_inlay));
+					pattern.d_array.match_lhs = false;
+					if (p.token.kind != TOK_CSQ) {
+						// TODO: dbg str for patterns instead of printing `xs...`
+						err_with_pos(oloc, "a `...xs` in array pattern must reside at the end");
+					}
+				} else {
+					ir_pattern_t elem = ppattern(s, previous_exprs, allow_inlay);
+
+					// [xs..., x]
+					if (p.token.kind == TOK_TRIPLE_DOTS) {
+						if (pattern.d_array.match) {
+							err_with_pos(p.token.loc, "cannot have multiple `...` in array pattern");
+						}
+						if (arrlenu(elems) != 0) {
+							// TODO: dbg str for patterns instead of printing `xs...`
+							err_with_pos(p.token.loc, "a `xs...` in array pattern must reside at the start");
+						}
+						pnext();
+						pattern.d_array.match = pattern_memdup(elem);
+						pattern.d_array.match_lhs = true;
+					} else {
+						arrpush(elems, elem);
+					}
+				}
+				
+				if (p.token.kind == TOK_COMMA) {
+					pnext();
+				} else if (p.token.kind != TOK_CSQ) {
+					punexpected("expected `,` or `]`");
+				}
+			}
+			pnext();
+
+			// [xs...] and [...xs] not allowed
+			if (arrlenu(elems) == 0 && pattern.d_array.match) {
+				err_with_pos(pattern.d_array.match->loc, "a `...` in array pattern must not be the only pattern");
+				// TODO: print patterns
+				// hint: use `xs` instead
+			}
+
+			// set
+			pattern.d_array.elems = elems;
+
 			return pattern;
 		}
 		default: {
@@ -2093,6 +2185,25 @@ void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
 		}
 		case PATTERN_TUPLE_UNIT: {
 			printf("()");
+			break;
+		}
+		case PATTERN_ARRAY: {
+			printf("[");
+			if (pattern.d_array.match && pattern.d_array.match_lhs) {
+				_ir_dump_pattern(modp, s, *pattern.d_array.match);
+				printf("..., ");
+			}
+			for (u32 i = 0; i < arrlen(pattern.d_array.elems); i++) {
+				_ir_dump_pattern(modp, s, pattern.d_array.elems[i]);
+				if (i != arrlen(pattern.d_array.elems) - 1) {
+					printf(", ");
+				}
+			}
+			if (pattern.d_array.match && !pattern.d_array.match_lhs) {
+				printf(", ...");
+				_ir_dump_pattern(modp, s, *pattern.d_array.match);
+			}
+			printf("]");
 			break;
 		}
 		default: {
