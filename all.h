@@ -428,6 +428,7 @@ struct ir_node_t {
 		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
 		NODE_UNDEFINED,
 		NODE_VOIDING, // evaluates expr, possible effects. discards return value, returning ()
+		NODE_SIZEOF_TYPE, // is usize
 	} kind;
 	
 	type_t type;
@@ -441,6 +442,7 @@ struct ir_node_t {
 		istr_t d_global_unresolved;
 		ir_node_t *d_voiding;
 		ir_node_t *d_deref;
+		type_t d_sizeof_type;
 		struct {
 			ir_node_t *lhs;
 			ir_node_t *rhs;

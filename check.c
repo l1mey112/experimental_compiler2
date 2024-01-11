@@ -105,8 +105,15 @@ bool ctype_is_numeric(type_t type) {
 		(kind == TYPE_F32 || kind == TYPE_F64);
 }
 
+bool ctype_is_integer(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
+		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END);
+}
+
 // TYPE_INFER on fail to convert
-type_t cconvert_integers(type_t to, type_t from) {
+type_t cconvert_numbers(type_t to, type_t from) {
 	assert(ctype_is_numeric(to));
 	assert(ctype_is_numeric(from));
 	
@@ -234,6 +241,11 @@ bool ckind_is_numeric(ti_kind kind) {
 	return (kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END) ||
 		(kind >= TYPE_UNSIGNED_INTEGERS_START && kind <= TYPE_UNSIGNED_INTEGERS_END) ||
 		(kind == TYPE_F32 || kind == TYPE_F64);
+}
+
+bool ctype_is_signed(type_t type) {
+	ti_kind kind = type_kind(type);
+	return kind >= TYPE_SIGNED_INTEGERS_START && kind <= TYPE_SIGNED_INTEGERS_END;
 }
 
 // signal that node is used, raise errors if needed
@@ -420,7 +432,7 @@ type_t cunify(type_t lhs_t, ir_node_t *rhs) {
 	}
 
 	if (ckind_is_numeric(lhs_kind) && ckind_is_numeric(rhs_kind)) {
-		type_t lhs_c = cconvert_integers(lhs_t, rhs_t);
+		type_t lhs_c = cconvert_numbers(lhs_t, rhs_t);
 
 		if (lhs_c != TYPE_INFER) {
 			if (lhs_c != rhs_t) {
@@ -683,29 +695,75 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 	assert(!is_bool_op); // || and && get desugared into ternary expressions
 
 	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
+	bool is_ptr_arith = false;
 
-	type_t lhs_t = cexpr(s, TYPE_BOOL, lhs);
-	type_t rhs_t = cexpr(s, TYPE_BOOL, rhs);
+	type_t lhs_t = cexpr(s, upvalue, lhs);
+	type_t rhs_t = cexpr(s, lhs_t, rhs);
+	//
+	ti_kind lhs_kind = type_kind(lhs_t);
+
+	if (lhs_kind == TYPE_PTR && (kind == TOK_ADD || kind == TOK_SUB)) {
+		is_ptr_arith = true;
+	} else if (lhs_kind == TYPE_PTR) {
+		err_with_pos(node->loc, "invalid operation `%s` on pointer type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+	}
+
 	cuse(lhs);
 	cuse(rhs);
 
-	// small sanity checks
-	assert(type_underlying(lhs_t) == lhs_t);
-	assert(type_underlying(rhs_t) == rhs_t);
-	//
-	ti_kind lhs_kind = type_kind(lhs_t);
-	ti_kind rhs_kind = type_kind(rhs_t);
-
-	// v :: *i32
-	// v + 20      becomes:      v + (20:usize * 4):*i32
 	// pointer arithmetic relies on underlying type
-	if (lhs_kind == TYPE_PTR) {
-		// disallow / and % on pointers? maybe not.
-		// subtracting two pointers should result in an isize? possibly.
-		assert_not_reached();
-	}
+	// `v: *i32` with `v + 20` becomes: 
+	//
+	// v + (20:usize * 4):*i32
+	//
+	// TODO?: ptr - ptr -> isize
+	//
+	// ptr + imm -> ptr
+	// ptr - imm -> ptr
+	if (is_ptr_arith) {
+		// v + offset
+		//
+		// v + (offset:usize * sizeof type):v_ptr
 
-	node->type = cunify(lhs_t, rhs);
+		if (!ctype_is_integer(rhs_t)) {
+			err_with_pos(node->loc, "type mismatch: expected integer, got `%s`", type_dbg_str(rhs_t));
+		}
+		
+		// force type USIZE
+		// twos complement saves us
+		cir_cast(TYPE_USIZE, rhs, rhs->loc);
+
+		ir_node_t sizeof_type = {
+			.kind = NODE_SIZEOF_TYPE,
+			.loc = rhs->loc,
+			.type = TYPE_USIZE,
+			.d_sizeof_type = type_get(lhs_t)->d_ptr.ref,
+		};
+
+		ir_node_t *mul = ir_memdup((ir_node_t){
+			.kind = NODE_INFIX,
+			.loc = rhs->loc,
+			.type = TYPE_USIZE,
+			.d_infix = {
+				.kind = TOK_MUL,
+				.lhs = rhs,
+				.rhs = ir_memdup(sizeof_type),
+			},
+		});
+
+		cir_cast(lhs_t, mul, rhs->loc);
+
+		node->d_infix.rhs = mul;
+		node->type = lhs_t;
+	} else {
+		if (!ctype_is_numeric(lhs_t)) {
+			err_with_pos(node->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+		}
+		if (!ctype_is_numeric(rhs_t)) {
+			err_with_pos(node->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
+		}
+		node->type = cunify(lhs_t, rhs);
+	}
 
 	// comparison operators
 	// ==  !=  <  >  <=  >= 

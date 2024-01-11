@@ -1878,6 +1878,10 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 	ir_scope_t *match_scopes = NULL;
 	ir_scope_t *s1 = ir_new_scope_ptr(s0);
 
+	if (!(p.token.kind == TOK_IDENT && p.token.lit == name)) {
+		err_with_pos(name_loc, "expected function `%s` implementation after type", sv_from(name));
+	}
+
 	while (p.token.kind == TOK_IDENT && p.token.lit == name) {
 		pnext();
 		pexpect(TOK_COLON);
@@ -1887,8 +1891,11 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 
 		ir_pattern_t *patterns = NULL;
 
+		// scope of the match arm
+		ir_scope_t s2 = ir_new_scope(s1);
+
 		while (true) {
-			ir_pattern_t pattern = ppattern(s1, NULL, false);
+			ir_pattern_t pattern = ppattern(&s2, NULL, false);
 			arrpush(patterns, pattern);
 			if (p.token.kind == TOK_ASSIGN) {
 				break;
@@ -1912,11 +1919,7 @@ void pproc(ir_node_t *out_expr, ir_scope_t *s0, ir_node_t *previous_exprs) {
 
 		// add: ... =
 		//          ^
-
 		pnext();
-
-		// scope of the match arm
-		ir_scope_t s2 = ir_new_scope(s1);
 
 		pscope_enter();
 		ir_node_t expr = pexpr(&s2, 0, 0, NULL);
@@ -2425,6 +2428,10 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			_ir_dump_expr(modp, s, *node.d_addr_of.ref);
 			break;
 		}
+		case NODE_SIZEOF_TYPE: {
+			printf("sizeof[%s]", type_dbg_str(node.d_sizeof_type));
+			break;
+		}
 		default: {
 			printf("\nunknown expr kind %d\n", node.kind);
 			print_hint_with_pos(node.loc, "LOC HERE");
@@ -2459,9 +2466,6 @@ void ir_dump_module(rmod_t mod) {
 	printf("module %s\n\n", fs_module_symbol_str(mod, ISTR_NONE));
 	for (u32 i = 0, c = arrlenu(modp->exprs); i < c; i++) {
 		_ir_dump_stmt(modp, NULL, modp->exprs[i]);
-		if (i != c - 1) {
-			printf("\n");
-		}
 	}
 
 	alloc_reset(_);

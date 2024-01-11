@@ -1,35 +1,41 @@
-;k: *'i32 -> ()
-;k: ptr = void ptr.* += 256
-;
-;fib: usize -> usize
-;fib: 0 = 0
-;fib: 1 = 1
-;fib: n = fib (n - 1) + fib (n - 2)
-;
-;t: () -> ()
-;t: () = do
-;    let 'k = 20
-;
-;    k += 20 + 20
-;
-;    let v = &'k
-;    v.* -= 20
-;
-;main: () -> ()
-;main: () = do
-;    let 'v = fib 10
-;    let k = &'v
-;    k.* = 24
-;    let c = k.*
-;
-;let l = false
-;
-;cond0: bool -> bool
-;cond0: t = t || l
-;
-;cond1: bool -> bool
-;cond1: t = t && l
+k: *'i32 -> ()
+k: ptr = void ptr.* += 256
+
+fib: usize -> usize
+fib: 0 = 0
+fib: 1 = 1
+fib: n = fib (n - 1) + fib (n - 2)
+
+t: () -> ()
+t: () = do
+    let 'k = 20
+
+    k += 20 + 20
+
+    let v = &'k
+    v.* -= 20
+
+main: () -> ()
+main: () = do
+    let 'v = fib 10
+    let k = &'v
+    k.* = 24
+    let c = k.*
+
+let l = false
+
+cond0: bool -> bool
+cond0: t = t || l
+
+cond1: bool -> bool
+cond1: t = t && l
 
 fsum: []i32 -> i32
 fsum: []         = 0
 fsum: [x, ...xs] = x + fsum xs
+
+conv: [3]i32 -> (i32, i32, i32)
+conv: [x, y, z] = (x, y, z)
+
+arith: *i32 -> i32 -> *i32
+arith: ptr offset = ptr + offset
