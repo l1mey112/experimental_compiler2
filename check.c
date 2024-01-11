@@ -651,13 +651,6 @@ type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
 	ti_kind lhs_kind = type_kind(lhs_t);
 	ti_kind rhs_kind = type_kind(rhs_t);
 
-	if (is_bool_op) {
-		(void)cunify(TYPE_BOOL, lhs);
-		(void)cunify(TYPE_BOOL, rhs);
-		node->type = TYPE_BOOL;
-		return node->type;
-	}
-	
 	// v :: *i32
 	// v + 20      becomes:      v + (20:usize * 4):*i32
 	// pointer arithmetic relies on underlying type
@@ -1038,7 +1031,13 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			type_t then_type = cexpr(s, upvalue, expr->d_if.then);
 			type_t else_type = cexpr(s, upvalue, expr->d_if.els);
-			expr->type = cunify(then_type, expr->d_if.els);
+			// desugared ternary if possible
+			if (expr->type == TYPE_BOOL) {
+				(void)cunify_type(TYPE_BOOL, then_type, expr->d_if.then->loc);
+				(void)cunify_type(TYPE_BOOL, else_type, expr->d_if.els->loc);
+			} else {
+				expr->type = cunify(then_type, expr->d_if.els);
+			}
 			return expr->type;
 		}
 		case NODE_UNDEFINED: {

@@ -1693,7 +1693,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 							node = (ir_node_t){
 								.kind = NODE_IF,
 								.loc = token.loc,
-								.type = TYPE_INFER,
+								.type = TYPE_BOOL, // force bool
 								.d_if.cond = p_node,
 								.d_if.then = p_rhs,
 								.d_if.els = ir_memdup(false_node),
@@ -1711,7 +1711,7 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 							node = (ir_node_t){
 								.kind = NODE_IF,
 								.loc = token.loc,
-								.type = TYPE_INFER,
+								.type = TYPE_BOOL,
 								.d_if.cond = p_node,
 								.d_if.then = ir_memdup(true_node),
 								.d_if.els = p_rhs,

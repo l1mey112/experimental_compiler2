@@ -398,7 +398,7 @@ struct ir_node_t {
 		NODE_MATCH,
 		NODE_DO_BLOCK,
 		NODE_LOOP,
-		NODE_IF,
+		NODE_IF, // in checker, if type == TYPE_BOOL it is a desugared logic op
 		NODE_ASSIGN,
 		NODE_INFIX,
 		NODE_POSTFIX,

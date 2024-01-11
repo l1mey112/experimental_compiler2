@@ -28,5 +28,8 @@
 
 let l = false
 
-c: bool -> bool
-c: t = t || l
+cond0: bool -> bool
+cond0: t = t || l
+
+cond1: bool -> bool
+cond1: t = t && l
