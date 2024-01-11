@@ -202,6 +202,27 @@ static ir_node_t *ir_sym_find_use(ir_node_t *expr, istr_t name) {
 			}
 			return NULL;
 		}
+		case NODE_ADDR_OF: {
+			if ((r = ir_sym_find_use(expr->d_addr_of.ref, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_DEREF: {
+			if ((r = ir_sym_find_use(expr->d_deref, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_ASSIGN: {
+			if ((r = ir_sym_find_use(expr->d_infix.lhs, name))) {
+				return r;
+			}
+			if ((r = ir_sym_find_use(expr->d_infix.rhs, name))) {
+				return r;
+			}
+			return NULL;
+		}
 		default: {
 			// TODO: be sure to be exhaustive
 			printf("ir_sym_find_use: unhandled node kind %d\n", expr->kind);
@@ -286,7 +307,7 @@ static bool ir_var_resolve_name(ir_scope_t *scope, istr_t name, ir_rvar_t *out) 
 		ir_rvar_t id = scope->locals[i];
 		ir_var_t *var = VAR_PTR(id);
 
-		if (var->name == name) {
+		if (var->name == name && !var->is_in_decl) {
 			if (out) {
 				*out = id;
 			}
@@ -732,6 +753,7 @@ enum : u8 {
 	//PREC_BAND,    // &
 	PREC_ADD,     // + -
 	PREC_MUL,     // * / %
+	PREC_CALL,    // a b       (determined elsewhere)
 	PREC_CAST,    // :
 	PREC_PREFIX,  // - * ! &
 	PREC_POSTFIX, // ++ --
@@ -1084,19 +1106,36 @@ ir_pattern_t ppattern(ir_scope_t *s, ir_node_t *previous_exprs, bool allow_inlay
 }
 
 ir_node_t plet(ir_scope_t *s, u8 cfg, ir_node_t *previous_exprs) {
-	pcheck(TOK_LET);
-
 	loc_t oloc = p.token.loc;
 
 	pnext();
 	// let x = 20
 	//     ^
 
+	// because of how ppattern() creates variables, we can't delay resolving
+	// until after, so without this hack the below works:
+	//
+	// let x = x
+	//
+	
+	u32 olen = arrlenu(s->locals);
 	ir_pattern_t pattern = ppattern(s, previous_exprs, true);
+	u32 rlen = arrlenu(s->locals);
+
+	// mask variables
+	for (u32 i = olen; i < rlen; i++) {
+		VAR_PTR(s->locals[i])->is_in_decl = true;
+	}
+	
 	pexpect(TOK_ASSIGN);
 	// let x = 20
 	//         ^^
 	ir_node_t rhs = pexpr(s, 0, cfg, previous_exprs);
+
+	// unmask variables
+	for (u32 i = olen; i < rlen; i++) {
+		VAR_PTR(s->locals[i])->is_in_decl = false;
+	}
 
 	return (ir_node_t){
 		.kind = NODE_LET_DECL,
@@ -1277,6 +1316,14 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 				};
 				break;
 			}
+			// possible syntax ambiguity with `|` operator
+			/* case TOK_PIPE: {
+				// piecewise functions
+				
+				// | expr = ...
+				// | expr = ...
+				// else   = ...
+			} */
 			case TOK_COLON: {
 				// label
 				pnext();
@@ -1445,14 +1492,31 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 						};
 						pnext();
 					} else {
-						ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
-						node = (ir_node_t){
-							.kind = NODE_PREFIX,
-							.loc = token.loc,
-							.type = TYPE_INFER,
-							.d_prefix.expr = ir_memdup(rhs),
-							.d_prefix.kind = token.kind,
-						};
+						if (token.kind == TOK_SINGLE_AND) {
+							bool is_mut = false;
+							if (p.token.kind == TOK_TACK) {
+								// &'v = mut ref
+								is_mut = true;
+								pnext();
+							}
+							ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
+							node = (ir_node_t){
+								.kind = NODE_ADDR_OF,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_addr_of.ref = ir_memdup(rhs),
+								.d_addr_of.is_mut = is_mut,
+							};
+						} else {
+							ir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
+							node = (ir_node_t){
+								.kind = NODE_PREFIX,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_prefix.expr = ir_memdup(rhs),
+								.d_prefix.kind = token.kind,
+							};
+						}
 					}
 					break;
 				} else {
@@ -1498,7 +1562,8 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 			};
 		}
 
-		if (p.token.kind == TOK_EOF) {
+		// &a b -> &a(b) NOT &(a b)
+		if (p.token.kind == TOK_EOF || prec >= PREC_CALL) {
 			return node;
 		}
 
@@ -1562,17 +1627,72 @@ ir_node_t pexpr(ir_scope_t *s, u8 prec, u8 cfg, ir_node_t *previous_exprs) {
 							continue;
 						}
 
-						ir_node_t rhs = pexpr(s, ptok_prec(token.kind), cfg, previous_exprs);
+						tok_t kind = token.kind;
+
+						ir_node_t rhs = pexpr(s, ptok_prec(kind), cfg, previous_exprs);
+
+						bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
+
+						// sparse array
+						static const tok_t assign_op_to_op[] = {
+							[TOK_ASSIGN_ADD] = TOK_ADD,
+							[TOK_ASSIGN_SUB] = TOK_SUB,
+							[TOK_ASSIGN_MUL] = TOK_MUL,
+							[TOK_ASSIGN_DIV] = TOK_DIV,
+							[TOK_ASSIGN_MOD] = TOK_MOD,
+						};
+
+						ir_node_t *p_node = ir_memdup(node);
+						ir_node_t *p_rhs = ir_memdup(rhs);
+
+						if (kind == TOK_ASSIGN) {
+							node = (ir_node_t){
+								.kind = NODE_ASSIGN,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_assign.lhs = p_node,
+								.d_assign.rhs = p_rhs,
+							};
+						} else if (is_assign_op) {
+							// desugar
+							//
+							// a += b -> a = a + b
+							//
+							tok_t desugared_infix = assign_op_to_op[kind];
+
+							// seems wildly unsafe to not do a deep copy of `p_node` here
+							// but most likely will be okay, since the lhs is used in a very similar context
+
+							ir_node_t op_node = {
+								.kind = NODE_INFIX,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_infix.lhs = p_node,
+								.d_infix.rhs = p_rhs,
+								.d_infix.kind = desugared_infix,
+							};
+							node = (ir_node_t){
+								.kind = NODE_ASSIGN,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_assign.lhs = p_node,
+								.d_assign.rhs = ir_memdup(op_node),
+							};
+						} else {
+							node = (ir_node_t){
+								.kind = NODE_INFIX,
+								.loc = token.loc,
+								.type = TYPE_INFER,
+								.d_infix.lhs = p_node,
+								.d_infix.rhs = p_rhs,
+								.d_infix.kind = token.kind,
+							};
+						}
+
+						// NODE_ASSIGN
 
 						// random infix
-						node = (ir_node_t){
-							.kind = NODE_INFIX,
-							.loc = token.loc,
-							.type = TYPE_INFER,
-							.d_infix.lhs = ir_memdup(node),
-							.d_infix.rhs = ir_memdup(rhs),
-							.d_infix.kind = token.kind,
-						};
+						
 						continue;
 					}
 				}
@@ -1905,8 +2025,7 @@ void _ir_dump_var_w_type(ir_rvar_t var) {
 }
 
 void _ir_dump_var(ir_rvar_t var) {
-	const char *mut_str = VAR_PTR(var)->is_mut ? "'" : "";
-	printf("%s%s.%u", mut_str, sv_from(VAR_PTR(var)->name), var);
+	printf("%s.%u", sv_from(VAR_PTR(var)->name), var);
 }
 
 void _ir_dump_pattern(mod_t *modp,ir_scope_t *s, ir_pattern_t pattern) {
@@ -1992,6 +2111,12 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 		case NODE_POSTFIX: {
 			_ir_dump_expr(modp, s, *node.d_postfix.expr);
 			printf("%s", node.d_postfix.kind == TOK_INC ? "++" : "--");
+			break;
+		}
+		case NODE_ASSIGN: {
+			_ir_dump_expr(modp, s, *node.d_assign.lhs);
+			printf(" = ");
+			_ir_dump_expr(modp, s, *node.d_assign.rhs);
 			break;
 		}
 		case NODE_INFIX: {
@@ -2141,6 +2266,14 @@ void _ir_dump_expr(mod_t *modp, ir_scope_t *s, ir_node_t node) {
 			printf("(");
 			_ir_dump_expr(modp, s, *node.d_deref);
 			printf(").*");
+			break;
+		}
+		case NODE_ADDR_OF: {
+			printf("&");
+			if (node.d_addr_of.is_mut) {
+				printf("'");
+			}
+			_ir_dump_expr(modp, s, *node.d_addr_of.ref);
 			break;
 		}
 		default: {

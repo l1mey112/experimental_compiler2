@@ -78,6 +78,8 @@ void ctype_assert(type_t src, type_t of, loc_t onerror) {
 	src = type_underlying(src);
 	of = type_underlying(of);
 	
+	// TODO: with typevars, this is not enough
+	//       damn you original design of an immutable type system
 	if (src != of) {
 		err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(of), type_dbg_str(src));
 	}
@@ -277,9 +279,32 @@ void cuse_type(ir_node_t *node) {
 	}
 }
 
-void cmutable_lvalue(ir_node_t *node) {
-	if (node->kind != NODE_VAR) {
-		err_with_pos(node->loc, "cannot assign to non-variable");
+// typecheck the nodes all the way down, then call this on it
+void clvalue(ir_node_t *node, bool is_mutable) {
+	switch (node->kind) {
+		case NODE_VAR: {
+			ir_var_t *var = VAR_PTR(node->d_var);
+			if (is_mutable && !var->is_mut) {
+				// TODO: then pull a rust and suggest on a loc_t?
+				print_err_with_pos(node->loc, "cannot mutate immutable variable");
+				print_hint_with_pos(var->loc, "variable `%s` declared here", sv_from(var->name));
+				err_unwind();
+			}
+			break;
+		}
+		case NODE_DEREF: {
+			type_t ptr_type = node->d_deref->type;
+			assert(type_kind(ptr_type) == TYPE_PTR);
+			tinfo_t *info = type_get(ptr_type);
+
+			if (is_mutable && !info->d_ptr.is_mut) {
+				err_with_pos(node->loc, "cannot mutate immutable pointer `%s`", type_dbg_str(ptr_type));
+			}
+			break;
+		}
+		default: {
+			err_with_pos(node->loc, "this expression is not an lvalue");
+		}
 	}
 }
 
@@ -517,26 +542,41 @@ type_t cdo(ir_node_t *node, type_t upvalue) {
 	cscope_leave();
 	c.blocks_len--;
 
+	// TODO: remove this rhs precedence unification, cunify() works this way anyway
+	//       shouldn't check for TYPE_INFER. should be:
+	// 
+	//       blk->brk_type = cunify(blk->brk_type, expr)
+	//
 	// no breaks pointing to this do, but somehow some ! code ran
 	if (blk->brk_type == TYPE_INFER) {
 		assert(arrlast(node->d_do_block.exprs).type == TYPE_BOTTOM);
 		blk->brk_type = TYPE_BOTTOM;
 	}
 
-	ir_node_t last;
 	if (blk->brk_type == TYPE_UNIT && arrlast(node->d_do_block.exprs).kind == NODE_BREAK_INFERRED) {
-		last = arrlast(node->d_do_block.exprs);
+		//
+		// brk :0 v = 20
+		//
+		// v = 20
+		// brk :0 ()
+		
+		ir_node_t last = *arrlast(node->d_do_block.exprs).d_break.expr;
+		arrlast(node->d_do_block.exprs) = last;
 
-		arrlast(node->d_do_block.exprs) = (ir_node_t){
+		ir_node_t new_brk_unit = {
 			.kind = NODE_BREAK_UNIT,
 			.loc = last.loc,
 			.type = TYPE_BOTTOM,
 			.d_break.blk_id = blk_id,
-			.d_break.expr = ir_memdup(last),
+			.d_break.expr = NULL,
 		};
+
+		arrpush(node->d_do_block.exprs, new_brk_unit);
 	}
 
-	return blk->brk_type;
+	node->type = blk->brk_type;
+
+	return node->type;
 }
 
 type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
@@ -559,39 +599,52 @@ type_t cloop(ir_scope_t *s, ir_node_t *node, type_t upvalue) {
 	return blk->brk_type;
 }
 
-type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
+type_t cassign(ir_scope_t *s, ir_node_t *node) {
 	ir_node_t *lhs = node->d_infix.lhs;
 	ir_node_t *rhs = node->d_infix.rhs;
-	tok_t kind = node->d_infix.kind;
-
-	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
-
-	type_t lhs_t;
-	type_t rhs_t;
 
 	// ignore `upvalue`, the only places where a var doesn't have an underlying type is when it's `undefined`
 	// undefined means it's an error to read, so upvalues don't really matter anyway.
 	//
 	// no need for a cuse() on the assignments, we're only reading here
 	// further uses of possible unknown copies will be caught by cuse()
-	if (kind == TOK_ASSIGN) {
-		// TODO: do lvalue checks here
-		// TODO: extract place, but it would probably just be a var anyway
 
-		// unification of TYPE_UNDEFINED if posed with such
-		if (lhs->kind != NODE_VAR) {
-			err_with_pos(lhs->loc, "cannot assign to non-variable, TODO: lvalue checks");
-		}
+	type_t lhs_t = cexpr(s, TYPE_INFER, lhs);
+	clvalue(lhs, true);
+	type_t rhs_t = cexpr(s, lhs_t, rhs);
 
+	// unification of TYPE_UNDEFINED if posed with such
+	if (lhs->kind == NODE_VAR) {
 		ir_var_t *var = VAR_PTR(lhs->d_var);
 		if (var->type == TYPE_UNDEFINED) {
 			var->type = rhs_t;
 		}
+	}
 
-		lhs_t = var->type;
-		rhs_t = cexpr(s, lhs_t, rhs);
-	} else if (!is_bool_op) {
+	cuse(lhs);
+	cuse(rhs);
+
+	node->type = cunify(lhs_t, rhs);
+
+	return node->type;
+}
+
+type_t cinfix(ir_scope_t *s, type_t upvalue, ir_node_t *node) {
+	ir_node_t *lhs = node->d_infix.lhs;
+	ir_node_t *rhs = node->d_infix.rhs;
+	tok_t kind = node->d_infix.kind;
+
+	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
+	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
+
+	type_t lhs_t;
+	type_t rhs_t;
+
+	if (!is_bool_op) {
 		lhs_t = cexpr(s, upvalue, lhs);
+		if (is_assign_op) {
+			clvalue(lhs, true);
+		}
 		rhs_t = cexpr(s, lhs_t, rhs);
 		cuse(lhs);
 		cuse(rhs);
@@ -710,6 +763,8 @@ void clambda_body(ir_node_t *lambda) {
 }
 
 // if `opt_decl` is nonnull, it's a proc decl
+// TODO: should ignore `upvalue` if `upvalue` is just straight wrong
+//       function chain length should be <= lambda arity
 type_t clambda(ir_node_t *lambda, type_t upvalue, ir_var_t *opt_decl) {
 	loc_t onerror = lambda->loc;
 
@@ -799,10 +854,6 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 		case NODE_MATCH: {
 			return cmatch(s, expr, upvalue);
 		}
-		/* case NODE_PROC_DECL: {
-			cfn(expr);
-			return TYPE_UNIT;
-		} */
 		case NODE_PREFIX: {
 			switch (expr->d_prefix.kind) {
 				case TOK_SUB: {
@@ -837,6 +888,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			}
 			expr->type = type;
 			return expr->type;
+		}
+		case NODE_ASSIGN: {
+			return cassign(s, expr);
 		}
 		case NODE_INFIX: {
 			return cinfix(s, upvalue, expr);
@@ -992,19 +1046,9 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			if (cond_type != TYPE_BOOL) {
 				err_with_pos(expr->d_if.cond->loc, "type mismatch: expected `bool`, got `%s`", type_dbg_str(cond_type));
 			}
-			if (expr->d_if.els == NULL) {
-				upvalue = TYPE_INFER; // should be (), but does that even matter really?
-			}
-
 			type_t then_type = cexpr(s, upvalue, expr->d_if.then);
-
-			if (expr->d_if.els == NULL) {
-				// TODO: possibly ignore?
-				expr->type = cunify(TYPE_UNIT, expr->d_if.then);
-			} else {
-				type_t else_type = cexpr(s, upvalue, expr->d_if.els);
-				expr->type = cunify(then_type, expr->d_if.els);
-			}
+			type_t else_type = cexpr(s, upvalue, expr->d_if.els);
+			expr->type = cunify(then_type, expr->d_if.els);
 			return expr->type;
 		}
 		case NODE_UNDEFINED: {
@@ -1100,8 +1144,31 @@ type_t cexpr(ir_scope_t *s, type_t upvalue, ir_node_t *expr) {
 			expr->type = type_new(info, NULL);
 			return expr->type; 
 		}
+		case NODE_VOIDING: {
+			// TODO: discards operand, raise warning if it's totally useless
+			(void)cexpr(s, TYPE_INFER, expr->d_voiding);
+			return TYPE_UNIT;
+		}
+		case NODE_DEREF: {
+			type_t type = cexpr(s, TYPE_INFER, expr->d_deref);
+			cuse(expr->d_deref);
+			if (type_kind(type) != TYPE_PTR) {
+				err_with_pos(expr->loc, "type mismatch: expected pointer type, got `%s`", type_dbg_str(type));
+			}
+			expr->type = type_get(type)->d_ptr.ref;
+			return expr->type;
+		}
+		case NODE_ADDR_OF: {
+			bool is_mut_ref = expr->d_addr_of.is_mut;
+			type_t type = cexpr(s, TYPE_INFER, expr->d_addr_of.ref);
+			cuse(expr->d_addr_of.ref); // debatable... possibly cuse_type() ??
+			clvalue(expr->d_addr_of.ref, is_mut_ref);
+			expr->type = type_new_inc_mul(type, is_mut_ref);
+			return expr->type;
+		}
 		default: {
-			printf("unhandled expression kind: %d\n", expr->kind); 
+			printf("\nunknown expr kind %d\n", expr->kind);
+			print_hint_with_pos(expr->loc, "LOC HERE");
 			assert_not_reached();
 		}
 	}

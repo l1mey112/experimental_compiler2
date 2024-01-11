@@ -37,7 +37,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			return true;
 		}
 		case TYPE_PTR: {
-			return a->d_ptr.ref == b->d_ptr.ref;
+			return a->d_ptr.ref == b->d_ptr.ref && a->d_ptr.is_mut == b->d_ptr.is_mut;
 		}
 		case TYPE_VAR: {
 			// types with different typevar types are not equal

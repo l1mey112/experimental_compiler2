@@ -222,7 +222,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_OSQ, "[") \
 	X(TOK_CSQ, "]") \
 	X(TOK_COLON, ":") \
-	X(TOK_QUESTION, "?")
+	X(TOK_QUESTION, "?") \
+	X(TOK_SINGLE_AND, "&")
 
 //	X(TOK_BAND, "&") \
 
@@ -232,7 +233,8 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 
 #define TOK_IS_PREFIX(t) \
 	((t) == TOK_SUB || \
-	(t) == TOK_NOT)
+	(t) == TOK_NOT || \
+	(t) == TOK_SINGLE_AND)
 
 // these tokens will always evaluate to bool
 #define TOK_IS_COND(t) \
@@ -356,7 +358,8 @@ struct ir_var_t {
 	istr_t name;
 	loc_t loc;
 	type_t type;
-	bool is_mut;
+	bool is_in_decl; // ignore var, used in parser
+	bool is_mut; // is mut
 	bool is_proc_decl; // is a desugared proc decl
 	bool is_arg; // is lambda argument
 	bool is_pub; // is exposed to other modules
@@ -396,10 +399,12 @@ struct ir_node_t {
 		NODE_DO_BLOCK,
 		NODE_LOOP,
 		NODE_IF,
+		NODE_ASSIGN,
 		NODE_INFIX,
 		NODE_POSTFIX,
 		NODE_PREFIX,
 		NODE_DEREF,
+		NODE_ADDR_OF,
 		NODE_INTEGER_LIT,
 		NODE_BOOL_LIT,
 		NODE_VAR,
@@ -429,6 +434,14 @@ struct ir_node_t {
 		istr_t d_global_unresolved;
 		ir_node_t *d_voiding;
 		ir_node_t *d_deref;
+		struct {
+			ir_node_t *lhs;
+			ir_node_t *rhs;
+		} d_assign;
+		struct {
+			ir_node_t *ref;
+			bool is_mut;
+		} d_addr_of;
 		struct {
 			rmod_t mod;
 			istr_t name;
