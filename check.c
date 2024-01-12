@@ -694,8 +694,6 @@ type_t cinfix(hir_scope_t *s, type_t upvalue, hir_node_t *node) {
 	tok_t kind = node->d_infix.kind;
 
 	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
-	assert(!is_bool_op); // || and && get desugared into ternary expressions
-
 	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
 	bool is_ptr_arith = false;
 
@@ -757,20 +755,59 @@ type_t cinfix(hir_scope_t *s, type_t upvalue, hir_node_t *node) {
 
 		node->d_infix.rhs = mul;
 		node->type = lhs_t;
-	} else {
-		if (!ctype_is_numeric(lhs_t)) {
-			err_with_pos(node->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
-		}
-		if (!ctype_is_numeric(rhs_t)) {
-			err_with_pos(node->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
-		}
-		node->type = cunify(lhs_t, rhs);
-	}
+	} else if (is_bool_op) {
+		(void)cunify(TYPE_BOOL, lhs);
+		(void)cunify(TYPE_BOOL, rhs);
 
-	// comparison operators
-	// ==  !=  <  >  <=  >= 
-	if (kind == TOK_EQ || kind == TOK_NEQ || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE) {
-		node->type = TYPE_BOOL;
+		// a && b -> if (a) b else false
+		// a || b -> if (a) true else b
+
+		hir_node_t bool_lit = {
+			.kind = NODE_BOOL_LIT,
+			.loc = node->loc,
+			.type = TYPE_BOOL,
+		};
+
+		if (kind == TOK_AND) {
+			// a && b -> if a then b else false
+			bool_lit.d_bool_lit = false;
+
+			*node = (hir_node_t){
+				.kind = NODE_IF,
+				.loc = node->loc,
+				.type = TYPE_BOOL, // force bool
+				.d_if.cond = lhs,
+				.d_if.then = rhs,
+				.d_if.els = hir_memdup(bool_lit),
+			};
+		} else {
+			// a || b -> if a then true else b
+			bool_lit.d_bool_lit = true;
+
+			*node = (hir_node_t){
+				.kind = NODE_IF,
+				.loc = node->loc,
+				.type = TYPE_BOOL, // force bool
+				.d_if.cond = lhs,
+				.d_if.then = hir_memdup(bool_lit),
+				.d_if.els = rhs,
+			};
+		}
+	} else {
+		type_t type = cunify(lhs_t, rhs);
+		// comparison operators
+		// ==  !=  <  >  <=  >= 
+		if (kind == TOK_EQ || kind == TOK_NEQ || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE) {
+			node->type = TYPE_BOOL;
+		} else {
+			if (!ctype_is_numeric(lhs_t)) {
+				err_with_pos(node->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+			}
+			if (!ctype_is_numeric(rhs_t)) {
+				err_with_pos(node->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
+			}
+			node->type = type;
+		}
 	}
 
 	return node->type;
@@ -1136,13 +1173,7 @@ type_t cexpr(hir_scope_t *s, type_t upvalue, hir_node_t *expr) {
 			}
 			type_t then_type = cexpr(s, upvalue, expr->d_if.then);
 			type_t else_type = cexpr(s, upvalue, expr->d_if.els);
-			// desugared ternary if possible
-			if (expr->type == TYPE_BOOL) {
-				(void)cunify_type(TYPE_BOOL, then_type, expr->d_if.then->loc);
-				(void)cunify_type(TYPE_BOOL, else_type, expr->d_if.els->loc);
-			} else {
-				expr->type = cunify(then_type, expr->d_if.els);
-			}
+			expr->type = cunify(then_type, expr->d_if.els);
 			return expr->type;
 		}
 		case NODE_UNDEFINED: {
@@ -1313,7 +1344,7 @@ void ctoplevel_exprs(hir_scope_t *s, hir_node_t *exprs) {
 	}
 }
 
-void cmodule(rmod_t mod) {
+void hir_check_module(rmod_t mod) {
 	c = (cctx_t){
 		.mod = mod,
 		.modp = MOD_PTR(mod)

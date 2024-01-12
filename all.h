@@ -577,9 +577,10 @@ istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
-void cmodule(rmod_t mod);
-void pentry(rfile_t f);
+void hir_process_file(rfile_t f);
+void hir_check_module(rmod_t mod);
 void hir_dump_module(rmod_t mod);
+void hir_typed_desugar(void);
 
 hir_node_t *hir_memdup(hir_node_t node);
 

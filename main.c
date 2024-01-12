@@ -76,11 +76,11 @@ int main(int argc, const char *argv[]) {
 			replp->data = (u8*)inp;
 			replp->len = strlen(inp);
 
-			pentry(repl);
+			hir_process_file(repl);
 
 			// queue can grow
 			for (; i < fs_files_queue_len; i++) {
-				pentry(i);
+				hir_process_file(i);
 			}
 		}
 		eprintf("exiting repl\n");
@@ -96,7 +96,7 @@ int main(int argc, const char *argv[]) {
 		for (rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
 			eprintf("parsing file '%s'\n", fs_files_queue[i].fp);
-			pentry(i);
+			hir_process_file(i);
 			if (old_sz != fs_files_queue_len) {
 				eprintf("  %u new files added\n", fs_files_queue_len - old_sz);
 			}
@@ -110,9 +110,10 @@ ret:
 
 	if (!err && !setjmp(err_diag.unwind)) {
 		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
-			cmodule(i);
+			hir_check_module(i);
 		}
 	}
+	// hir_typed_desugar();
 	for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
 		printf("\n");
 		mod_t *modp = MOD_PTR(i);
