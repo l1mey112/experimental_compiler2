@@ -1346,370 +1346,301 @@ hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 
 	label.name = ISTR_NONE;
 
-	while (should_continue) {
-		hir_node_t onode = node;
-		token_t token = p.token;
+retry:
+	switch (token.kind) {
+		case TOK_VOID: {
+			pnext();
+			// void expr
+			//      ^^^^
+			hir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+			node = (hir_node_t){
+				.kind = NODE_VOIDING,
+				.loc = token.loc,
+				.type = TYPE_UNIT,
+				.d_voiding = hir_memdup(expr),
+			};
+			break;
+		}
+		case TOK_UNDEFINED: {
+			pnext();
+			node = (hir_node_t){
+				.kind = NODE_UNDEFINED,
+				.type = TYPE_UNDEFINED,
+				.loc = token.loc,
+			};
+			break;
+		}
+		case TOK_TRUE:
+		case TOK_FALSE: {
+			pnext();
+			node = (hir_node_t){
+				.kind = NODE_BOOL_LIT,
+				.type = TYPE_BOOL,
+				.loc = token.loc,
+				.d_bool_lit = token.kind == TOK_TRUE,
+			};
+			break;
+		}
+		// TODO: labels
+		case TOK_IF: {
+			// if (...) ... else ...
+			loc_t oloc = token.loc;
+			pnext();
+			pexpect(TOK_OPAR);
+			hir_node_t *cond = hir_memdup(pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs));
+			pexpect(TOK_CPAR);
 
-		switch (token.kind) {
-			case TOK_VOID: {
+			// if (...) ... else ...
+			//          ^^^
+
+			hir_node_t *then = hir_memdup(pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs));
+
+			// if (...) ... else ...
+			//              ^^^^
+			//            optional
+
+			hir_node_t *els = NULL;
+			if (p.token.kind == TOK_ELSE) {
 				pnext();
-				// void expr
-				//      ^^^^
-				hir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
-				node = (hir_node_t){
-					.kind = NODE_VOIDING,
-					.loc = token.loc,
+				els = hir_memdup(pexpr(s, 0, 0, previous_exprs));
+			} else {
+				// desugar to () return using voiding
+
+				// if (t) effect
+				//
+				// if (t) void effect
+				// else   ()
+
+				els = hir_memdup((hir_node_t){
+					.kind = NODE_TUPLE_UNIT,
+					.loc = oloc,
 					.type = TYPE_UNIT,
-					.d_voiding = hir_memdup(expr),
-				};
-				break;
+				});
+				then = hir_memdup((hir_node_t){
+					.kind = NODE_VOIDING,
+					.loc = then->loc,
+					.type = TYPE_UNIT,
+					.d_voiding = then,
+				});
 			}
-			case TOK_UNDEFINED: {
-				pnext();
-				node = (hir_node_t){
-					.kind = NODE_UNDEFINED,
-					.type = TYPE_UNDEFINED,
-					.loc = token.loc,
-				};
-				break;
-			}
-			case TOK_TRUE:
-			case TOK_FALSE: {
-				pnext();
-				node = (hir_node_t){
-					.kind = NODE_BOOL_LIT,
-					.type = TYPE_BOOL,
-					.loc = token.loc,
-					.d_bool_lit = token.kind == TOK_TRUE,
-				};
-				break;
-			}
-			// TODO: labels
-			case TOK_IF: {
-				// if (...) ... else ...
-				loc_t oloc = token.loc;
-				pnext();
-				pexpect(TOK_OPAR);
-				hir_node_t *cond = hir_memdup(pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs));
-				pexpect(TOK_CPAR);
 
-				// if (...) ... else ...
-				//          ^^^
-
-				hir_node_t *then = hir_memdup(pexpr(s, 0, PEXPR_ET_ELSE, previous_exprs));
-
-				// if (...) ... else ...
-				//              ^^^^
-				//            optional
-
-				hir_node_t *els = NULL;
-				if (p.token.kind == TOK_ELSE) {
-					pnext();
-					els = hir_memdup(pexpr(s, 0, 0, previous_exprs));
-				} else {
-					// desugar to () return using voiding
-
-					// if (t) effect
-					//
-					// if (t) void effect
-					// else   ()
-
-					els = hir_memdup((hir_node_t){
-						.kind = NODE_TUPLE_UNIT,
-						.loc = oloc,
-						.type = TYPE_UNIT,
-					});
-					then = hir_memdup((hir_node_t){
-						.kind = NODE_VOIDING,
-						.loc = then->loc,
-						.type = TYPE_UNIT,
-						.d_voiding = then,
-					});
+			node = (hir_node_t){
+				.kind = NODE_IF,
+				.type = TYPE_INFER,
+				.loc = token.loc,
+				.d_if = {
+					.cond = cond,
+					.then = then,
+					.els = els,
+				},
+			};
+			break;
+		}
+		// possible syntax ambiguity with `|` operator
+		// case TOK_PIPE:
+		case TOK_COLON: {
+			// label
+			pnext();
+			pcheck(TOK_IDENT);
+			label.name = p.token.lit;
+			label.name_loc = p.token.loc;
+			pnext();
+			switch (p.token.kind) {
+				case TOK_DO: {
+					break;
 				}
-
-				node = (hir_node_t){
-					.kind = NODE_IF,
-					.type = TYPE_INFER,
-					.loc = token.loc,
-					.d_if = {
-						.cond = cond,
-						.then = then,
-						.els = els,
-					},
-				};
-				break;
+				case TOK_LOOP: {
+					break;
+				}
+				default: {
+					err_with_pos(p.token.loc, "expected `do` or `loop` after label");
+				}
 			}
-			// possible syntax ambiguity with `|` operator
-			/* case TOK_PIPE: {
-				// piecewise functions
-				
-				// | expr = ...
-				// | expr = ...
-				// else   = ...
-			} */
-			case TOK_COLON: {
-				// label
+			goto retry;
+		}
+		case TOK_DO: {
+			node = pdo(s, label.name, label.name_loc); // TODO?: no chaining
+			label.name = ISTR_NONE;
+			should_continue = false;
+			break;
+		}
+		case TOK_LOOP: {
+			node = ploop(s, cfg, previous_exprs, label.name, label.name_loc);
+			label.name = ISTR_NONE;
+			break;
+		}
+		case TOK_LET: {
+			node = plet(s, cfg, previous_exprs);
+			should_continue = false; // single expr
+			break;
+		}
+		case TOK_BREAK: {
+			istr_t label = ISTR_NONE;
+			loc_t onerror = p.token.loc;
+			pnext();
+			// parse label
+			if (p.token.kind == TOK_COLON) {
 				pnext();
 				pcheck(TOK_IDENT);
-				label.name = p.token.lit;
-				label.name_loc = p.token.loc;
+				label = p.token.lit;
+				onerror = p.token.loc;
 				pnext();
-				switch (p.token.kind) {
-					case TOK_DO:
-						break;
-					default: {
-						err_with_pos(p.token.loc, "expected `do` after label");
-					}
-				}
-				continue;
 			}
-			case TOK_LOOP: {
-				node = ploop(s, cfg, previous_exprs, label.name, label.name_loc);
-				label.name = ISTR_NONE;
-				break;
-			}
-			case TOK_DO: {
-				node = pdo(s, label.name, label.name_loc); // TODO?: no chaining
-				label.name = ISTR_NONE;
-				should_continue = false;
-				break;
-			}
-			case TOK_LET: {
-				node = plet(s, cfg, previous_exprs);
-				should_continue = false; // single expr
-				break;
-			}
-			case TOK_BREAK: {
-				istr_t label = ISTR_NONE;
-				loc_t onerror = p.token.loc;
-				pnext();
-				// parse label
-				if (p.token.kind == TOK_COLON) {
-					pnext();
-					pcheck(TOK_IDENT);
-					label = p.token.lit;
-					onerror = p.token.loc;
-					pnext();
-				}
-				u8 blk_id = pblk_locate(label, onerror);
-				hir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+			u8 blk_id = pblk_locate(label, onerror);
+			hir_node_t expr = pexpr(s, 0, cfg, previous_exprs);
+			node = (hir_node_t){
+				.kind = NODE_BREAK,
+				.loc = token.loc,
+				.type = TYPE_BOTTOM,
+				.d_break = {
+					.blk_id = blk_id,
+					.expr = hir_memdup(expr),
+				},
+			};
+			should_continue = false; // single expr
+			break;
+		}
+		case TOK_IDENT: {
+			node = pident(s);
+			break;
+		}
+		case TOK_OPAR: {
+			loc_t oloc = p.token.loc;
+			pnext();
+			if (p.token.kind == TOK_CPAR) {
 				node = (hir_node_t){
-					.kind = NODE_BREAK,
-					.loc = token.loc,
-					.type = TYPE_BOTTOM,
-					.d_break = {
-						.blk_id = blk_id,
-						.expr = hir_memdup(expr),
-					},
+					.kind = NODE_TUPLE_UNIT,
+					.loc = oloc,
+					.type = TYPE_UNIT,
 				};
-				should_continue = false; // single expr
-				break;
-			}
-			case TOK_IDENT: {
-				node = pident(s);
-				break;
-			}
-			case TOK_OPAR: {
-				loc_t oloc = p.token.loc;
 				pnext();
-				if (p.token.kind == TOK_CPAR) {
-					node = (hir_node_t){
-						.kind = NODE_TUPLE_UNIT,
-						.loc = oloc,
-						.type = TYPE_UNIT,
-					};
+				break;
+			}
+			bool first = true;
+			hir_node_t *elems = NULL;
+			while (p.token.kind != TOK_CPAR) {
+				if (first) {
+					node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
+				} else {
+					if (elems == NULL) {
+						arrpush(elems, node);
+					}
+					node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
+					arrpush(elems, node);					
+				}
+
+				if (p.token.kind == TOK_COMMA) {
 					pnext();
-					break;
+				} else if (p.token.kind != TOK_CPAR) {
+					punexpected("expected `,` or `)`");
 				}
-				bool first = true;
-				hir_node_t *elems = NULL;
-				while (p.token.kind != TOK_CPAR) {
-					if (first) {
-						node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
-					} else {
-						if (elems == NULL) {
-							arrpush(elems, node);
-						}
-						node = pexpr(s, 0, PEXPR_ET_PAREN, previous_exprs);
-						arrpush(elems, node);					
-					}
 
-					if (p.token.kind == TOK_COMMA) {
-						pnext();
-					} else if (p.token.kind != TOK_CPAR) {
-						punexpected("expected `,` or `)`");
-					}
-
-					first = false;
-				}
-				pnext();
-				if (elems != NULL) {
-					node = (hir_node_t){
-						.kind = NODE_TUPLE,
-						.loc = oloc,
-						.type = TYPE_INFER,
-						.d_tuple = {
-							.elems = elems,
-						},
-					};
-				}
-				break;
+				first = false;
 			}
-			case TOK_OSQ: {
-				loc_t oloc = p.token.loc;
-				hir_node_t *nodes = NULL;
-
-				// [ 1, 2, 3, 4, 5 ]
-				// ^
-
-				pnext();
-				while (p.token.kind != TOK_CSQ) {
-					hir_node_t node = pexpr(s, 0, PEXPR_ET_ARRAY, previous_exprs);
-					arrpush(nodes, node);				
-
-					if (p.token.kind == TOK_COMMA) {
-						pnext();
-					} else if (p.token.kind != TOK_CSQ) {
-						punexpected("expected `,` or `]`");
-					}
-				}
-
-				// [ 1, 2, 3, 4, 5 ]
-				//                 ^
-				pnext();
-
+			pnext();
+			if (elems != NULL) {
 				node = (hir_node_t){
-					.kind = NODE_ARRAY_LIT,
+					.kind = NODE_TUPLE,
 					.loc = oloc,
 					.type = TYPE_INFER,
-					.d_array_lit = {
-						.elems = nodes,
+					.d_tuple = {
+						.elems = elems,
 					},
 				};
-				break;
 			}
-			case TOK_INTEGER: {
-				node = (hir_node_t){
-					.kind = NODE_INTEGER_LIT,
-					.loc = p.token.loc,
-					.type = TYPE_INFER,
-					.d_integer_lit = {
-						.lit = p.token.lit,
-					},
-				};
-				pnext();
-				break;
-			}
-			default: {
-				if (TOK_IS_PREFIX(token.kind)) {
+			break;
+		}
+		case TOK_OSQ: {
+			loc_t oloc = p.token.loc;
+			hir_node_t *nodes = NULL;
+
+			// [ 1, 2, 3, 4, 5 ]
+			// ^
+
+			pnext();
+			while (p.token.kind != TOK_CSQ) {
+				hir_node_t node = pexpr(s, 0, PEXPR_ET_ARRAY, previous_exprs);
+				arrpush(nodes, node);				
+
+				if (p.token.kind == TOK_COMMA) {
 					pnext();
-					if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
+				} else if (p.token.kind != TOK_CSQ) {
+					punexpected("expected `,` or `]`");
+				}
+			}
+
+			// [ 1, 2, 3, 4, 5 ]
+			//                 ^
+			pnext();
+
+			node = (hir_node_t){
+				.kind = NODE_ARRAY_LIT,
+				.loc = oloc,
+				.type = TYPE_INFER,
+				.d_array_lit = {
+					.elems = nodes,
+				},
+			};
+			break;
+		}
+		case TOK_INTEGER: {
+			node = (hir_node_t){
+				.kind = NODE_INTEGER_LIT,
+				.loc = p.token.loc,
+				.type = TYPE_INFER,
+				.d_integer_lit = {
+					.lit = p.token.lit,
+				},
+			};
+			pnext();
+			break;
+		}
+		default: {
+			if (TOK_IS_PREFIX(token.kind)) {
+				pnext();
+				if (token.kind == TOK_SUB && p.token.kind == TOK_INTEGER) {
+					node = (hir_node_t){
+						.kind = NODE_INTEGER_LIT,
+						.loc = token.loc,
+						.type = TYPE_INFER,
+						.d_integer_lit = {
+							.lit = p.token.lit,
+							.negate = true,
+						},
+					};
+					pnext();
+				} else {
+					if (token.kind == TOK_SINGLE_AND) {
+						bool is_mut = false;
+						if (p.token.kind == TOK_TACK) {
+							// &'v = mut ref
+							is_mut = true;
+							pnext();
+						}
+						hir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
 						node = (hir_node_t){
-							.kind = NODE_INTEGER_LIT,
+							.kind = NODE_ADDR_OF,
 							.loc = token.loc,
 							.type = TYPE_INFER,
-							.d_integer_lit = {
-								.lit = p.token.lit,
-								.negate = true,
-							},
+							.d_addr_of.ref = hir_memdup(rhs),
+							.d_addr_of.is_mut = is_mut,
 						};
-						pnext();
 					} else {
-						if (token.kind == TOK_SINGLE_AND) {
-							bool is_mut = false;
-							if (p.token.kind == TOK_TACK) {
-								// &'v = mut ref
-								is_mut = true;
-								pnext();
-							}
-							hir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
-							node = (hir_node_t){
-								.kind = NODE_ADDR_OF,
-								.loc = token.loc,
-								.type = TYPE_INFER,
-								.d_addr_of.ref = hir_memdup(rhs),
-								.d_addr_of.is_mut = is_mut,
-							};
-						} else {
-							hir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
-							node = (hir_node_t){
-								.kind = NODE_PREFIX,
-								.loc = token.loc,
-								.type = TYPE_INFER,
-								.d_prefix.expr = hir_memdup(rhs),
-								.d_prefix.kind = token.kind,
-							};
-						}
+						hir_node_t rhs = pexpr(s, PREC_PREFIX, cfg, previous_exprs);
+						node = (hir_node_t){
+							.kind = NODE_PREFIX,
+							.loc = token.loc,
+							.type = TYPE_INFER,
+							.d_prefix.expr = hir_memdup(rhs),
+							.d_prefix.kind = token.kind,
+						};
 					}
-					break;
-				} else {
-					punexpected("expected expression");
-				}
-			}
-		}
-
-		switch (cfg) {
-			case PEXPR_ET_NONE: break;
-			case PEXPR_ET_PAREN: {
-				if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
-					should_continue = false;
 				}
 				break;
-			}
-			case PEXPR_ET_INDEX_LO: {
-				if (p.token.kind == TOK_CSQ || p.token.kind == TOK_DOUBLE_DOTS) {
-					should_continue = false;
-				}
-				break;
-			}
-			case PEXPR_ET_INDEX_HI: {
-				if (p.token.kind == TOK_CSQ) {
-					should_continue = false;
-				}
-				break;
-			}
-			case PEXPR_ET_ARRAY: {
-				if (p.token.kind == TOK_CSQ || p.token.kind == TOK_COMMA) {
-					should_continue = false;
-				}
-				break;
-			}
-			case PEXPR_ET_ELSE: {
-				if (p.token.kind == TOK_ELSE) {
-					should_continue = false;
-				}
-				break;
-			}
-			default: {
-				assert_not_reached();
+			} else {
+				punexpected("expected expression");
 			}
 		}
-
-		if (is_single) {
-			is_single = false;
-		} else {
-			node = (hir_node_t){
-				.kind = NODE_CALL,
-				.loc = onode.loc,
-				.type = TYPE_INFER,
-				.d_call.f = hir_memdup(onode),
-				.d_call.arg = hir_memdup(node),
-			};
-		}
-
-		// &a b -> &a(b) NOT &(a b)
-		if (p.token.kind == TOK_EOF || prec >= PREC_CALL) {
-			return node;
-		}
-
-		if (ptok_prec_ambiguities() == 0 && p.token.loc.line_nr == line_nr) {
-			continue;
-		}
-		break;
-	}
-
-	if (!should_continue) {
-		return node;
 	}
 
 	while (true) {
@@ -1719,7 +1650,47 @@ hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 			return node;
 		}
 
-		if (prec < ptok_prec_ambiguities()) {
+		u8 nprec = ptok_prec_ambiguities();
+		nprec = nprec == 0 ? PREC_CALL : nprec;
+
+		if (prec < nprec) {
+			switch (cfg) {
+				case PEXPR_ET_NONE: break;
+				case PEXPR_ET_PAREN: {
+					if (p.token.kind == TOK_CPAR || p.token.kind == TOK_COMMA) {
+						return node;
+					}
+					break;
+				}
+				case PEXPR_ET_INDEX_LO: {
+					if (p.token.kind == TOK_CSQ || p.token.kind == TOK_DOUBLE_DOTS) {
+						return node;
+					}
+					break;
+				}
+				case PEXPR_ET_INDEX_HI: {
+					if (p.token.kind == TOK_CSQ) {
+						return node;
+					}
+					break;
+				}
+				case PEXPR_ET_ARRAY: {
+					if (p.token.kind == TOK_CSQ || p.token.kind == TOK_COMMA) {
+						return node;
+					}
+					break;
+				}
+				case PEXPR_ET_ELSE: {
+					if (p.token.kind == TOK_ELSE) {
+						return node;
+					}
+					break;
+				}
+				default: {
+					assert_not_reached();
+				}
+			}
+			
 			switch (token.kind) {
 				case TOK_INC:
 				case TOK_DEC: {
@@ -1840,6 +1811,8 @@ hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 						hir_node_t *p_node = hir_memdup(node);
 						hir_node_t *p_rhs = hir_memdup(rhs);
 
+						// TODO: move and desugar into desugar pass
+
 						if (kind == TOK_ASSIGN) {
 							node = (hir_node_t){
 								.kind = NODE_ASSIGN,
@@ -1919,11 +1892,17 @@ hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 								.d_infix.kind = token.kind,
 							};
 						}
-
-						// NODE_ASSIGN
-
-						// random infix
+						continue;
+					} else if (p.token.loc.line_nr == line_nr) {
+						hir_node_t onode = pexpr(s, PREC_CALL, cfg, previous_exprs);
 						
+						node = (hir_node_t){
+							.kind = NODE_CALL,
+							.loc = onode.loc,
+							.type = TYPE_INFER,
+							.d_call.f = hir_memdup(node),
+							.d_call.arg = hir_memdup(onode),
+						};
 						continue;
 					}
 				}
