@@ -1260,6 +1260,45 @@ type_t cexpr(hir_scope_t *s, type_t upvalue, hir_node_t *expr) {
 			expr->type = type_new_inc_mul(type, is_mut_ref);
 			return expr->type;
 		}
+		case NODE_INDEX: {
+			type_t type = cexpr(s, TYPE_INFER, expr->d_index.expr);
+			cuse(expr->d_index.expr);
+			if (type_kind(type) != TYPE_ARRAY && type_kind(type) != TYPE_SLICE) {
+				err_with_pos(expr->d_index.expr->loc, "type mismatch: expected array or slice type, got `%s`", type_dbg_str(type));
+			}
+			//
+			type_t index_type = cexpr(s, TYPE_USIZE, expr->d_index.index);
+			cuse(expr->d_index.index);
+			cunify(TYPE_USIZE, expr->d_index.index);
+			//
+			if (type_kind(type) == TYPE_ARRAY) {
+				expr->type = type_get(type)->d_array.elem;
+			} else {
+				expr->type = type_get(type)->d_slice.elem;
+			}
+			return expr->type;
+		}
+		case NODE_SLICE: {
+			type_t type = cexpr(s, TYPE_INFER, expr->d_slice.expr);
+			cuse(expr->d_slice.expr);
+			if (type_kind(type) != TYPE_ARRAY && type_kind(type) != TYPE_SLICE) {
+				err_with_pos(expr->d_slice.expr->loc, "type mismatch: expected array or slice type, got `%s`", type_dbg_str(type));
+			}
+			//
+			if (expr->d_slice.lo) {
+				(void)cexpr(s, TYPE_USIZE, expr->d_slice.lo);
+				cuse(expr->d_slice.lo);
+				cunify(TYPE_USIZE, expr->d_slice.lo);
+			}
+			//
+			if (expr->d_slice.hi) {
+				(void)cexpr(s, TYPE_USIZE, expr->d_slice.hi);
+				cuse(expr->d_slice.hi);
+				cunify(TYPE_USIZE, expr->d_slice.hi);
+			}
+			//
+			return expr->type = type_array_or_slice_to_slice(type);
+		}
 		default: {
 			printf("\nunknown expr kind %d\n", expr->kind);
 			print_hint_with_pos(expr->loc, "LOC HERE");

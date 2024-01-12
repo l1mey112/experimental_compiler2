@@ -212,6 +212,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_PIPE, "|") \
 	X(TOK_TILDE, "~") \
 	X(TOK_TRIPLE_DOTS, "...") \
+	X(TOK_DOUBLE_DOTS, "..") \
 	X(TOK_DOT, ".") \
 	X(TOK_COMMA, ",") \
 	X(TOK_OPAR, "(") \
@@ -412,6 +413,8 @@ struct hir_node_t {
 		NODE_PREFIX,
 		NODE_DEREF,
 		NODE_ADDR_OF,
+		NODE_INDEX,
+		NODE_SLICE,
 		NODE_INTEGER_LIT,
 		NODE_BOOL_LIT,
 		NODE_VAR,
@@ -443,6 +446,15 @@ struct hir_node_t {
 		hir_node_t *d_voiding;
 		hir_node_t *d_deref;
 		type_t d_sizeof_type;
+		struct {
+			hir_node_t *expr;
+			hir_node_t *index;
+		} d_index;
+		struct {
+			hir_node_t *expr;
+			hir_node_t *lo; // possible NULLs
+			hir_node_t *hi; // possible NULLs
+		} d_slice;
 		struct {
 			hir_node_t *lhs;
 			hir_node_t *rhs;
@@ -510,7 +522,7 @@ struct hir_node_t {
 			hir_node_t *elems;
 		} d_tuple;
 		struct {
-			hir_node_t *elems; // if NULL the size if 0
+			hir_node_t *elems;
 		} d_array_lit;
 		struct {
 			hir_node_t *expr; // in use with NODE_BREAK*

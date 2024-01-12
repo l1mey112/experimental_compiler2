@@ -180,6 +180,15 @@ static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
 			}
 			return NULL;
 		}
+		case NODE_INDEX: {
+			if ((r = hir_sym_find_use(expr->d_index.expr, name))) {
+				return r;
+			}
+			if ((r = hir_sym_find_use(expr->d_index.index, name))) {
+				return r;
+			}
+			return NULL;
+		}
 		case NODE_CALL: {
 			if ((r = hir_sym_find_use(expr->d_call.f, name))) {
 				return r;
@@ -192,6 +201,15 @@ static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
 		case NODE_TUPLE: {
 			for (u32 i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
 				hir_node_t *exprp = &expr->d_tuple.elems[i];
+				if ((r = hir_sym_find_use(exprp, name))) {
+					return r;
+				}
+			}
+			return NULL;
+		}
+		case NODE_ARRAY_LIT: {
+			for (u32 i = 0, c = arrlen(expr->d_array_lit.elems); i < c; i++) {
+				hir_node_t *exprp = &expr->d_array_lit.elems[i];
 				if ((r = hir_sym_find_use(exprp, name))) {
 					return r;
 				}
@@ -228,6 +246,12 @@ static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
 				return r;
 			}
 			if ((r = hir_sym_find_use(expr->d_infix.rhs, name))) {
+				return r;
+			}
+			return NULL;
+		}
+		case NODE_CAST: {
+			if ((r = hir_sym_find_use(expr->d_cast, name))) {
 				return r;
 			}
 			return NULL;
@@ -1301,6 +1325,8 @@ enum : u8 {
 	PEXPR_ET_NONE,
 	PEXPR_ET_PAREN,
 	PEXPR_ET_ARRAY,
+	PEXPR_ET_INDEX_LO,
+	PEXPR_ET_INDEX_HI,
 	PEXPR_ET_ELSE,
 };
 
@@ -1630,6 +1656,18 @@ hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 				}
 				break;
 			}
+			case PEXPR_ET_INDEX_LO: {
+				if (p.token.kind == TOK_CSQ || p.token.kind == TOK_DOUBLE_DOTS) {
+					should_continue = false;
+				}
+				break;
+			}
+			case PEXPR_ET_INDEX_HI: {
+				if (p.token.kind == TOK_CSQ) {
+					should_continue = false;
+				}
+				break;
+			}
 			case PEXPR_ET_ARRAY: {
 				if (p.token.kind == TOK_CSQ || p.token.kind == TOK_COMMA) {
 					should_continue = false;
@@ -1693,6 +1731,66 @@ hir_node_t pexpr(hir_scope_t *s, u8 prec, u8 cfg, hir_node_t *previous_exprs) {
 						.d_postfix.expr = hir_memdup(node),
 						.d_postfix.kind = token.kind,
 					};
+					continue;
+				}
+				case TOK_OSQ: {
+					// x[0..1] and x[0]
+					loc_t oloc = p.token.loc;
+					pnext();
+
+					hir_node_t *expr0;
+					if (p.token.kind == TOK_DOUBLE_DOTS) {
+						// x[..1]
+						expr0 = NULL;
+						pnext();
+					} else {
+						// x[0]
+						expr0 = hir_memdup(pexpr(s, 0, PEXPR_ET_INDEX_LO, previous_exprs));
+						if (p.token.kind == TOK_CSQ) {
+							pnext();
+							node = (hir_node_t){
+								.kind = NODE_INDEX,
+								.loc = oloc,
+								.type = TYPE_INFER,
+								.d_index = {
+									.expr = hir_memdup(node),
+									.index = expr0,
+								},
+							};
+							continue;
+						}
+					}
+					// x[0..]
+					//      ^
+					// x[0..1]
+					//      ^
+					if (p.token.kind == TOK_CSQ) {
+						pnext();
+						node = (hir_node_t){
+							.kind = NODE_SLICE,
+							.loc = oloc,
+							.type = TYPE_INFER,
+							.d_slice = {
+								.expr = hir_memdup(node),
+								.lo = expr0,
+								.hi = NULL,
+							},
+						};
+					} else {
+						hir_node_t expr1 = pexpr(s, 0, PEXPR_ET_INDEX_HI, previous_exprs);
+						pexpect(TOK_CSQ);
+
+						node = (hir_node_t){
+							.kind = NODE_SLICE,
+							.loc = oloc,
+							.type = TYPE_INFER,
+							.d_slice = {
+								.expr = hir_memdup(node),
+								.lo = expr0,
+								.hi = hir_memdup(expr1),
+							},
+						};
+					}
 					continue;
 				}
 				default: {
@@ -2433,6 +2531,26 @@ void _hir_dump_expr(mod_t *modp, hir_scope_t *s, hir_node_t node) {
 		}
 		case NODE_SIZEOF_TYPE: {
 			printf("sizeof[%s]", type_dbg_str(node.d_sizeof_type));
+			break;
+		}
+		case NODE_INDEX: {
+			_hir_dump_expr(modp, s, *node.d_index.expr);
+			printf("[");
+			_hir_dump_expr(modp, s, *node.d_index.index);
+			printf("]");
+			break;
+		}
+		case NODE_SLICE: {
+			_hir_dump_expr(modp, s, *node.d_slice.expr);
+			printf("[");
+			if (node.d_slice.lo) {
+				_hir_dump_expr(modp, s, *node.d_slice.lo);
+			}
+			printf("..");
+			if (node.d_slice.hi) {
+				_hir_dump_expr(modp, s, *node.d_slice.hi);
+			}
+			printf("]");
 			break;
 		}
 		default: {

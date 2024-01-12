@@ -1,7 +1,7 @@
+pick: []i32 -> usize -> i32
+pick: xs i = xs[i]
+
 main: () -> ()
 main: () = do
-    let 'v = undefined
-
-    let k = &v
-
-    v = 2
+    let x = [1, 2, 3, 4, 5]
+    let c = pick (x[..]) 2
