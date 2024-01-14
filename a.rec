@@ -1,10 +1,7 @@
-pick: []i32 -> usize -> i32
-pick: xs i = xs[i]
-
 main: () -> ()
 main: () = do
-    let x = [1, 2, 3, 4, 5]
-    let c = pick x[..] 2
+    let v = (1, false, 3)
 
-c: bool -> bool -> bool
-c: a b = a && b
+    let k = v.1
+
+    let t = [1, 2, 3, 4, 5].ptr

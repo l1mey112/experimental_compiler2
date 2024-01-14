@@ -1211,6 +1211,21 @@ type_t cexpr(hir_scope_t *s, type_t upvalue, hir_node_t *expr) {
 
 			return expr->type;
 		}
+		case NODE_TUPLE_FIELD: {
+			type_t type = cexpr(s, TYPE_INFER, expr->d_tuple_field.expr);
+			cuse(expr->d_tuple_field.expr);
+			if (type_kind(type) != TYPE_TUPLE) {
+				err_with_pos(expr->d_tuple_field.expr->loc, "type mismatch: expected tuple type, got `%s`", type_dbg_str(type));
+			}
+			type_t *elems = type_get(type)->d_tuple.elems;
+			size_t field = expr->d_tuple_field.field;
+			//
+			if (field >= arrlenu(elems)) {
+				err_with_pos(expr->loc, "field %zu out of bounds on tuple type `%s`", field, type_dbg_str(type));
+			}
+			expr->type = elems[field];
+			return expr->type;
+		}
 		case NODE_ARRAY_LIT: {
 			assert(expr->d_array_lit.elems != NULL); // TODO: handle []
 

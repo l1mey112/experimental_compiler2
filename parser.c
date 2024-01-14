@@ -256,6 +256,7 @@ static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
 			}
 			return NULL;
 		}
+		case NODE_BOOL_LIT:
 		case NODE_UNDEFINED:
 		case NODE_LAMBDA:
 		case NODE_DO_BLOCK:
@@ -1791,6 +1792,30 @@ retry:
 								.d_deref = hir_memdup(node),
 							};
 							continue;
+						}
+
+						// field access: v.x
+						// tuple access: v.0
+						if (token.kind == TOK_DOT) {
+							switch (p.token.kind) {
+								case TOK_INTEGER: {
+									size_t len = strtoull(sv_from(p.token.lit), NULL, 10);
+									node = (hir_node_t){
+										.kind = NODE_TUPLE_FIELD,
+										.loc = p.token.loc,
+										.type = TYPE_INFER,
+										.d_tuple_field = {
+											.expr = hir_memdup(node),
+											.field = len,
+										},
+									};
+									pnext();
+									continue;
+								}
+								default: {
+									err_with_pos(token.loc, "expected integer literal after `.`");
+								}
+							} 
 						}
 
 						tok_t kind = token.kind;

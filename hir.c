@@ -201,6 +201,12 @@ void _hir_dump_expr(mod_t *modp, hir_scope_t *s, hir_node_t node) {
 			printf(")");
 			break;
 		}
+		case NODE_TUPLE_FIELD: {
+			printf("(");
+			_hir_dump_expr(modp, s, *node.d_tuple_field.expr);
+			printf(").%zu", node.d_tuple_field.field);
+			break;
+		}
 		case NODE_BREAK_UNIT: {
 			printf("brk :%u ()", node.d_break.blk_id);
 			break;

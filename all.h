@@ -372,7 +372,6 @@ struct hir_scope_t {
 	hir_rvar_t *locals;
 };
 
-// TODO: match on tuples and arrays
 struct hir_pattern_t {
 	enum pattern_kind_t {
 		PATTERN_VAR,
@@ -432,6 +431,7 @@ struct hir_node_t {
 		NODE_UNDEFINED,
 		NODE_VOIDING, // evaluates expr, possible effects. discards return value, returning ()
 		NODE_SIZEOF_TYPE, // is usize
+		NODE_TUPLE_FIELD,
 	} kind;
 	
 	type_t type;
@@ -446,6 +446,10 @@ struct hir_node_t {
 		hir_node_t *d_voiding;
 		hir_node_t *d_deref;
 		type_t d_sizeof_type;
+		struct {
+			hir_node_t *expr;
+			size_t field;
+		} d_tuple_field;
 		struct {
 			hir_node_t *expr;
 			hir_node_t *index;
