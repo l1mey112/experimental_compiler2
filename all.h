@@ -408,7 +408,7 @@ struct hir_node_t {
 		NODE_IF, // in checker, if type == TYPE_BOOL it is a desugared logic op
 		NODE_ASSIGN,
 		NODE_INFIX,
-		NODE_POSTFIX,
+		NODE_POSTFIX, // TODO: why do we even have these stupid little ops, why can't we just desugar??
 		NODE_PREFIX,
 		NODE_DEREF,
 		NODE_ADDR_OF,

@@ -1,7 +1,4 @@
 main: () -> ()
 main: () = do
     let v = (1, false, 3)
-
     let k = v.1
-
-    let t = [1, 2, 3, 4, 5].ptr

@@ -256,6 +256,7 @@ static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
 			}
 			return NULL;
 		}
+		case NODE_TUPLE_FIELD:
 		case NODE_BOOL_LIT:
 		case NODE_UNDEFINED:
 		case NODE_LAMBDA:
