@@ -640,3 +640,79 @@ void types_dump(void);
 const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);
+
+typedef struct lir_proc_t lir_proc_t;
+typedef struct lir_block_t lir_block_t;
+typedef struct lir_term_t lir_term_t;
+typedef struct lir_inst_t lir_inst_t;
+typedef struct lir_value_t lir_value_t;
+typedef u32 lir_rvalue_t;
+typedef u32 lir_rblock_t;
+typedef u32 lir_rinst_t;
+
+#define LIR_VALUE_NONE ((lir_rvalue_t)-1)
+
+// v0 = 10
+struct lir_value_t {
+	lir_rvalue_t index; // self
+	type_t type;
+	loc_t loc; // more debuginfo
+};
+
+struct lir_inst_t {
+	lir_rvalue_t target; // LIR_VALUE_NONE for none
+	// no need for self index
+
+	enum {
+		INST_INTEGER_LITERAL,
+		INST_ADD,
+		INST_SUB,
+		INST_MUL,
+		INST_DIV,
+	} kind;
+
+	union {
+		struct {
+			istr_t lit;
+		} d_integer_literal;
+		struct {
+			lir_rvalue_t lhs;
+			lir_rvalue_t rhs;
+		} d_infix;
+	};
+};
+
+struct lir_term_t {
+	enum {
+		TERM_GOTO,
+		TERM_RET,
+	} kind;
+
+	union {
+		struct {
+			lir_rblock_t target;
+		} d_goto;
+		struct {
+			lir_rvalue_t value;
+		} d_ret;
+	};
+};
+
+struct lir_block_t {
+	lir_rblock_t index; // self
+	lir_inst_t *insts;
+	lir_rvalue_t *args;
+	lir_term_t term;
+};
+
+struct lir_proc_t {
+	lir_block_t *blocks; // block 0 is always entry block
+	lir_value_t *values;
+};
+
+lir_rvalue_t lir_value_new(lir_proc_t *proc, lir_value_t value);
+lir_rblock_t lir_block_new(lir_proc_t *proc, lir_block_t block);
+lir_rvalue_t lir_block_arg(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
+void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
+lir_rinst_t lir_inst_new(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
+lir_rvalue_t lir_inst_value(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
