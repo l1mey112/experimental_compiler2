@@ -16,8 +16,13 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 	}
 
 	switch (a_type) {
-		case TYPE_FN: {
-			if (a->d_fn.arg != b->d_fn.arg) {
+		case TYPE_FUNCTION: {
+			u32 a_args_len = arrlenu(a->d_fn.args);
+			u32 b_args_len = arrlenu(b->d_fn.args);
+			if (a_args_len != b_args_len) {
+				return false;
+			}
+			if (memcmp(a->d_fn.args, b->d_fn.args, a_args_len * sizeof(type_t)) != 0) {
 				return false;
 			}
 			if (a->d_fn.ret != b->d_fn.ret) {
@@ -38,10 +43,6 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 		}
 		case TYPE_PTR: {
 			return a->d_ptr.ref == b->d_ptr.ref && a->d_ptr.is_mut == b->d_ptr.is_mut;
-		}
-		case TYPE_VAR: {
-			// types with different typevar types are not equal
-			return false;
 		}
 		case TYPE_SLICE: {
 			return a->d_slice.elem == b->d_slice.elem;
@@ -101,96 +102,25 @@ type_t type_new_inc_mul(type_t type, bool is_mut) {
 	return type_new(typeinfo, NULL);
 }
 
-type_t typevar_new(void) {
-	tinfo_t typeinfo = {
-		.kind = TYPE_VAR,
-		.d_typevar_type = TYPE_INFER,
-	};
-	
-	return type_new(typeinfo, NULL);
-}
-
-void typevar_replace(type_t typevar, type_t type) {
-	assert(type != TYPE_INFER);
-	assert(type_kind(typevar) == TYPE_VAR);
-
-	tinfo_t *typeinfo = type_get(typevar);
-	typeinfo->d_typevar_type = type;
-}
-
-// safe for comparisions
-ti_kind type_kind_raw(type_t type) {
-	assert(type != TYPE_INFER);
-	if (type < _TYPE_CONCRETE_MAX) {
-		return type;
-	}
-
-	tinfo_t *typeinfo = type_get_raw(type);
-	return typeinfo->kind;
-}
-
 // safe for comparisions
 ti_kind type_kind(type_t type) {
 	assert(type != TYPE_INFER);
 	if (type < _TYPE_CONCRETE_MAX) {
 		return type;
 	}
-	
-	u32 idx = type - _TYPE_CONCRETE_MAX;
-	tinfo_t *typeinfo = &types[idx];
 
-	if (typeinfo->kind == TYPE_VAR && typeinfo->d_typevar_type != TYPE_INFER) {
-		return type_kind(typeinfo->d_typevar_type);
-	}
-	
+	tinfo_t *typeinfo = type_get(type);
 	return typeinfo->kind;
 }
 
 // don't unwrap vars
-tinfo_t *type_get_raw(type_t type) {
-	assert(type != TYPE_INFER);
-	assert(type >= _TYPE_CONCRETE_MAX);
-	u32 idx = type - _TYPE_CONCRETE_MAX;
-	
-	tinfo_t *typeinfo = &types[idx];
-	return typeinfo;
-}
-
 tinfo_t *type_get(type_t type) {
 	assert(type != TYPE_INFER);
 	assert(type >= _TYPE_CONCRETE_MAX);
 	u32 idx = type - _TYPE_CONCRETE_MAX;
 	
 	tinfo_t *typeinfo = &types[idx];
-
-	if (typeinfo->kind == TYPE_VAR && typeinfo->d_typevar_type != TYPE_INFER) {
-		return type_get(typeinfo->d_typevar_type);
-	}
-
 	return typeinfo;
-}
-
-// unwrap typevars where needed
-type_t type_underlying(type_t type) {
-	assert(type != TYPE_INFER);
-	if (type < _TYPE_CONCRETE_MAX) {
-		return type;
-	}
-
-	u32 idx = type - _TYPE_CONCRETE_MAX;
-	tinfo_t *typeinfo = &types[idx];
-
-	if (typeinfo->kind == TYPE_VAR && typeinfo->d_typevar_type != TYPE_INFER) {
-		return type_underlying(typeinfo->d_typevar_type);
-	}
-
-	return type;
-}
-
-// unwrap typevars where needed
-bool type_eq(type_t a, type_t b) {
-	assert(a != TYPE_INFER && b != TYPE_INFER);
-	return type_underlying(a) == type_underlying(b);
 }
 
 type_t type_array_or_slice_to_slice(type_t type) {
@@ -234,7 +164,7 @@ static void _type_dbg_str(type_t type, bool inner) {
 		return;
 	}
 
-	tinfo_t *typeinfo = type_get_raw(type);
+	tinfo_t *typeinfo = type_get(type);
 
 	switch (typeinfo->kind) {
 		case TYPE_UNKNOWN: {
@@ -254,13 +184,19 @@ static void _type_dbg_str(type_t type, bool inner) {
 			COMMIT(sprintf((char *)p, ")"));
 			break;
 		}
-		case TYPE_FN: {
+		case TYPE_FUNCTION: {
 			if (!inner) {
 				COMMIT(sprintf((char *)p, "("));
 			}
-			_type_dbg_str(typeinfo->d_fn.arg, false);
+			for (u32 i = 0, c = arrlenu(typeinfo->d_fn.args); i < c; i++) {
+				type_t arg = typeinfo->d_fn.args[i];
+				_type_dbg_str(arg, false);
+				if (i + 1 < c) {
+					COMMIT(sprintf((char *)p, ", "));
+				}
+			}
 			COMMIT(sprintf((char *)p, " -> "));
-			_type_dbg_str(typeinfo->d_fn.ret, true);
+			_type_dbg_str(typeinfo->d_fn.ret, false);
 			if (!inner) {
 				COMMIT(sprintf((char *)p, ")"));
 			}
@@ -272,14 +208,6 @@ static void _type_dbg_str(type_t type, bool inner) {
 				COMMIT(sprintf((char *)p, "'"));
 			}
 			_type_dbg_str(typeinfo->d_ptr.ref, false);
-			break;
-		}
-		case TYPE_VAR: {
-			if (typeinfo->d_typevar_type == TYPE_INFER) {
-				COMMIT(sprintf((char *)p, "?%u", type));
-			} else {
-				_type_dbg_str(typeinfo->d_typevar_type, false);
-			}
 			break;
 		}
 		case TYPE_ARRAY: {
@@ -316,10 +244,4 @@ const char *type_dbg_str(type_t type) {
 	p[nwritten] = '\0';
 
 	return (const char *)oldp;
-}
-
-void types_dump(void) {
-	for (type_t i = 0; i < type_len; i++) {
-		printf("%u: %s\n", i + _TYPE_CONCRETE_MAX, type_dbg_str(i + _TYPE_CONCRETE_MAX));
-	}
 }

@@ -310,22 +310,64 @@ enum ti_kind {
 	_TYPE_CONCRETE_MAX,
 	//
 	TYPE_UNKNOWN, // reference to be filled in later
-	TYPE_VAR, // typevars
 	// TYPE_GENERIC, // generic (we don't make guarantees about polymorphism)
 	TYPE_TUPLE,
-	TYPE_FN,
+	TYPE_FUNCTION,
+	TYPE_CLOSURE,
+	TYPE_CLOSURE_UNION,
 	TYPE_PTR,
 	TYPE_SLICE,
 	TYPE_ARRAY,
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
 	// TYPE_ENUM,
-	// TYPE_FN_PTR,
+	// TYPE_FUNCTION_PTR,
 	// TYPE_STRUCT,
 	// TYPE_FIXEDARRAY,
 };
 
 typedef enum ti_kind ti_kind;
+typedef struct tinfo_t tinfo_t;
+
+struct tinfo_t {
+	ti_kind kind;
+
+	bool is_named; // module.lit for named types
+
+	union {
+		struct {
+			type_t *args;
+			type_t ret;
+			// bool effects and so on
+		} d_fn;
+		struct {
+			type_t fn;
+			// captured vars, etc
+		} d_closure;
+		struct {
+			// type_t *elems; // array of closures
+		} d_closure_union;
+		struct  {
+			type_t elem;
+		} d_slice;
+		struct {
+			size_t length;
+			type_t elem;
+		} d_array;
+		struct {
+			type_t *elems;
+		} d_tuple;
+		struct {
+			type_t ref;
+			bool is_mut;
+		} d_ptr;
+		struct {
+			rmod_t mod;
+			istr_t name;
+		} d_named;
+	};
+};
+
 typedef enum tok_t tok_t;
 
 struct loc_t {
@@ -342,203 +384,9 @@ struct token_t {
 	istr_t lit;
 };
 
-typedef struct hir_scope_t hir_scope_t;
-typedef u32 hir_rvar_t;
-typedef struct hir_var_t hir_var_t;
-typedef struct hir_node_t hir_node_t;
-typedef struct hir_pattern_t hir_pattern_t;
-
 // TODO: define helper function for invalid loc_t
 // TODO: fancy arena allocators? fuck that!
 //       we're going for a quick and dirty bootstrap
-
-extern hir_var_t *hir_vars;
-
-#define VAR_PTR(id) (&hir_vars[id])
-
-struct hir_var_t {
-	istr_t name;
-	loc_t loc;
-	type_t type;
-	bool is_in_decl; // ignore var, used in parser
-	bool is_mut; // is mut
-	bool is_proc_decl; // is a desugared proc decl
-	bool is_arg; // is lambda argument
-	bool is_pub; // is exposed to other modules
-};
-
-struct hir_scope_t {
-	hir_scope_t *parent;
-	hir_rvar_t *locals;
-};
-
-struct hir_pattern_t {
-	enum pattern_kind_t {
-		PATTERN_VAR,
-		PATTERN_UNDERSCORE,
-		PATTERN_ARRAY,
-		PATTERN_TUPLE,
-		PATTERN_TUPLE_UNIT,
-		PATTERN_INTEGER_LIT,
-	} kind;
-
-	loc_t loc;
-
-	union {
-		hir_rvar_t d_var;
-		struct {
-			hir_pattern_t *elems;
-		} d_tuple;
-		struct {
-			hir_pattern_t *elems;
-			hir_pattern_t *match; // single pattern, possible NULL
-			bool match_lhs; // else, rhs
-		} d_array;
-		istr_t d_integer_lit;
-	};
-};
-
-struct hir_node_t {
-	enum node_kind_t {
-		NODE_LET_DECL,
-		NODE_LAMBDA,
-		NODE_MATCH,
-		NODE_DO_BLOCK,
-		NODE_LOOP,
-		NODE_IF, // in checker, if type == TYPE_BOOL it is a desugared logic op
-		NODE_ASSIGN,
-		NODE_INFIX,
-		NODE_POSTFIX, // TODO: why do we even have these stupid little ops, why can't we just desugar??
-		NODE_PREFIX,
-		NODE_DEREF,
-		NODE_ADDR_OF,
-		NODE_INDEX,
-		NODE_SLICE,
-		NODE_INTEGER_LIT,
-		NODE_BOOL_LIT,
-		NODE_VAR,
-		NODE_GLOBAL_UNRESOLVED,
-		NODE_SYM,
-		NODE_SYM_UNRESOLVED,
-		NODE_CAST,
-		NODE_CALL,
-		NODE_TUPLE_UNIT,
-		NODE_TUPLE,
-		NODE_ARRAY_LIT,
-		NODE_BREAK_UNIT, // always !. ignore expr
-		NODE_BREAK_INFERRED, // always !. inserted by the parser
-		NODE_BREAK, // always !. expr type never (), otherwise it would be NODE_BREAK_UNIT
-		NODE_UNDEFINED,
-		NODE_VOIDING, // evaluates expr, possible effects. discards return value, returning ()
-		NODE_SIZEOF_TYPE, // is usize
-		NODE_TUPLE_FIELD,
-	} kind;
-	
-	type_t type;
-	loc_t loc;
-
-	// #define MATCH_DO_BLOCK(expr, v, t) \
-	// 	case NODE_DO_BLOCK: {typeof((expr).do_block) *v = &(expr).do_block; t break;}
-
-	union {
-		hir_rvar_t d_var;
-		istr_t d_global_unresolved;
-		hir_node_t *d_voiding;
-		hir_node_t *d_deref;
-		type_t d_sizeof_type;
-		struct {
-			hir_node_t *expr;
-			size_t field;
-		} d_tuple_field;
-		struct {
-			hir_node_t *expr;
-			hir_node_t *index;
-		} d_index;
-		struct {
-			hir_node_t *expr;
-			hir_node_t *lo; // possible NULLs
-			hir_node_t *hi; // possible NULLs
-		} d_slice;
-		struct {
-			hir_node_t *lhs;
-			hir_node_t *rhs;
-		} d_assign;
-		struct {
-			hir_node_t *ref;
-			bool is_mut;
-		} d_addr_of;
-		struct {
-			rmod_t mod;
-			istr_t name;
-		} d_sym_unresolved;
-		struct {
-			rmod_t mod;
-			hir_rvar_t var;
-		} d_sym;
-		struct {
-			hir_node_t *expr;
-			tok_t kind;
-		} d_postfix;
-		struct {
-			hir_node_t *expr;
-			tok_t kind;
-		} d_prefix;
-		struct {
-			hir_scope_t *scope; // scopes are pointers here for a reason
-			hir_node_t *exprs; // all do blocks have at least one expr, unless they become a NODE_TUPLE_UNIT
-			u8 blk_id;
-		} d_do_block;
-		struct {
-			hir_node_t *expr;
-			u8 blk_id;
-		} d_loop;
-		struct {
-			hir_node_t *lhs;
-			hir_node_t *rhs;
-			tok_t kind;
-		} d_infix;
-		hir_node_t *d_cast;
-		struct {
-			istr_t lit;
-			bool negate;
-		} d_integer_lit;
-		bool d_bool_lit;
-		struct {
-			hir_rvar_t *args;
-			hir_scope_t *scope;
-			hir_node_t *expr;
-		} d_lambda;
-		struct {
-			hir_node_t *expr;
-			hir_scope_t *scopes;
-			hir_pattern_t *patterns;
-			hir_node_t *exprs;
-		} d_match;
-		struct {
-			hir_pattern_t pattern;
-			hir_node_t *expr;
-		} d_let_decl;
-		struct {
-			hir_node_t *f;
-			hir_node_t *arg;
-		} d_call;
-		struct {
-			hir_node_t *elems;
-		} d_tuple;
-		struct {
-			hir_node_t *elems;
-		} d_array_lit;
-		struct {
-			hir_node_t *expr; // in use with NODE_BREAK*
-			u8 blk_id;
-		} d_break;
-		struct {
-			hir_node_t *cond;
-			hir_node_t *then;
-			hir_node_t *els;
-		} d_if;
-	};
-};
 
 struct mod_t {
 	struct disk_t {
@@ -553,8 +401,8 @@ struct mod_t {
 		u32 files_count;
 	} on_disk;
 
-	hir_scope_t toplevel;
-	hir_node_t *exprs;
+	/* hir_scope_t toplevel;
+	hir_node_t *exprs; */
 };
 
 struct file_t {
@@ -581,76 +429,40 @@ istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
-void hir_process_file(rfile_t f);
-void hir_check_module(rmod_t mod);
+void lir_process_file(rfile_t f);
+/* void hir_check_module(rmod_t mod);
 void hir_dump_module(rmod_t mod);
-void hir_typed_desugar(void);
-
-hir_node_t *hir_memdup(hir_node_t node);
-
-typedef struct tinfo_t tinfo_t;
-
-struct tinfo_t {
-	ti_kind kind;
-
-	bool is_named; // module.lit for named types
-
-	union {
-		type_t d_typevar_type;
-		struct {
-			// curried representation
-			type_t arg;
-			type_t ret;
-			// executing this function will cause an `io` effect
-			// bool is_effect;
-		} d_fn;
-		struct  {
-			type_t elem;
-		} d_slice;
-		struct {
-			size_t length;
-			type_t elem;
-		} d_array;
-		struct {
-			type_t *elems;
-		} d_tuple;
-		struct {
-			type_t ref;
-			bool is_mut;
-		} d_ptr;
-		struct {
-			rmod_t mod;
-			istr_t name;
-		} d_named;
-	};
-};
+void hir_typed_desugar(void); */
 
 type_t type_array_or_slice_to_slice(type_t type);
 type_t type_new_inc_mul(type_t type, bool is_mut);
-type_t typevar_new(void);
-void typevar_replace(type_t typevar, type_t type);
 type_t type_new(tinfo_t typeinfo, loc_t *onerror);
-tinfo_t *type_get_raw(type_t type);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);
-ti_kind type_kind_raw(type_t type);
-type_t type_underlying(type_t a);
-bool type_eq(type_t a, type_t b);
-void types_dump(void);
 const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);
 
+#define TI_GUARD(type, kind, lvalue) \
+	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
+
+typedef struct lir_symbol_t lir_symbol_t;
 typedef struct lir_proc_t lir_proc_t;
 typedef struct lir_block_t lir_block_t;
 typedef struct lir_term_t lir_term_t;
 typedef struct lir_inst_t lir_inst_t;
 typedef struct lir_value_t lir_value_t;
+typedef struct lir_local_t lir_local_t;
+typedef struct lir_term_sc_t lir_term_sc_t;
+typedef struct lir_term_block_t lir_term_block_t;
+typedef struct lir_term_pat_t lir_term_pat_t; // pattern match abstraction
 typedef u32 lir_rvalue_t;
 typedef u32 lir_rblock_t;
-typedef u32 lir_rinst_t;
+typedef u32 lir_rinst_t; // TODO: possible removal of lir_rinst_t
+typedef u32 lir_rlocal_t;
 
 #define LIR_VALUE_NONE ((lir_rvalue_t)-1)
+#define LIR_BLOCK_NONE ((lir_rblock_t)-1)
 
 // v0 = 10
 struct lir_value_t {
@@ -662,57 +474,225 @@ struct lir_value_t {
 struct lir_inst_t {
 	lir_rvalue_t target; // LIR_VALUE_NONE for none
 	// no need for self index
-
-	enum {
-		INST_INTEGER_LITERAL,
-		INST_ADD,
-		INST_SUB,
-		INST_MUL,
-		INST_DIV,
+	bool is_root; // for checker
+	enum : u8 {
+		INST_INTEGER_LIT,
+		INST_BOOL_LIT,
+		INST_ARRAY,
+		INST_TUPLE_UNIT,
+		INST_TUPLE,
+		//
+		INST_LOCAL,
+		INST_SYMBOL,
+		//
+		INST_ADD, // infix
+		INST_SUB, // infix
+		INST_MUL, // infix
+		INST_DIV, // infix
+		INST_MOD, // infix
+		INST_EQ,  // infix
+		INST_NE,  // infix
+		ISNT_LE,  // infix
+		ISNT_LT,  // infix
+		ISNT_GE,  // infix
+		ISNT_GT,  // infix
+		INST_AND, // infix
+		INST_OR,  // infix
+		INST_NEG, // unary
+		INST_NOT, // unary
+		//
+		INST_LOAD,
+		INST_STORE,
+		INST_LEA, // &index[], have to load to get value out
+		INST_SLICE, // index[lo:hi]
+		//
+		INST_CALL, // f(a, b, c)
+		INST_CAST,
+		INST_FIELD_OFFSET,
+		INST_TUPLE_OFFSET,
+		INST_SIZEOF, // is usize
+		_INST_MAX,
 	} kind;
 
 	union {
-		struct {
-			istr_t lit;
-		} d_integer_literal;
+		istr_t d_integer_lit;
+		bool d_bool_lit;
+		lir_rvalue_t *d_array;
+		lir_rvalue_t *d_tuple;
+		lir_rlocal_t d_local;
+		// TODO: symbol
 		struct {
 			lir_rvalue_t lhs;
 			lir_rvalue_t rhs;
 		} d_infix;
+		struct {
+			lir_rvalue_t src;
+		} d_unary;
+		struct {
+			lir_rvalue_t dest;
+			lir_rvalue_t src;
+		} d_store;
+		struct {
+			lir_rvalue_t src;
+		} d_load;
+		struct {
+			lir_rvalue_t src;
+			lir_rvalue_t index;
+		} d_lea;
+		struct {
+			lir_rvalue_t src;
+			lir_rvalue_t lo; // can be NULL
+			lir_rvalue_t hi; // can be NULL
+		} d_slice;
+		struct {
+			lir_rvalue_t f;
+			lir_rvalue_t *args;
+		} d_call;
+		struct {
+			lir_rvalue_t src;
+			type_t type;
+		} d_cast;
 	};
+};
+
+// recurse in the same direction
+struct lir_term_pat_t {
+	enum pattern_kind_t {
+		PATTERN_LOCAL,
+		PATTERN_UNDERSCORE,
+		PATTERN_ARRAY,
+		PATTERN_TUPLE,
+		PATTERN_TUPLE_UNIT,
+		PATTERN_INTEGER_LIT,
+		PATTERN_BOOL_LIT,
+	} kind;
+
+	loc_t loc;
+
+	union {
+		u32 d_local; // index into block args
+		struct {
+			lir_term_pat_t *elems;
+		} d_tuple;
+		struct {
+			lir_term_pat_t *elems;
+			lir_term_pat_t *match; // single pattern, possible NULL
+			bool match_lhs; // else, rhs
+		} d_array;
+		istr_t d_integer_lit;
+		bool d_bool_lit;
+	};
+};
+
+struct lir_term_block_t {
+	lir_rblock_t block;
+	lir_rvalue_t *args;
+};
+
+struct lir_term_sc_t {
+	lir_rvalue_t value;
+	lir_term_block_t block;
 };
 
 struct lir_term_t {
 	enum {
+		TERM_UNINIT, // shouldn't be this
 		TERM_GOTO,
+		TERM_IF,
+		TERM_SWITCH,
 		TERM_RET,
+		TERM_GOTO_PATTERN,
 	} kind;
 
 	union {
+		lir_term_block_t d_goto;
 		struct {
-			lir_rblock_t target;
-		} d_goto;
+			lir_rvalue_t cond;
+			lir_term_block_t then;
+			lir_term_block_t els;
+		} d_if;
+		struct {
+			lir_rvalue_t value;
+			lir_term_sc_t *cases;
+			lir_term_block_t default_block; // LIR_BLOCK_NONE for no default
+		} d_switch;
 		struct {
 			lir_rvalue_t value;
 		} d_ret;
+		//
+		// abstractions/intrinsics
+		//
+		struct {
+			lir_rvalue_t value;
+			lir_rblock_t *blocks;
+			lir_term_pat_t *patterns;
+		} d_goto_pattern;
 	};
 };
 
 struct lir_block_t {
 	lir_rblock_t index; // self
+	const char *debug_name;
 	lir_inst_t *insts;
 	lir_rvalue_t *args;
 	lir_term_t term;
 };
 
+/* struct hir_var_t {
+	istr_t name;
+	loc_t loc;
+	type_t type;
+	bool is_in_decl; // ignore var, used in parser
+	bool is_mut; // is mut
+	bool is_proc_decl; // is a desugared proc decl
+	bool is_arg; // is lambda argument
+	bool is_pub; // is exposed to other modules
+}; */
+
+// stack slot
+struct lir_local_t {
+	istr_t name;
+	loc_t loc;
+	type_t type;
+	// bool is_in_decl; // ignore var, used in parser
+	bool is_mut;
+};
+
 struct lir_proc_t {
 	lir_block_t *blocks; // block 0 is always entry block
+	lir_local_t *locals; // stack slots
 	lir_value_t *values;
 };
 
+// TODO: symbols into hashmap
+struct lir_symbol_t {
+	istr_t qualified_name;
+	istr_t short_name;
+	rmod_t mod;
+	loc_t loc;
+
+	enum : u8 {
+		SYMBOL_VAR,
+		SYMBOL_PROC,
+	} kind;
+
+	union {
+		lir_proc_t d_proc;
+	};
+};
+
+// search by qualified name
+extern lir_symbol_t *symbols;
+
 lir_rvalue_t lir_value_new(lir_proc_t *proc, lir_value_t value);
-lir_rblock_t lir_block_new(lir_proc_t *proc, lir_block_t block);
+lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name); // takes ownership of debug_name
 lir_rvalue_t lir_block_arg(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
 void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
+lir_rlocal_t lir_local_new(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut);
 lir_rinst_t lir_inst_new(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
 lir_rvalue_t lir_inst_value(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
+lir_rvalue_t lir_local_addr(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
+void lir_local_store(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_rvalue_t value);
+lir_rvalue_t lir_local_load(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
+void lir_print_symbol(lir_symbol_t *symbol);
+void lir_print_symbols(void);
