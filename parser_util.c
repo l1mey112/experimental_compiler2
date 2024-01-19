@@ -292,7 +292,7 @@ type_t ptype_expr(u8 prec) {
 			// []i32
 			//   ^^^
 
-			type_t elem = ptype();
+			type_t elem = ptype_expr(PREC_UNARY);
 
 			if (is_array) {
 				size_t len = strtoull(sv_from(int_size.lit), NULL, 10);

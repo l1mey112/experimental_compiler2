@@ -466,32 +466,34 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					//
 					continue;
 				}
-				/* case TOK_OSQ: {
+				case TOK_OSQ: {
 					// x[0..1] and x[0]
 					loc_t oloc = p.token.loc;
 					pnext();
 
-					hir_node_t *expr0;
+					bool expr0_s;
+					rexpr_t expr0;
 					if (p.token.kind == TOK_DOUBLE_DOTS) {
 						// x[..1]
-						expr0 = NULL;
+						expr0_s = false;
 						pnext();
 					} else {
 						// x[0]
-						expr0 = hir_memdup(pexpr(s, 0, PEXPR_ET_INDEX_LO, previous_exprs));
+						
+						expr0 = pexpr(proc, block, PEXPR_ET_INDEX_LO, cfg);
 						if (p.token.kind == TOK_CSQ) {
 							pnext();
-							node = (hir_node_t){
-								.kind = NODE_INDEX,
-								.loc = oloc,
-								.type = TYPE_INFER,
-								.d_index = {
-									.expr = hir_memdup(node),
-									.index = expr0,
+							expr.block = expr0.block;
+							expr.value = lir_inst_value(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
+								.kind = INST_LEA,
+								.d_lea = {
+									.src = expr.value,
+									.index = expr0.value,
 								},
-							};
+							});
 							continue;
 						}
+						expr0_s = true;
 					}
 					// x[0..]
 					//      ^
@@ -499,33 +501,33 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					//      ^
 					if (p.token.kind == TOK_CSQ) {
 						pnext();
-						node = (hir_node_t){
-							.kind = NODE_SLICE,
-							.loc = oloc,
-							.type = TYPE_INFER,
+						expr.block = expr0_s ? expr0.block : block;
+						expr.value = lir_inst_value(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
+							.kind = INST_SLICE,
 							.d_slice = {
-								.expr = hir_memdup(node),
-								.lo = expr0,
-								.hi = NULL,
+								.src = expr.value,
+								.lo = expr0_s ? expr0.value : LIR_VALUE_NONE,
+								.hi = LIR_VALUE_NONE,
 							},
-						};
+						});
 					} else {
-						hir_node_t expr1 = pexpr(s, 0, PEXPR_ET_INDEX_HI, previous_exprs);
+						lir_rblock_t next = expr0_s ? expr0.block : block;
+						rexpr_t expr1 = pexpr(proc, next, PEXPR_ET_INDEX_HI, cfg);
 						pexpect(TOK_CSQ);
 
-						node = (hir_node_t){
-							.kind = NODE_SLICE,
-							.loc = oloc,
-							.type = TYPE_INFER,
+						expr.is_lvalue = false;
+						expr.block = expr1.block;
+						expr.value = lir_inst_value(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
+							.kind = INST_SLICE,
 							.d_slice = {
-								.expr = hir_memdup(node),
-								.lo = expr0,
-								.hi = hir_memdup(expr1),
+								.src = expr.value,
+								.lo = expr0_s ? expr0.value : LIR_VALUE_NONE,
+								.hi = expr1.value,
 							},
-						};
+						});
 					}
 					continue;
-				} */
+				}
 				default: {
 					if (!TOK_IS_INFIX(token.kind)) {
 						goto exit;
