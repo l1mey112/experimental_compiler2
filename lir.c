@@ -49,12 +49,29 @@ lir_rvalue_t lir_inst_value(lir_proc_t *proc, lir_rblock_t block, type_t type, l
 	return rvalue;
 }
 
+lir_rvalue_t lir_mut(lir_proc_t *proc, lir_rblock_t block, lir_rvalue_t value) {
+	lir_value_t *valuep = &proc->values[value];
+	return lir_inst_value(proc, block, valuep->type, valuep->loc, (lir_inst_t){
+		.kind = INST_MUT,
+		.d_mut = value,
+	});
+}
+
 lir_rvalue_t lir_local_addr(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
+	// to avoid duplications of &local, search for refs in the current block
+	lir_block_t *blockp = &proc->blocks[block];
+	for (u32 i = 0, c = arrlenu(blockp->insts); i < c; i++) {
+		lir_inst_t *inst = &blockp->insts[i];
+		if (inst->kind == INST_LOCAL && inst->d_local.local == local) {
+			return inst->target;
+		}
+	}
+	
 	lir_block_t *b = &proc->blocks[block];
 	lir_local_t *localp = &proc->locals[local];
 	lir_rvalue_t val = lir_inst_value(proc, block, localp->type, localp->loc, (lir_inst_t){
 		.kind = INST_LOCAL,
-		.d_local = local,
+		.d_local.local = local,
 	});
 	return val;
 }
@@ -74,11 +91,12 @@ lir_rlocal_t lir_local_new(lir_proc_t *proc, istr_t name, loc_t loc, type_t type
 void lir_local_store(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_rvalue_t value) {
 	lir_block_t *b = &proc->blocks[block];
 	lir_rvalue_t val = lir_local_addr(proc, block, local);
+	lir_rvalue_t mut = lir_mut(proc, block, val);
 	lir_inst_new(proc, block, (lir_inst_t){
 		.target = LIR_VALUE_NONE,
 		.kind = INST_STORE,
 		.d_store = {
-			.dest = val,
+			.dest = mut,
 			.src = value,
 		},
 	});
@@ -246,11 +264,16 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 		}
 		case INST_LOCAL: {
 			printf("&");
-			_print_local(proc, inst->d_local);
+			_print_local(proc, inst->d_local.local);
 			break;
 		}
 		case INST_SYMBOL: {
 			assert_not_reached();
+		}
+		case INST_MUT: {
+			printf("mut ");
+			_print_value(proc, inst->d_mut);
+			break;
 		}
 		case INST_ADD:
 		case INST_SUB:
@@ -344,19 +367,25 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 			printf(")");
 			break;
 		}
-		/* case INST_CAST: {
+		case INST_CAST: {
 			// value as type
 			_print_value(proc, inst->d_cast.src);
 			printf(" as %s", type_dbg_str(inst->d_cast.type));
 			break;
 		}
 		case INST_FIELD_OFFSET: {
-
+			// value.field
+			_print_value(proc, inst->d_field_offset.src);
+			printf(".field %s", sv_from(inst->d_field_offset.field));
+			break;
 		}
 		case INST_TUPLE_OFFSET: {
-
+			// value.0
+			_print_value(proc, inst->d_tuple_offset.src);
+			printf(".tuple %zu", inst->d_tuple_offset.index);
+			break;
 		}
-		case INST_SIZEOF: {
+		/* case INST_SIZEOF: {
 
 		} */
 		default: {
@@ -496,5 +525,8 @@ void lir_print_symbol(lir_symbol_t *symbol) {
 void lir_print_symbols(void) {
 	for (u32 i = 0, c = arrlenu(symbols); i < c; i++) {
 		lir_print_symbol(&symbols[i]);
+		if (i + 1 < c) {
+			printf("\n");
+		}
 	}
 }

@@ -201,7 +201,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_MOD, "%") \
 	X(TOK_EQ, "==") \
 	X(TOK_ASSIGN, "=") \
-	X(TOK_NEQ, "!=") \
+	X(TOK_NE, "!=") \
 	X(TOK_NOT, "!") \
 	X(TOK_LE, "<=") \
 	X(TOK_LT, "<") \
@@ -241,7 +241,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 // these tokens will always evaluate to bool
 #define TOK_IS_COND(t) \
 	((t) == TOK_EQ || \
-	(t) == TOK_NEQ || \
+	(t) == TOK_NE || \
 	(t) == TOK_LT || \
 	(t) == TOK_GT || \
 	(t) == TOK_LE || \
@@ -266,7 +266,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	(t) == TOK_ASSIGN_DIV || \
 	(t) == TOK_ASSIGN_MOD || \
 	(t) == TOK_EQ || \
-	(t) == TOK_NEQ || \
+	(t) == TOK_NE || \
 	(t) == TOK_LT || \
 	(t) == TOK_GT || \
 	(t) == TOK_LE || \
@@ -472,7 +472,7 @@ struct lir_value_t {
 };
 
 struct lir_inst_t {
-	lir_rvalue_t target; // LIR_VALUE_NONE for none
+	lir_rvalue_t target; // LIR_VALUE_NONE for none, will be set for you in most cases
 	// no need for self index
 	bool is_root; // for checker
 	enum : u8 {
@@ -484,6 +484,7 @@ struct lir_inst_t {
 		//
 		INST_LOCAL,
 		INST_SYMBOL,
+		INST_MUT,
 		//
 		INST_ADD, // infix
 		INST_SUB, // infix
@@ -519,8 +520,13 @@ struct lir_inst_t {
 		bool d_bool_lit;
 		lir_rvalue_t *d_array;
 		lir_rvalue_t *d_tuple;
-		lir_rlocal_t d_local;
-		// TODO: symbol
+		lir_rvalue_t d_mut; // conv to mut reference
+		struct {
+			lir_rlocal_t local;
+		} d_local;
+		struct {
+			istr_t qualified_name; // TODO: remove
+		} d_symbol;
 		struct {
 			lir_rvalue_t lhs;
 			lir_rvalue_t rhs;
@@ -552,6 +558,14 @@ struct lir_inst_t {
 			lir_rvalue_t src;
 			type_t type;
 		} d_cast;
+		struct {
+			lir_rvalue_t src;
+			istr_t field;
+		} d_field_offset;
+		struct {
+			lir_rvalue_t src;
+			u64 index; // TODO: should be u16...
+		} d_tuple_offset;
 	};
 };
 
@@ -692,6 +706,7 @@ lir_rlocal_t lir_local_new(lir_proc_t *proc, istr_t name, loc_t loc, type_t type
 lir_rinst_t lir_inst_new(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
 lir_rvalue_t lir_inst_value(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
 lir_rvalue_t lir_local_addr(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
+lir_rvalue_t lir_mut(lir_proc_t *proc, lir_rblock_t block, lir_rvalue_t value);
 void lir_local_store(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_rvalue_t value);
 lir_rvalue_t lir_local_load(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
 void lir_print_symbol(lir_symbol_t *symbol);

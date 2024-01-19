@@ -1,5 +1,11 @@
 add: i32 -> i32 -> i32
-add: a b = 0 
-add: a 0 = 0
-add: 0 b = 0
+add: a b = a + b
+add: 0 b = b
+add: a 0 = a
 add: 0 0 = 0
+
+extract0: (i32, i32) -> i32
+extract0: xs = xs.0
+
+sumsome: i32 -> i32
+sumsome: 't = t += 2

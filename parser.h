@@ -75,22 +75,24 @@ void pexpect(tok_t expected);
 void NORETURN punexpected(const char *err);
 type_t ptype(void);
 void pimport(void);
+int pimport_ident(istr_t name);
 void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);
 void ppop_scope(void);
 lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block);
 
-
 // result of parsing an expression
 typedef struct rexpr_t rexpr_t;
 
 // parsing an expression:
-// 1. results in a value
+// 1. results in a value or pointer (lvalue)
 // 2. could introduce control flow (block changing)
 struct rexpr_t {
 	lir_rvalue_t value;
 	lir_rblock_t block;
+	bool is_lvalue;
 };
 
 // TODO: nicer interface with default vars?
-rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u32 levels, u8 prec, u8 cfg);
+rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg);
+void pexpr_load(lir_proc_t *proc, rexpr_t *expr);

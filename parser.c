@@ -153,7 +153,8 @@ void pfn(lir_proc_t *parent) {
 		// with pattern, construct a basic block for it
 
 		ppush_scope();
-		rexpr_t expr = pexpr(&proc, block, 0, 0, 0);
+		rexpr_t expr = pexpr(&proc, block, 0, 0);
+		pexpr_load(&proc, &expr); // remove lvalues
 		ppop_scope();
 		ppop_scope();
 

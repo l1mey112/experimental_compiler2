@@ -479,6 +479,16 @@ void pimport(void) {
 	};
 }
 
+// -1 for not found
+int pimport_ident(istr_t name) {
+	for (u32 i = 0; i < p.is_len; i++) {
+		if (p.is[i].name == name) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 void pscope_register(pscope_entry_t entry) {
 	p.scope_entries[p.scope_entries_len++] = entry;
 }
