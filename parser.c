@@ -75,19 +75,24 @@ void pfn(lir_proc_t *parent) {
 	// TODO: we don't really store the locs of args???
 	// INFO: when DCEing locals or merging, take the loc of the one that actually has one
 
-	lir_rvalue_t *args = NULL;
+	lir_rlocal_t *args = NULL;
 	for (u32 i = 0; i < proc_len; i++) {
-		lir_rvalue_t v = lir_block_arg(&proc, entry, (lir_value_t){
+		lir_rlocal_t v = lir_local_new(&proc, (lir_local_t){
+			.kind = LOCAL_SSA,
 			.type = proc_typeinfo->d_fn.args[i],
-			.loc = name_loc,
+			.is_debuginfo = true,
+			.d_debuginfo = {
+				.loc = name_loc,
+			},
 		});
+		lir_block_arg_assign(&proc,entry, v);
 		arrpush(args, v);
 	}
 
 	// construct a tuple so it can unpack
 	// v3 = (v0, v1)
 
-	lir_rvalue_t tuple = lir_inst_value(&proc, entry, proc_typeinfo->d_fn.ret, name_loc, (lir_inst_t){
+	lir_rlocal_t tuple = lir_ssa_tmp_inst(&proc, entry, proc_typeinfo->d_fn.ret, &name_loc, (lir_inst_t){
 		.kind = INST_TUPLE,
 		.d_tuple = args,
 	});
@@ -154,13 +159,12 @@ void pfn(lir_proc_t *parent) {
 
 		ppush_scope();
 		rexpr_t expr = pexpr(&proc, block, 0, 0);
-		pexpr_load(&proc, &expr); // remove lvalues
 		ppop_scope();
 		ppop_scope();
 
-		lir_block_term(&proc, block, (lir_term_t){
+		lir_block_term(&proc, expr.block, (lir_term_t){
 			.kind = TERM_RET,
-			.d_ret = expr.value,
+			.d_ret = lir_lvalue_spill(&proc, expr.block, expr.value),
 		});
 		pat++;
 

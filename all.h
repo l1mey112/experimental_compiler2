@@ -22,6 +22,17 @@ typedef int64_t i64;
 typedef float f32;
 typedef double f64;
 
+// there is no robust workaround, must pass type
+#define arr(type, ...) ({                              \
+		type *ret = NULL;                              \
+		type v[] = {__VA_ARGS__};                      \
+		if (sizeof(v)) {                               \
+			arraddnptr(ret, sizeof(v) / sizeof(type)); \
+			memcpy(ret, v, sizeof(v));                 \
+		}                                              \
+		ret;                                           \
+	})
+
 typedef struct loc_t loc_t;
 typedef struct err_diag_t err_diag_t;
 typedef struct token_t token_t;
@@ -451,29 +462,73 @@ typedef struct lir_proc_t lir_proc_t;
 typedef struct lir_block_t lir_block_t;
 typedef struct lir_term_t lir_term_t;
 typedef struct lir_inst_t lir_inst_t;
-typedef struct lir_value_t lir_value_t;
 typedef struct lir_local_t lir_local_t;
 typedef struct lir_term_sc_t lir_term_sc_t;
 typedef struct lir_term_block_t lir_term_block_t;
 typedef struct lir_term_pat_t lir_term_pat_t; // pattern match abstraction
-typedef u32 lir_rvalue_t;
+typedef struct lir_lvalue_t lir_lvalue_t;
+typedef struct lir_lvalue_proj_t lir_lvalue_proj_t;
 typedef u32 lir_rblock_t;
-typedef u32 lir_rinst_t; // TODO: possible removal of lir_rinst_t
 typedef u32 lir_rlocal_t;
 
-#define LIR_VALUE_NONE ((lir_rvalue_t)-1)
-#define LIR_BLOCK_NONE ((lir_rblock_t)-1)
+#define BLOCK_NONE ((lir_rblock_t)-1)
 
-// v0 = 10
-struct lir_value_t {
-	lir_rvalue_t index; // self
+struct lir_local_t {
 	type_t type;
-	loc_t loc; // more debuginfo
+	enum {
+		LOCAL_MUT, // assigned multiple times
+		LOCAL_IMM, // assigned once in all flows of control
+		LOCAL_SSA, // assigned once (block args can only be SSA locals)
+	} kind;
+
+	// semantically, SSA locals are constants
+	// they can't have their address taken or assigned to
+
+	// TODO: optimised out or removed flag so debuggers
+	//       like GDB can let the user know that
+
+	// TODO: instead of duplicating debuginfo on SSA locals, make it point to the derived original local
+	bool is_debuginfo;
+	struct {
+		loc_t loc;
+		istr_t name;
+	} d_debuginfo;
+};
+
+#define PROJ_IDX_INVALID ((u16)-1)
+
+struct lir_lvalue_proj_t {
+	enum : u8 {
+		PROJ_DEREF,
+		PROJ_FIELD,
+		PROJ_INDEX,
+	} kind;
+
+	loc_t loc;
+
+	union {
+		struct {
+			u16 field_idx; // (default -1) set for tuples, after checking both are set 
+			istr_t field; // set for fields
+		} d_field;
+		struct {
+			lir_rlocal_t index;
+		} d_index;
+	};
+};
+
+// TODO: what you probably want in an lvalue
+//
+//       - we store the location of each projection (can reconstruct everything)
+//       - we don't store the type of each
+//       - we don't store the resultant type
+
+struct lir_lvalue_t {
+	lir_rlocal_t local; // TODO: global symbols
+	lir_lvalue_proj_t *proj;
 };
 
 struct lir_inst_t {
-	lir_rvalue_t target; // LIR_VALUE_NONE for none, will be set for you in most cases
-	// no need for self index
 	bool is_root; // for checker
 	enum : u8 {
 		INST_INTEGER_LIT,
@@ -481,10 +536,6 @@ struct lir_inst_t {
 		INST_ARRAY,
 		INST_TUPLE_UNIT,
 		INST_TUPLE,
-		//
-		INST_LOCAL,
-		INST_SYMBOL,
-		INST_MUT,
 		//
 		INST_ADD, // infix
 		INST_SUB, // infix
@@ -502,70 +553,45 @@ struct lir_inst_t {
 		INST_NEG, // unary
 		INST_NOT, // unary
 		//
-		INST_LOAD,
-		INST_STORE,
-		INST_LEA, // &index[], have to load to get value out
-		INST_SLICE, // index[lo:hi]
+		INST_LVALUE,
+		INST_ADDRESS_OF,
 		//
 		INST_CALL, // f(a, b, c)
 		INST_CAST,
-		INST_FIELD_OFFSET,
-		INST_TUPLE_OFFSET,
 		INST_SIZEOF, // is usize
 		_INST_MAX,
 	} kind;
 
+	lir_lvalue_t dest;
+
 	union {
 		istr_t d_integer_lit;
 		bool d_bool_lit;
-		lir_rvalue_t *d_array;
-		lir_rvalue_t *d_tuple;
-		lir_rvalue_t d_mut; // conv to mut reference
+		lir_rlocal_t *d_array;
+		lir_rlocal_t *d_tuple;
+		lir_lvalue_t d_lvalue;
 		struct {
-			lir_rlocal_t local;
-		} d_local;
+			lir_lvalue_t lvalue;
+			bool is_mut;
+		} d_address_of;
 		struct {
 			istr_t qualified_name; // TODO: remove
 		} d_symbol;
 		struct {
-			lir_rvalue_t lhs;
-			lir_rvalue_t rhs;
+			lir_rlocal_t lhs;
+			lir_rlocal_t rhs;
 		} d_infix;
 		struct {
-			lir_rvalue_t src;
+			lir_rlocal_t src;
 		} d_unary;
 		struct {
-			lir_rvalue_t dest;
-			lir_rvalue_t src;
-		} d_store;
-		struct {
-			lir_rvalue_t src;
-		} d_load;
-		struct {
-			lir_rvalue_t src;
-			lir_rvalue_t index;
-		} d_lea;
-		struct {
-			lir_rvalue_t src;
-			lir_rvalue_t lo; // can be NULL
-			lir_rvalue_t hi; // can be NULL
-		} d_slice;
-		struct {
-			lir_rvalue_t f;
-			lir_rvalue_t *args;
+			lir_rlocal_t f;
+			lir_rlocal_t *args;
 		} d_call;
 		struct {
-			lir_rvalue_t src;
+			lir_rlocal_t src;
 			type_t type;
 		} d_cast;
-		struct {
-			lir_rvalue_t src;
-			istr_t field;
-		} d_field_offset;
-		struct {
-			lir_rvalue_t src;
-			u64 index; // TODO: should be u16...
-		} d_tuple_offset;
 	};
 };
 
@@ -584,7 +610,7 @@ struct lir_term_pat_t {
 	loc_t loc;
 
 	union {
-		u32 d_local; // index into block args
+		lir_rlocal_t d_local; // index into local args
 		struct {
 			lir_term_pat_t *elems;
 		} d_tuple;
@@ -600,14 +626,14 @@ struct lir_term_pat_t {
 
 struct lir_term_block_t {
 	lir_rblock_t block;
-	lir_rvalue_t *args;
+	lir_rlocal_t *args;
 };
 
-struct lir_term_sc_t {
-	lir_rvalue_t value;
+/* struct lir_term_sc_t {
+	lir_lvalue_t value;
 	lir_term_block_t block;
 };
-
+ */
 struct lir_term_t {
 	enum {
 		TERM_UNINIT, // shouldn't be this
@@ -618,26 +644,28 @@ struct lir_term_t {
 		TERM_GOTO_PATTERN,
 	} kind;
 
+	// TODO: merge TERM_IF with TERM_SWITCH?
+
 	union {
 		lir_term_block_t d_goto;
 		struct {
-			lir_rvalue_t cond;
+			lir_rlocal_t cond;
 			lir_term_block_t then;
 			lir_term_block_t els;
 		} d_if;
-		struct {
+		/* struct {
 			lir_rvalue_t value;
 			lir_term_sc_t *cases;
-			lir_term_block_t default_block; // LIR_BLOCK_NONE for no default
-		} d_switch;
+			lir_term_block_t default_block; // BLOCK_NONE for no default
+		} d_switch; */
 		struct {
-			lir_rvalue_t value;
+			lir_rlocal_t value;
 		} d_ret;
 		//
 		// abstractions/intrinsics
 		//
 		struct {
-			lir_rvalue_t value;
+			lir_rlocal_t value;
 			lir_rblock_t *blocks;
 			lir_term_pat_t *patterns;
 		} d_goto_pattern;
@@ -648,34 +676,13 @@ struct lir_block_t {
 	lir_rblock_t index; // self
 	const char *debug_name;
 	lir_inst_t *insts;
-	lir_rvalue_t *args;
+	lir_rlocal_t *args;
 	lir_term_t term;
-};
-
-/* struct hir_var_t {
-	istr_t name;
-	loc_t loc;
-	type_t type;
-	bool is_in_decl; // ignore var, used in parser
-	bool is_mut; // is mut
-	bool is_proc_decl; // is a desugared proc decl
-	bool is_arg; // is lambda argument
-	bool is_pub; // is exposed to other modules
-}; */
-
-// stack slot
-struct lir_local_t {
-	istr_t name;
-	loc_t loc;
-	type_t type;
-	// bool is_in_decl; // ignore var, used in parser
-	bool is_mut;
 };
 
 struct lir_proc_t {
 	lir_block_t *blocks; // block 0 is always entry block
 	lir_local_t *locals; // stack slots
-	lir_value_t *values;
 };
 
 // TODO: symbols into hashmap
@@ -698,16 +705,35 @@ struct lir_symbol_t {
 // search by qualified name
 extern lir_symbol_t *symbols;
 
-lir_rvalue_t lir_value_new(lir_proc_t *proc, lir_value_t value);
+void lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
+// create local, local = inst
+lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc, lir_inst_t inst);
+
+lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local);
+lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut);
 lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name); // takes ownership of debug_name
-lir_rvalue_t lir_block_arg(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
+lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc);
+void lir_block_arg_assign(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local); // assert local is LOCAL_SSA
 void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
-lir_rlocal_t lir_local_new(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut);
-lir_rinst_t lir_inst_new(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
-lir_rvalue_t lir_inst_value(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
-lir_rvalue_t lir_local_addr(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
-lir_rvalue_t lir_mut(lir_proc_t *proc, lir_rblock_t block, lir_rvalue_t value);
-void lir_local_store(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_rvalue_t value);
-lir_rvalue_t lir_local_load(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
 void lir_print_symbol(lir_symbol_t *symbol);
 void lir_print_symbols(void);
+
+// INFO: in the parser we assign around lvalues willy nilly.
+//       there is a possibility for aliasing, but it doesn't
+//       seem much of an issue for now.
+//
+//       multiple instructions may share the same lvalue
+
+lir_lvalue_t lir_lvalue(lir_rlocal_t local);
+void lir_lvalue_deref(lir_lvalue_t *lvalue, loc_t loc);
+void lir_lvalue_struct_field(lir_lvalue_t *lvalue, loc_t loc, istr_t field);
+void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx);
+void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index);
+
+// INFO: spill for READING only, writing to this would cause weird behaviour
+//       spill will return the local if it contains no projections
+//       otherwise unwrap projections into a new local and return it
+//
+//       after a write to the original lvalue, the spilled local is invalidated
+//       returns SSA locals
+lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue);

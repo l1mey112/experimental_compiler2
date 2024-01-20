@@ -530,14 +530,16 @@ lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block) {
 			pnext();
 			//
 			// construct block arg and assign to local
-			lir_rblock_t rarg = arrlenu(proc->blocks[block].args);
-			lir_rvalue_t arg = lir_block_arg(proc, block, (lir_value_t){
-				.type = TYPE_INFER,
-				.loc = name_loc,
-			});
 
-			lir_rlocal_t local = lir_local_new(proc, name, name_loc, TYPE_INFER, is_mut);
-			lir_local_store(proc, block, local, arg);
+			lir_rlocal_t arg = lir_block_new_arg(proc, block, TYPE_INFER, &name_loc);
+			lir_rlocal_t local = lir_local_new_named(proc, name, name_loc, TYPE_INFER, is_mut);
+
+			// local = arg
+			lir_inst(proc, block, (lir_inst_t){
+				.dest = local, // original lvalue
+				.kind = INST_LVALUE,
+				.d_lvalue = arg,
+			});
 
 			(void)pscope_register((pscope_entry_t){
 				.name = name,

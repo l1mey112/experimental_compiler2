@@ -4,10 +4,24 @@ lir_symbol_t *symbols;
 
 #include "stb_ds.h"
 
-lir_rvalue_t lir_value_new(lir_proc_t *proc, lir_value_t value) {
-	u32 idx = arrlenu(proc->values);
-	value.index = idx;
-	arrpush(proc->values, value);
+lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local) {
+	u32 idx = arrlenu(proc->locals);
+	arrpush(proc->locals, local);
+	return idx;
+}
+
+lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut) {
+	lir_local_t local = {
+		.kind = is_mut ? LOCAL_MUT : LOCAL_IMM,
+		.type = type,
+		.is_debuginfo = true,
+		.d_debuginfo = {
+			.name = name,
+			.loc = loc,
+		}
+	};
+	u32 idx = arrlenu(proc->locals);
+	arrpush(proc->locals, local);
 	return idx;
 }
 
@@ -21,11 +35,27 @@ lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name) {
 	return idx;
 }
 
-lir_rvalue_t lir_block_arg(lir_proc_t *proc, lir_rblock_t block, lir_value_t value) {
+lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc) {
+	lir_local_t desc = (lir_local_t){
+		.kind = LOCAL_SSA,
+		.type = type,
+	};
+
+	if (loc) {
+		desc.is_debuginfo = true;
+		desc.d_debuginfo.loc = *loc;
+	}
+	
+	lir_rlocal_t local = lir_local_new(proc, desc);
+	lir_block_arg_assign(proc, block, local);
+	return local;
+}
+
+void lir_block_arg_assign(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
 	lir_block_t *b = &proc->blocks[block];
-	lir_rvalue_t rvalue = lir_value_new(proc, value);
-	arrpush(b->args, rvalue);
-	return rvalue;
+	lir_local_t *localp = &proc->locals[local];
+	assert(localp->kind == LOCAL_SSA);
+	arrpush(b->args, local);
 }
 
 void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term) {
@@ -33,95 +63,121 @@ void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term) {
 	b->term = term;
 }
 
-lir_rinst_t lir_inst_new(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst) {
+void lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst) {
 	lir_block_t *b = &proc->blocks[block];
-	u32 idx = arrlenu(b->insts);
 	arrpush(b->insts, inst);
-	return idx;
 }
 
-// inst builder
-// v2 = v0 + v1
-lir_rvalue_t lir_inst_value(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst) {
-	lir_rvalue_t rvalue = lir_value_new(proc, (lir_value_t){.type = type, .loc = loc});
-	inst.target = rvalue;
-	(void)lir_inst_new(proc, block, inst);
-	return rvalue;
-}
+// create local, local = inst
+lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc, lir_inst_t inst) {
+	lir_local_t desc = (lir_local_t){
+		.kind = LOCAL_SSA,
+		.type = type,
+	};
 
-lir_rvalue_t lir_mut(lir_proc_t *proc, lir_rblock_t block, lir_rvalue_t value) {
-	lir_value_t *valuep = &proc->values[value];
-	return lir_inst_value(proc, block, valuep->type, valuep->loc, (lir_inst_t){
-		.kind = INST_MUT,
-		.d_mut = value,
-	});
-}
-
-lir_rvalue_t lir_local_addr(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
-	// to avoid duplications of &local, search for refs in the current block
-	lir_block_t *blockp = &proc->blocks[block];
-	for (u32 i = 0, c = arrlenu(blockp->insts); i < c; i++) {
-		lir_inst_t *inst = &blockp->insts[i];
-		if (inst->kind == INST_LOCAL && inst->d_local.local == local) {
-			return inst->target;
-		}
+	if (loc) {
+		desc.is_debuginfo = true;
+		desc.d_debuginfo.loc = *loc;
 	}
 	
-	lir_block_t *b = &proc->blocks[block];
-	lir_local_t *localp = &proc->locals[local];
-	lir_rvalue_t val = lir_inst_value(proc, block, localp->type, localp->loc, (lir_inst_t){
-		.kind = INST_LOCAL,
-		.d_local.local = local,
-	});
-	return val;
+	lir_rlocal_t local = lir_local_new(proc, desc);
+	inst.dest = lir_lvalue(local);
+	lir_inst(proc, block, inst);
+	return local;
 }
 
-lir_rlocal_t lir_local_new(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut) {
-	lir_local_t local = {
-		.name = name,
-		.loc = loc,
-		.type = type,
-		.is_mut = is_mut,
+lir_lvalue_t lir_lvalue(lir_rlocal_t local) {
+	return (lir_lvalue_t){
+		.local = local,
+		.proj = NULL,
 	};
-	u32 idx = arrlenu(proc->locals);
-	arrpush(proc->locals, local);
-	return idx;
 }
 
-void lir_local_store(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_rvalue_t value) {
-	lir_block_t *b = &proc->blocks[block];
-	lir_rvalue_t val = lir_local_addr(proc, block, local);
-	lir_rvalue_t mut = lir_mut(proc, block, val);
-	lir_inst_new(proc, block, (lir_inst_t){
-		.target = LIR_VALUE_NONE,
-		.kind = INST_STORE,
-		.d_store = {
-			.dest = mut,
-			.src = value,
+void lir_lvalue_deref(lir_lvalue_t *lvalue, loc_t loc) {
+	lir_lvalue_proj_t desc = {
+		.kind = PROJ_DEREF,
+		.loc = loc,
+	};
+
+	arrpush(lvalue->proj, desc);
+}
+
+void lir_lvalue_struct_field(lir_lvalue_t *lvalue, loc_t loc, istr_t field) {
+	lir_lvalue_proj_t desc = {
+		.kind = PROJ_FIELD,
+		.loc = loc,
+		.d_field = {
+			.field = field,
+			.field_idx = PROJ_IDX_INVALID,
 		},
-	});
+	};
+
+	arrpush(lvalue->proj, desc);
 }
 
-lir_rvalue_t lir_local_load(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
-	lir_block_t *b = &proc->blocks[block];
-	lir_rvalue_t val = lir_local_addr(proc, block, local);
-	lir_rvalue_t rvalue = lir_value_new(proc, (lir_value_t){.type = proc->locals[local].type, .loc = proc->locals[local].loc});
-	lir_inst_new(proc, block, (lir_inst_t){
-		.target = rvalue,
-		.kind = INST_LOAD,
-		.d_load = {
-			.src = val,
-		}
+void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx) {
+	lir_lvalue_proj_t desc = {
+		.kind = PROJ_FIELD,
+		.loc = loc,
+		.d_field = {
+			.field = ISTR_NONE,
+			.field_idx = field_idx,
+		},
+	};
+
+	arrpush(lvalue->proj, desc);
+}
+
+void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index) {
+	lir_lvalue_proj_t desc = {
+		.kind = PROJ_INDEX,
+		.loc = loc,
+		.d_index = {
+			.index = index,
+		},
+	};
+
+	arrpush(lvalue->proj, desc);
+}
+
+lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
+	if (arrlenu(lvalue.proj) == 0) {
+		return lvalue.local;
+	}
+
+	return lir_ssa_tmp_inst(proc, block, lvalue.local, &lvalue.proj[0].loc, (lir_inst_t){
+		.kind = INST_LVALUE,
+		.d_lvalue = lvalue,
 	});
-	return rvalue;
 }
 
 static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
 	lir_local_t *localp = &proc->locals[local];
-	if (localp->name) {
-		printf("%s", sv_from(localp->name));
+
+	switch (localp->kind) {
+		case LOCAL_MUT:
+		case LOCAL_IMM: {
+			if (localp->is_debuginfo) {
+				printf("%s", sv_from(localp->d_debuginfo.name));
+			} else {
+				printf("_");
+			}
+			printf(".%u", local);
+			break;
+		}
+		case LOCAL_SSA: {
+			printf("%%");
+			printf("%u", local);
+			break;
+		}
 	}
-	printf(".%u", local);
+
+}
+
+// : type
+static void _print_local_type(lir_proc_t *proc, lir_rlocal_t local) {
+	lir_local_t *localp = &proc->locals[local];
+	printf(": %s", type_dbg_str(localp->type));
 }
 
 static void _print_term_pattern(lir_proc_t *proc, lir_term_pat_t *pattern) {
@@ -193,21 +249,15 @@ static void _print_blockref(lir_proc_t *proc, lir_rblock_t block) {
 	}
 }
 
-static void _print_value(lir_proc_t *proc, lir_rvalue_t value) {
-	lir_value_t *valuep = &proc->values[value];
-	printf("v%u", value);
-}
-
-static void _print_blockterm(lir_proc_t *proc, lir_term_block_t *block) {
-	_print_blockref(proc, block->block);
+static void _print_blockterm(lir_proc_t *proc, lir_term_block_t block) {
+	_print_blockref(proc, block.block);
 	// block(v0, v1)
-	u32 c = arrlenu(block->args);
+	u32 c = arrlenu(block.args);
 	if (c > 0) {
 		printf("(");
 		for (u32 i = 0; i < c; i++) {
-			lir_rvalue_t arg = block->args[i];
-			lir_value_t *argp = &proc->values[arg];
-			_print_value(proc, arg);
+			lir_rlocal_t arg = block.args[i];
+			_print_local(proc, arg);
 			if (i + 1 < c) {
 				printf(", ");
 			}
@@ -216,15 +266,44 @@ static void _print_blockterm(lir_proc_t *proc, lir_term_block_t *block) {
 	}
 }
 
+static void _print_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
+	_print_local(proc, lvalue.local);
+	for (u32 i = 0, c = arrlenu(lvalue.proj); i < c; i++) {
+		lir_lvalue_proj_t *proj = &lvalue.proj[i];
+		switch (proj->kind) {
+			case PROJ_DEREF: {
+				printf(".*");
+				break;
+			}
+			case PROJ_FIELD: {
+				if (proj->d_field.field != ISTR_NONE) {
+					printf(".%s", sv_from(proj->d_field.field));
+				} else {
+					printf(".%u", proj->d_field.field_idx);
+				}
+				break;
+			}
+			case PROJ_INDEX: {
+				printf("[");
+				_print_local(proc, proj->d_index.index);
+				printf("]");
+				break;
+			}
+			default: {
+				assert_not_reached();
+			}
+		}
+	}
+}
+
 static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 	// assert(inst->kind < _INST_MAX);	
 
 	printf("  ");
 
-	if (inst->target != LIR_VALUE_NONE) {
-		_print_value(proc, inst->target);
-		printf(" = ");
-	}
+	_print_lvalue(proc, inst->dest);
+
+	printf(" = ");
 
 	switch (inst->kind) {
 		case INST_INTEGER_LIT: {
@@ -238,8 +317,8 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 		case INST_ARRAY: {
 			printf("[");
 			for (u32 i = 0, c = arrlenu(inst->d_array); i < c; i++) {
-				lir_rvalue_t elem = inst->d_array[i];
-				_print_value(proc, elem);
+				lir_rlocal_t elem = inst->d_array[i];
+				_print_local(proc, elem);
 				if (i + 1 < c) {
 					printf(", ");
 				}
@@ -253,26 +332,13 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 		case INST_TUPLE: {
 			printf("(");
 			for (u32 i = 0, c = arrlenu(inst->d_tuple); i < c; i++) {
-				lir_rvalue_t elem = inst->d_tuple[i];
-				_print_value(proc, elem);
+				lir_rlocal_t elem = inst->d_tuple[i];
+				_print_local(proc, elem);
 				if (i + 1 < c) {
 					printf(", ");
 				}
 			}
 			printf(")");
-			break;
-		}
-		case INST_LOCAL: {
-			printf("&");
-			_print_local(proc, inst->d_local.local);
-			break;
-		}
-		case INST_SYMBOL: {
-			assert_not_reached();
-		}
-		case INST_MUT: {
-			printf("mut ");
-			_print_value(proc, inst->d_mut);
 			break;
 		}
 		case INST_ADD:
@@ -304,9 +370,9 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 				[INST_OR] = "|",
 			};
 
-			_print_value(proc, inst->d_infix.lhs);
+			_print_local(proc, inst->d_infix.lhs);
 			printf(" %s ", lit_tbl[inst->kind]);
-			_print_value(proc, inst->d_infix.rhs);
+			_print_local(proc, inst->d_infix.rhs);
 			break;
 		}
 		case INST_NEG:
@@ -317,49 +383,16 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 			};
 
 			printf("%s", lit_tbl[inst->kind]);
-			_print_value(proc, inst->d_unary.src);
+			_print_local(proc, inst->d_unary.src);
 			break;
-		}
-		case INST_LOAD: {
-			printf("load ");
-			_print_value(proc, inst->d_load.src);
-			break;
-		}
-		case INST_STORE: {
-			printf("store ");
-			_print_value(proc, inst->d_store.dest);
-			printf(", ");
-			_print_value(proc, inst->d_store.src);
-			break;
-		}
-		case INST_LEA: {
-			// &value[index]
-			printf("&");
-			_print_value(proc, inst->d_lea.src);
-			printf("[");
-			_print_value(proc, inst->d_lea.index);
-			printf("]");
-			break;
-		}
-		case INST_SLICE: {
-			// value[start..end]
-			_print_value(proc, inst->d_slice.src);
-			printf("[");
-			if (inst->d_slice.lo != LIR_VALUE_NONE) {
-				_print_value(proc, inst->d_slice.lo);
-			}
-			printf("..");
-			if (inst->d_slice.hi != LIR_VALUE_NONE) {
-				_print_value(proc, inst->d_slice.hi);
-			}
 		}
 		case INST_CALL: {
 			// value(a, b, c)
-			_print_value(proc, inst->d_call.f);
+			_print_local(proc, inst->d_call.f);
 			printf("(");
 			for (u32 i = 0, c = arrlenu(inst->d_call.args); i < c; i++) {
-				lir_rvalue_t arg = inst->d_call.args[i];
-				_print_value(proc, arg);
+				lir_rlocal_t arg = inst->d_call.args[i];
+				_print_local(proc, arg);
 				if (i + 1 < c) {
 					printf(", ");
 				}
@@ -369,26 +402,25 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 		}
 		case INST_CAST: {
 			// value as type
-			_print_value(proc, inst->d_cast.src);
+			_print_local(proc, inst->d_cast.src);
 			printf(" as %s", type_dbg_str(inst->d_cast.type));
 			break;
 		}
-		case INST_FIELD_OFFSET: {
-			// value.field
-			_print_value(proc, inst->d_field_offset.src);
-			printf(".field %s", sv_from(inst->d_field_offset.field));
+		case INST_LVALUE: {
+			_print_lvalue(proc, inst->d_lvalue);
 			break;
 		}
-		case INST_TUPLE_OFFSET: {
-			// value.0
-			_print_value(proc, inst->d_tuple_offset.src);
-			printf(".tuple %zu", inst->d_tuple_offset.index);
+		case INST_ADDRESS_OF: {
+			printf("&");
+			if (inst->d_address_of.is_mut) {
+				printf("'");
+			}
+			_print_lvalue(proc, inst->d_address_of.lvalue);
 			break;
 		}
-		/* case INST_SIZEOF: {
-
-		} */
+		// case INST_SIZEOF:
 		default: {
+			printf("\n\nkind: %u\n\n", inst->kind);
 			assert_not_reached();
 		}
 	}
@@ -404,12 +436,18 @@ void lir_print_proc(lir_symbol_t *symbol) {
 	// print locals
 	for (u32 i = 0, c = arrlenu(proc->locals); i < c; i++) {
 		lir_local_t *localp = &proc->locals[i];
+
+		if (localp->kind == LOCAL_SSA) {
+			continue;
+		}
+
 		printf("  ");
-		if (localp->is_mut) {
+
+		if (localp->kind == LOCAL_MUT) {
 			printf("'");
 		}
 		_print_local(proc, i);
-		printf(": %s", type_dbg_str(localp->type));
+		_print_local_type(proc, i);
 		printf("\n");
 	}
 
@@ -424,10 +462,9 @@ void lir_print_proc(lir_symbol_t *symbol) {
 		if (c > 0) {
 			printf("(");
 			for (u32 i = 0; i < c; i++) {
-				lir_rvalue_t arg = block->args[i];
-				lir_value_t *argp = &proc->values[arg];
-				_print_value(proc, arg);
-				printf(": %s", type_dbg_str(argp->type));
+				lir_rlocal_t arg = block->args[i];
+				_print_local(proc, arg);
+				_print_local_type(proc, arg);
 				if (i + 1 < c) {
 					printf(", ");
 				}
@@ -447,13 +484,23 @@ void lir_print_proc(lir_symbol_t *symbol) {
 		switch (block->term.kind) {
 			case TERM_GOTO: {
 				printf("  goto ");
-				_print_blockterm(proc, &block->term.d_goto);
+				_print_blockterm(proc, block->term.d_goto);
 				printf("\n");
 				break;
 			}
 			case TERM_RET: {
 				printf("  ret ");
-				_print_value(proc, block->term.d_ret.value);
+				_print_local(proc, block->term.d_ret.value);
+				printf("\n");
+				break;
+			}
+			case TERM_IF: {
+				printf("  if ");
+				_print_local(proc, block->term.d_if.cond);
+				printf(" goto ");
+				_print_blockterm(proc, block->term.d_if.then);
+				printf(" else goto ");
+				_print_blockterm(proc, block->term.d_if.els);
 				printf("\n");
 				break;
 			}
@@ -467,7 +514,7 @@ void lir_print_proc(lir_symbol_t *symbol) {
 				//     (0, b) -> block_two
 
 				printf("  goto_pattern ");
-				_print_value(proc, block->term.d_goto_pattern.value);
+				_print_local(proc, block->term.d_goto_pattern.value);
 				printf("\n");
 
 				for (u32 i = 0, c = arrlenu(block->term.d_goto_pattern.patterns); i < c; i++) {
@@ -480,29 +527,6 @@ void lir_print_proc(lir_symbol_t *symbol) {
 				}
 				break;
 			}
-			/* case TERM_GOTO_PATTERN: {
-				printf("  goto_pattern ");
-				_print_value(proc, block->term.d_goto_pattern.value);
-				printf(" (");
-				for (u32 i = 0, c = arrlenu(block->term.d_goto_pattern.blocks); i < c; i++) {
-					lir_rblock_t block = block->term.d_goto_pattern.blocks[i];
-					_print_blockref(proc, block);
-					if (i + 1 < c) {
-						printf(", ");
-					}
-				}
-				printf(") (");
-				for (u32 i = 0, c = arrlenu(block->term.d_goto_pattern.patterns); i < c; i++) {
-					lir_rpattern_t pattern = block->term.d_goto_pattern.patterns[i];
-					lir_pattern_t *patternp = &proc->patterns[pattern];
-					printf("%s", sv_from(patternp->name));
-					if (i + 1 < c) {
-						printf(", ");
-					}
-				}
-				printf(")\n");
-				break;
-			} */
 			default: {
 				assert_not_reached();
 			}

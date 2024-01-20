@@ -1,2 +1,17 @@
-t: []i32 -> i32
-t: xs = xs[0]
+add: i32 -> i32 -> i32
+add: a b = a + b
+add: a 0 = a
+add: 0 b = b
+add: 0 0 = 0
+
+addsome: i32 -> i32
+addsome: 'xs = xs += 20
+
+addr: i32 -> i32
+addr: x = (&x).*
+
+select: bool -> i32 -> i32 -> i32
+select: cond a b = if (cond) a else b
+
+selectn: bool -> i32 -> ()
+selectn: cond a = if (cond) a
