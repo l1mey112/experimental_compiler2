@@ -1,17 +1,31 @@
-add: i32 -> i32 -> i32
-add: a b = a + b
-add: a 0 = a
-add: 0 b = b
-add: 0 0 = 0
+; add: i32 -> i32 -> i32
+; add: a b = a + b
+; add: a 0 = a
+; add: 0 b = b
+; add: 0 0 = 0
+; 
+; addsome: i32 -> i32
+; addsome: 'xs = xs += 20
+; 
+; addr: i32 -> i32
+; addr: x = (&x).*
+; 
+; select: bool -> i32 -> i32 -> i32
+; select: cond a b = if (cond) a else b
+; 
+; selectn: bool -> i32 -> ()
+; selectn: cond a = if (cond) a
+; 
+; eeepy: i32 -> (i32, i32)
+; eeepy: x = (x, undefined)
 
-addsome: i32 -> i32
-addsome: 'xs = xs += 20
+; main: () -> ()
+; main: () = :t do
+;     brk :t 50 + 50
 
-addr: i32 -> i32
-addr: x = (&x).*
+; condbrk0: bool -> i32
+; condbrk0: cond = :t do
+;     brk :t if (cond) 50 + 50 else 25
 
-select: bool -> i32 -> i32 -> i32
-select: cond a b = if (cond) a else b
-
-selectn: bool -> i32 -> ()
-selectn: cond a = if (cond) a
+c: bool -> i32
+c: cond = if (cond) 50 + 50 else 25

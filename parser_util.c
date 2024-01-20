@@ -685,3 +685,31 @@ lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block) {
 		}
 	}
 }
+
+// if `opt_label != ISTR_NONE` then `onerror` points to label otherwise the `brk` expr
+u32 pblk_locate(istr_t opt_label, loc_t onerror) {
+	for (u32 i = p.blks_len; i-- > 0;) {
+		pblk_t *blk = &p.blks[i];
+		if (!blk->always_brk && opt_label == ISTR_NONE) {
+			continue;
+		}
+		if (blk->label == opt_label) {
+			return i;
+		}
+	}
+
+	// makes more sense, need to specialise the error message regardless on state of blks
+	if (opt_label != ISTR_NONE) {
+		err_with_pos(onerror, "label `%s` not found", sv_from(opt_label));
+	} else {
+		err_with_pos(onerror, "not inside a loop");
+	}
+}
+
+// construct a ! value using unreachable control flow
+rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t *loc) {
+	rexpr_t expr;
+	expr.block = lir_block_new(proc, NULL);
+	expr.value = lir_lvalue(lir_block_new_arg(proc, expr.block, TYPE_BOTTOM, loc));
+	return expr;
+}

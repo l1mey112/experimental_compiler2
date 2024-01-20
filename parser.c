@@ -125,7 +125,7 @@ void pfn(lir_proc_t *parent) {
 		lir_term_pat_t *patterns = NULL;
 
 		char *debug_name;
-		asprintf(&debug_name, "%s.%u", sv_from(name), pat);
+		asprintf(&debug_name, "pattern%u", pat);
 		lir_rblock_t block = lir_block_new(&proc, debug_name);
 
 		while (true) {
@@ -223,7 +223,7 @@ void ptop_stmt(void) {
 			// fallthrough
 		}
 		default: {
-			assert_not_reached();
+			punexpected("expected top-level statement");
 			/* hir_node_t expr;
 			bool set = pstmt(&expr, NULL, p.modp->exprs);
 			if (set) {

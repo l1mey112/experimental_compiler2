@@ -536,6 +536,7 @@ struct lir_inst_t {
 		INST_ARRAY,
 		INST_TUPLE_UNIT,
 		INST_TUPLE,
+		INST_UNDEFINED,
 		//
 		INST_ADD, // infix
 		INST_SUB, // infix

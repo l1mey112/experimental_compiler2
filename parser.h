@@ -6,6 +6,18 @@ typedef struct pctx_t pctx_t;
 typedef struct pimport_t pimport_t;
 typedef struct pproc_decls_t pproc_decls_t;
 typedef struct pscope_entry_t pscope_entry_t;
+typedef struct pblk_t pblk_t;
+
+// TODO: since we have no need to reconstruct the block stack in the checker
+//       we can just ignore brks to a block that has `always_brk` set to false
+//       like in label-less`do` blocks.
+struct pblk_t {
+	istr_t label;
+	loc_t loc; // TODO: i don't even think we'll need this?
+	bool always_brk; // if false, a `brk` without a label doesn't resolve to this
+	lir_rblock_t brk;
+	lir_rblock_t rep;
+};
 
 struct pimport_t {
 	rmod_t mod;
@@ -21,7 +33,6 @@ struct pscope_entry_t {
 	enum {
 		PS_LOCAL,
 		PS_DEBUG_REFERENCE,
-		PS_BRANCH,
 		PS_SYMBOL,
 		// PS_TYPE,
 	} kind;
@@ -31,9 +42,6 @@ struct pscope_entry_t {
 			// will probably need to let the parser know if a local resides in a parent fn
 			lir_rlocal_t local;
 		} d_local;
-		struct {
-			bool always_brk; // if false, a `brk` without a label doesn't resolve to this
-		} d_branch;
 		struct {
 			istr_t qualified_name;
 		} d_symbol;
@@ -56,6 +64,8 @@ struct pctx_t {
 	u32 scope_len;
 	pscope_entry_t scope_entries[256]; // scope entries
 	u32 scope_entries_len;
+	pblk_t blks[256]; // block stack, idx encoded in a u8
+	u32 blks_len;
 	//
 	rfile_t file;
 	rmod_t mod;
@@ -80,7 +90,7 @@ void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);
 void ppop_scope(void);
 lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block);
-
+u32 pblk_locate(istr_t opt_label, loc_t onerror);
 // result of parsing an expression
 typedef struct rexpr_t rexpr_t;
 
@@ -94,3 +104,4 @@ struct rexpr_t {
 
 // TODO: nicer interface with default vars?
 rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg);
+rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t *loc);

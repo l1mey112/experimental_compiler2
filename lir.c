@@ -243,10 +243,12 @@ static void _print_term_pattern(lir_proc_t *proc, lir_term_pat_t *pattern) {
 static void _print_blockref(lir_proc_t *proc, lir_rblock_t block) {
 	lir_block_t *blockp = &proc->blocks[block];
 	if (blockp->debug_name) {
-		printf("%s", blockp->debug_name);
+		printf("%s.", blockp->debug_name);
 	} else {
-		printf(".L%d", block);
+		printf(".L");
 	}
+
+	printf("%u", block);
 }
 
 static void _print_blockterm(lir_proc_t *proc, lir_term_block_t block) {
@@ -324,6 +326,10 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 				}
 			}
 			printf("]");
+		}
+		case INST_UNDEFINED: {
+			printf("undefined");
+			break;
 		}
 		case INST_TUPLE_UNIT: {
 			printf("()");

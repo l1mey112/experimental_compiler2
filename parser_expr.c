@@ -151,7 +151,7 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 		u32 lo = p.scope[s];
 		u32 hi;
 		if (s == p.scope_len - 1) {
-			hi = arrlen(p.scope_entries);
+			hi = p.scope_entries_len;
 		} else {
 			hi = p.scope[s + 1];
 		}
@@ -203,15 +203,122 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	}; */
 }
 
+// returns true if `expr_out` has been written to in any way
+bool pstmt(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
+	bool set = false;
+
+	switch (p.token.kind) {
+		case TOK_IDENT: {
+			if (p.peek.kind == TOK_COLON) {
+				assert_not_reached();
+				/* pproc(expr, s, previous_exprs);
+				set = true;
+				break; */
+			}
+			// fall through
+		}
+		// case TOK_LET
+		default: {
+			*expr_out = pexpr(proc, block, 0, 0);
+			set = true;
+			break;
+		}
+	}
+
+	return set;
+}
+
+// naive indentation rules, but works for now
+// do
+//     ...
+//     ...
+rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_loc) {
+	loc_t oloc = p.token.loc;
+	pnext();
+	//
+	// TODO: handle the case where the next line token is dedented less than the actual do
+	//       would need some lexer stuff (store the start of the line in parser)
+	if (p.token.kind == TOK_EOF || p.token.loc.line_nr == oloc.line_nr) {
+		err_with_pos(oloc, "expected newline after `do`");
+	}
+
+	// chain
+	rexpr_t expr = {
+		.block = block,
+	};
+
+	lir_rblock_t do_rep = BLOCK_NONE;
+	lir_rblock_t do_brk = BLOCK_NONE;
+	lir_rlocal_t do_brk_local;
+
+	if (opt_label != ISTR_NONE) {
+		do_rep = lir_block_new(proc, "do.entry");
+		do_brk = lir_block_new(proc, "do.exit");
+
+		lir_block_term(proc, expr.block, (lir_term_t){
+			.kind = TERM_GOTO,
+			.d_goto = {
+				.block = do_rep,
+			},
+		});
+
+		do_brk_local = lir_block_new_arg(proc, do_brk, TYPE_INFER, &oloc);
+		expr.block = do_rep;
+	}
+
+	u8 blk_id = p.blks_len++;
+	p.blks[blk_id] = (pblk_t){
+		.label = opt_label,
+		.loc = opt_loc,
+		.always_brk = false,
+		.brk = do_brk,
+		.rep = do_rep,
+	};
+
+	bool set = false;
+
+	u32 bcol = p.token.loc.col;
+	ppush_scope();
+	while (p.token.kind != TOK_EOF) {
+		u32 cln = p.token.loc.line_nr;
+
+		set |= pstmt(proc, expr.block, &expr);
+
+		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
+			break;
+		}
+	}
+	ppop_scope();
+	p.blks_len--;
+
+	// not EOF, something was present here but didn't return any value
+	// return () to either the brk param or just as a bare expression
+	if (!set) {
+		expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, &oloc, (lir_inst_t){
+			.kind = INST_TUPLE_UNIT,
+		}));
+	}
+
+	if (opt_label != ISTR_NONE) {
+		lir_block_term(proc, expr.block, (lir_term_t){
+			.kind = TERM_GOTO,
+			.d_goto = {
+				.block = do_brk,
+				.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
+			},
+		});
+		expr.value = lir_lvalue(do_brk_local);
+		expr.block = do_brk;
+	}
+	return expr;
+}
+
 // (                           a b                          )
 // ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break
 rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 	// will set `is_root` on return path
 
 	token_t token = p.token;
-	u32 line_nr = token.loc.line_nr;
-	bool is_single = true;
-	bool should_continue = true;
 
 	struct {
 		istr_t name;
@@ -224,14 +331,24 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 		.block = block,
 	};
 
-	retry: switch (token.kind) {
+	retry: switch (p.token.kind) {
 		case TOK_VOID: {
 			pnext();
 			// void expr
 			//      ^^^^
 			expr = pexpr(proc, expr.block, 0, cfg); // ignore
+			// TODO: possibly insert `unused` instruction
 			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, &token.loc, (lir_inst_t){
 				.kind = INST_TUPLE_UNIT,
+			}));
+			break;
+		}
+		case TOK_UNDEFINED: {
+			pnext();
+			// undefined must be an SSA constant
+			// it is also nonsensical to have undefined inside an immutable variable
+			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNDEFINED, &token.loc, (lir_inst_t){
+				.kind = INST_UNDEFINED,
 			}));
 			break;
 		}
@@ -296,53 +413,13 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			}
 			break;
 		}
-		/* case TOK_IF: {
-			// if (...) ... else ...
-			//
-			pnext();
-			pexpect(TOK_OPAR);
-			rexpr_t cond = pexpr(proc, block, PEXPR_ET_PAREN, cfg);
-			pexpect(TOK_CPAR);
-
-			// if (...) ... else ...
-			//          ^^^
-
-			rexpr_t then = pexpr(proc, block, PEXPR_ET_ELSE, cfg);
-
-			// if (...) ... else ...
-			//              ^^^^
-			//            optional
-			//
-			// when `else` is not present, we will create a unit tuple
-			// to return. just goto the exit label and ret `v0`.
-			//
-			// exit:
-			//     v0 = ()
-
-			if (p.token.kind == TOK_ELSE) {
-				rexpr_t els = pexpr(proc, block, 0, cfg);
-
-				// case : goto
-				// case : goto then
-				lir_block_term(proc, block, token.loc, (lir_term_t){
-					.kind = TERM_IF,
-					.d_if = {
-						.cond = cond.value,
-						.then = then.block,
-						.els = els.block,
-					},
-				});
-			} else {
-
-			}
-		} */
 		case TOK_IF: {
 			loc_t oloc = p.token.loc;
 			// if (...) ... else ...
 			//
 			pnext();
 			pexpect(TOK_OPAR);
-			rexpr_t cond = pexpr(proc, expr.block, PEXPR_ET_PAREN, cfg);
+			rexpr_t cond = pexpr(proc, expr.block, 0, PEXPR_ET_PAREN);
 			pexpect(TOK_CPAR);
 
 			// if (...) ... else ...
@@ -365,7 +442,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 			// don't forget to setup terminators, sometimes we return a value and others not
 			lir_rlocal_t block_t = lir_block_new(proc, "if.then");
-			rexpr_t then = pexpr(proc, block_t, PEXPR_ET_ELSE, cfg);
+			rexpr_t then = pexpr(proc, block_t, 0, PEXPR_ET_ELSE);
 
 			// if (...) ... else ...
 			//              ^^^^
@@ -442,6 +519,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						.block = exit,
 					},
 				});
+				else_block = exit;
 			}
 
 			// join control flow
@@ -460,6 +538,85 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 			expr.block = exit;
 			expr.value = lir_lvalue(exit_value);
+			break;
+		}
+		case TOK_COLON: {
+			// label
+			pnext();
+			pcheck(TOK_IDENT);
+			label.name = p.token.lit;
+			label.name_loc = p.token.loc;
+			pnext();
+			switch (p.token.kind) {
+				case TOK_DO: {
+					break;
+				}
+				case TOK_LOOP: {
+					break;
+				}
+				default: {
+					err_with_pos(p.token.loc, "expected `do` or `loop` after label");
+				}
+			}
+			goto retry;
+		}
+		case TOK_DO: {
+			expr = pdo(proc, expr.block, label.name, label.name_loc);
+			label.name = ISTR_NONE;
+			break;
+		}
+		case TOK_BREAK: {
+			istr_t label = ISTR_NONE;
+			loc_t onerror = p.token.loc;
+			pnext();
+			// parse label
+			if (p.token.kind == TOK_COLON) {
+				pnext();
+				pcheck(TOK_IDENT);
+				label = p.token.lit;
+				onerror = p.token.loc;
+				pnext();
+			}
+			u8 blk_id = pblk_locate(label, onerror);
+			expr = pexpr(proc, expr.block, 0, cfg);
+
+			// below unifies just fine. remember that a `brk` always
+			// returns a ! type, so it's always a valid expression.
+			//
+			// returning a ! type is involved though since it requires
+			// unreachable control flow. construct a new block with a
+			// ! parameter and then use that as the expr return.
+			//
+			// the checker is aware of any blocks that produce a ! type
+			// and will remove them from the CFG after checking.
+			//
+			// desugar:
+			//
+			// :t do
+			//     20 + brk :t 50
+			//
+			// entry:
+			//     goto do.0
+			// do.0:
+			//     %0 = 20
+			//     %1 = 50
+			//     goto do.exit(%1)
+			// do.1(%3: !):
+			//     %4 = %0 + %3
+			//     goto do.exit(%4)
+			// do.exit(%2: i32):
+			//     (use %2)
+			//
+			//
+			lir_block_term(proc, expr.block, (lir_term_t){
+				.kind = TERM_GOTO,
+				.d_goto = {
+					.block = p.blks[blk_id].brk,
+					.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
+				},
+			});
+
+			expr = pnoreturn_value(proc, &token.loc);
 			break;
 		}
 		default: {
