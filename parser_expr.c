@@ -228,6 +228,14 @@ bool pstmt(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 	return set;
 }
 
+// TODO: add in expr_cfg ???
+/*
+
+let v = (do
+	40
+) + 20
+
+*/
 // naive indentation rules, but works for now
 // do
 //     ...
@@ -311,6 +319,59 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 		expr.block = do_brk;
 	}
 	return expr;
+}
+
+// loop expr
+rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_label, loc_t opt_loc) {
+	loc_t oloc = p.token.loc;
+	pnext();
+
+	lir_rblock_t loop_rep = lir_block_new(proc, "loop.entry");
+	lir_rblock_t loop_brk = lir_block_new(proc, "loop.exit");
+
+	lir_rlocal_t loop_brk_value = lir_block_new_arg(proc, loop_brk, TYPE_INFER, &oloc);
+
+	u8 blk_id = p.blks_len++;
+	p.blks[blk_id] = (pblk_t){
+		.label = opt_label,
+		.loc = opt_loc,
+		.always_brk = true,
+		.brk = loop_brk,
+		.rep = loop_rep,
+	};
+
+	// block -> loop.entry
+	lir_block_term(proc, block, (lir_term_t){
+		.kind = TERM_GOTO,
+		.d_goto = {
+			.block = loop_rep,
+		},
+	});
+
+	rexpr_t expr = pexpr(proc, loop_rep, 0, expr_cfg);
+	// TODO: unused(expr)
+
+	// expr.block -> loop.entry
+	// <- loop.exit
+
+	lir_block_term(proc, expr.block, (lir_term_t){
+		.kind = TERM_GOTO,
+		.d_goto = {
+			.block = loop_rep,
+		},
+	});
+
+	p.blks_len--;
+	if (!p.blks[p.blks_len].is_brk) {
+		proc->locals[loop_brk_value].type = TYPE_BOTTOM; // infinite loop, expr is !
+	}
+
+	rexpr_t expr_ret = {
+		.block = loop_brk,
+		.value = lir_lvalue(loop_brk_value),
+	};
+
+	return expr_ret;
 }
 
 // (                           a b                          )
@@ -565,6 +626,11 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			label.name = ISTR_NONE;
 			break;
 		}
+		case TOK_LOOP: {
+			expr = ploop(proc, expr.block, cfg, label.name, label.name_loc);
+			label.name = ISTR_NONE;
+			break;
+		}
 		case TOK_BREAK: {
 			istr_t label = ISTR_NONE;
 			loc_t onerror = p.token.loc;
@@ -615,6 +681,9 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
 				},
 			});
+
+			// we are breaking here
+			p.blks[blk_id].is_brk = true;
 
 			expr = pnoreturn_value(proc, &token.loc);
 			break;

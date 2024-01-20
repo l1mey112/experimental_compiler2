@@ -381,6 +381,7 @@ struct tinfo_t {
 
 typedef enum tok_t tok_t;
 
+// TODO(zakazaka): u32 start u32 end is better (compute later)
 struct loc_t {
 	u32 line_nr;
 	u32 col;

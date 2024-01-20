@@ -17,6 +17,7 @@ struct pblk_t {
 	bool always_brk; // if false, a `brk` without a label doesn't resolve to this
 	lir_rblock_t brk;
 	lir_rblock_t rep;
+	bool is_brk; // if broken to (used with loop)
 };
 
 struct pimport_t {
@@ -86,9 +87,11 @@ void NORETURN punexpected(const char *err);
 type_t ptype(void);
 void pimport(void);
 int pimport_ident(istr_t name);
+
 void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);
 void ppop_scope(void);
+
 lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block);
 u32 pblk_locate(istr_t opt_label, loc_t onerror);
 // result of parsing an expression
