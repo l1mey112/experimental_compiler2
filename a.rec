@@ -49,7 +49,7 @@
 call: i32 -> i32 -> i32      ; (assume these types work)
 call: 'f 'x = do
     let l
-    l = f x x x x
+    l = (if (c) f else 1) x x x x
 
 ; (now fixed with proper spilling)
 ;

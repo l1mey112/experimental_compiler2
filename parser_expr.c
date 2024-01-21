@@ -575,6 +575,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			pnext();
 			pexpect(TOK_OPAR);
 			rexpr_t cond = pexpr(proc, expr.block, 0, PEXPR_ET_PAREN);
+			lir_rlocal_t cond_local = pexpr_spill(proc, &cond);
 			pexpect(TOK_CPAR);
 
 			// if (...) ... else ...
@@ -598,6 +599,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// don't forget to setup terminators, sometimes we return a value and others not
 			lir_rlocal_t block_t = lir_block_new(proc, "if.then");
 			rexpr_t then = pexpr(proc, block_t, 0, PEXPR_ET_ELSE);
+			lir_rlocal_t then_local = pexpr_spill(proc, &then);
 
 			// if (...) ... else ...
 			//              ^^^^
@@ -648,7 +650,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					.kind = TERM_GOTO,
 					.d_goto = {
 						.block = exit,
-						.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, then.block, then.value)),
+						.args = arr(lir_rlocal_t, then_local),
 					},
 				});
 
@@ -685,7 +687,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			lir_block_term(proc, expr.block, (lir_term_t){
 				.kind = TERM_IF,
 				.d_if = {
-					.cond = lir_lvalue_spill(proc, expr.block, cond.value),
+					.cond = cond_local,
 					.then = block_t,
 					.els = else_block,
 				},
@@ -933,8 +935,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				case TOK_OSQ: {
 					// x[0..1] and x[0]
 					pnext();
-
-					// TODO: block chaining
+					//
+					// ive introduced spillage without care for repeated operations
+					// ive vetted this code here and i hope it conforms with order of evaluation
+					pexpr_spill(proc, &expr);
 
 					// INFO: currently slices AREN'T lvalues
 					//
@@ -974,23 +978,26 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							.kind = INST_SLICE,
 							.d_slice = {
 								.src = lir_lvalue_spill(proc, expr.block, expr.value),
-								.lo = expr0_s ? lir_lvalue_spill(proc, expr.block, expr0.value) : LOCAL_NONE,
+								.lo = expr0_s ? lir_lvalue_spill(proc, expr0.block, expr0.value) : LOCAL_NONE,
 								.hi = LOCAL_NONE,
 							},
 						}), token.loc);
 					} else {
+						if (expr0_s) {
+							pexpr_spill(proc, &expr0);
+						}
 						rexpr_t expr1 = pexpr(proc, expr.block, 0, PEXPR_ET_INDEX_HI);
 						pexpect(TOK_CSQ);
 
-						expr.block = expr1.block;
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr1.block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = INST_SLICE,
 							.d_slice = {
 								.src = lir_lvalue_spill(proc, expr.block, expr.value),
-								.lo = expr0_s ? lir_lvalue_spill(proc, expr.block, expr0.value) : LOCAL_NONE,
-								.hi = lir_lvalue_spill(proc, expr.block, expr1.value),
+								.lo = expr0_s ? lir_lvalue_spill(proc, expr0.block, expr0.value) : LOCAL_NONE,
+								.hi = lir_lvalue_spill(proc, expr1.block, expr1.value),
 							},
 						}), token.loc);
+						expr.block = expr1.block;
 					}
 					continue;
 				}
@@ -1063,15 +1070,17 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
 						//
 						rexpr_t lhs_v = expr;
-						rexpr_t rhs_v = pexpr(proc, expr.block, nprec, cfg);
-						lir_rblock_t prec_block = rhs_v.block;
 
+						// remember, spill before pexpr() calls
 						lir_rlocal_t lhs;
-						lir_rlocal_t rhs = lir_lvalue_spill(proc, rhs_v.block, rhs_v.value);
-
 						if (kind != TOK_ASSIGN) {
 							lhs = lir_lvalue_spill(proc, lhs_v.block, lhs_v.value);
 						}
+						
+						rexpr_t rhs_v = pexpr(proc, expr.block, nprec, cfg);
+						lir_rblock_t prec_block = rhs_v.block;
+
+						lir_rlocal_t rhs = lir_lvalue_spill(proc, rhs_v.block, rhs_v.value);
 
 						if (is_assign_op) {
 							// sparse array
@@ -1173,11 +1182,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							lir_inst_t *instp = &proc->blocks[r.block].insts[r.inst];
 
 							if (instp->kind == INST_CALL) {
-								// merge
-								// keep expr the same
+								// merge and forward instruction, expr.value stays the same
 								lir_inst_t inst = lir_inst_pop(proc, r.block, r.inst);
 								arrpush(inst.d_call.args, arg);
-								lir_inst(proc, expr0.block, inst);
+								lir_inst(proc, expr.block, inst);
 								continue;
 							}
 						}
