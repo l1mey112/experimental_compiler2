@@ -219,6 +219,13 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 	// let x       (evaluates to a no-op)
 	//
 
+	//
+	// TODO: make a single match on `_` just evaluate to a unused() instruction
+	//
+	// let _ = expr
+	//
+	//
+
 	// no let rec here
 	pmask_scope(scope_olen, scope_rlen, true);
 
@@ -525,6 +532,39 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					.d_tuple = elems,
 				}), oloc);
 			}
+			break;
+		}
+		case TOK_OSQ: {
+			loc_t oloc = p.token.loc;
+			lir_rlocal_t *elems = NULL;
+
+			// [ 1, 2, 3, 4, 5 ]
+			// ^
+
+			pnext();
+			while (p.token.kind != TOK_CSQ) {
+				expr = pexpr(proc, expr.block, PEXPR_ET_ARRAY, 0);
+
+				arrpush(elems, lir_lvalue_spill(proc, expr.block, expr.value));
+
+				if (p.token.kind == TOK_COMMA) {
+					pnext();
+				} else if (p.token.kind != TOK_CSQ) {
+					punexpected("expected `,` or `]`");
+				}
+			}
+
+			// [ 1, 2, 3, 4, 5 ]
+			//                 ^
+			pnext();
+
+			expr = (rexpr_t){
+				.block = expr.block,
+				.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
+					.kind = INST_ARRAY,
+					.d_array = elems,
+				}), oloc),
+			};
 			break;
 		}
 		case TOK_IF: {
@@ -889,12 +929,20 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					//
 					continue;
 				}
-				/* case TOK_OSQ: {
+				case TOK_OSQ: {
 					// x[0..1] and x[0]
-					loc_t oloc = p.token.loc;
 					pnext();
 
-					bool expr0_s;
+					// TODO: block chaining
+
+					// INFO: currently slices AREN'T lvalues
+					//
+					//     x[0..2] = [1, 2] isn't possible
+					//
+					// if we were to make it possible, then you'll be able to take
+					// the address of a slice, which in reality should be a temporary
+					//
+					bool expr0_s; // ?rexpr_t would be quite nice here
 					rexpr_t expr0;
 					if (p.token.kind == TOK_DOUBLE_DOTS) {
 						// x[..1]
@@ -902,55 +950,49 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						pnext();
 					} else {
 						// x[0]
-						
-						expr0 = pexpr(proc, block, PEXPR_ET_INDEX_LO, cfg);
+						expr0 = pexpr(proc, expr.block, PEXPR_ET_INDEX_LO, cfg);
 						if (p.token.kind == TOK_CSQ) {
 							pnext();
 							expr.block = expr0.block;
-							expr.value = lir_inst_value(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
-								.kind = INST_LEA,
-								.d_lea = {
-									.src = expr.value,
-									.index = expr0.value,
-								},
-							});
+							lir_lvalue_index(&expr.value, token.loc, lir_lvalue_spill(proc, expr.block, expr0.value));
 							continue;
 						}
+						pexpect(TOK_DOUBLE_DOTS);
 						expr0_s = true;
 					}
-					// x[0..]
-					//      ^
-					// x[0..1]
-					//      ^
+					expr.block = expr0_s ? expr0.block : block;
+					//
+					// x[?..]
+					// x[?..expr]
+					//
 					if (p.token.kind == TOK_CSQ) {
 						pnext();
-						expr.block = expr0_s ? expr0.block : block;
-						expr.value = lir_inst_value(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
+						// x[0..]
+						// x[..]
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = INST_SLICE,
 							.d_slice = {
-								.src = expr.value,
-								.lo = expr0_s ? expr0.value : LIR_VALUE_NONE,
-								.hi = LIR_VALUE_NONE,
+								.src = lir_lvalue_spill(proc, expr.block, expr.value),
+								.lo = expr0_s ? lir_lvalue_spill(proc, expr.block, expr0.value) : LOCAL_NONE,
+								.hi = LOCAL_NONE,
 							},
-						});
+						}), token.loc);
 					} else {
-						lir_rblock_t next = expr0_s ? expr0.block : block;
-						rexpr_t expr1 = pexpr(proc, next, PEXPR_ET_INDEX_HI, cfg);
+						rexpr_t expr1 = pexpr(proc, expr.block, PEXPR_ET_INDEX_HI, cfg);
 						pexpect(TOK_CSQ);
 
-						expr.is_lvalue = false;
 						expr.block = expr1.block;
-						expr.value = lir_inst_value(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = INST_SLICE,
 							.d_slice = {
-								.src = expr.value,
-								.lo = expr0_s ? expr0.value : LIR_VALUE_NONE,
-								.hi = expr1.value,
+								.src = lir_lvalue_spill(proc, expr.block, expr.value),
+								.lo = expr0_s ? lir_lvalue_spill(proc, expr.block, expr0.value) : LOCAL_NONE,
+								.hi = lir_lvalue_spill(proc, expr.block, expr1.value),
 							},
-						});
+						}), token.loc);
 					}
 					continue;
-				} */
+				}
 				default: {
 					if (!TOK_IS_INFIX(token.kind)) {
 						goto exit;

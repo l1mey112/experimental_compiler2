@@ -326,6 +326,7 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 				}
 			}
 			printf("]");
+			break;
 		}
 		case INST_UNDEFINED: {
 			printf("undefined");
@@ -424,6 +425,20 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 			_print_lvalue(proc, inst->d_address_of.lvalue);
 			break;
 		}
+		case INST_SLICE: {
+			// x[?lo..?hi]
+			_print_local(proc, inst->d_slice.src);
+			printf("[");
+			if (inst->d_slice.lo != LOCAL_NONE) {
+				_print_local(proc, inst->d_slice.lo);
+			}
+			printf("..");
+			if (inst->d_slice.hi != LOCAL_NONE) {
+				_print_local(proc, inst->d_slice.hi);
+			}
+			printf("]");
+			break;
+		}
 		// case INST_SIZEOF:
 		default: {
 			printf("\n\nkind: %u\n\n", inst->kind);
@@ -503,11 +518,11 @@ void lir_print_proc(lir_sym_t *symbol) {
 				break;
 			}
 			case TERM_IF: {
-				printf("  if ");
+				printf("  if (");
 				_print_local(proc, block->term.d_if.cond);
-				printf(" goto ");
+				printf(") goto ");
 				_print_blockterm(proc, block->term.d_if.then);
-				printf(" else goto ");
+				printf(" else ");
 				_print_blockterm(proc, block->term.d_if.els);
 				printf("\n");
 				break;
@@ -521,9 +536,9 @@ void lir_print_proc(lir_sym_t *symbol) {
 				//     (a, b) -> block_two
 				//     (0, b) -> block_two
 
-				printf("  goto_pattern ");
+				printf("  goto_pattern (");
 				_print_local(proc, block->term.d_goto_pattern.value);
-				printf("\n");
+				printf(")\n");
 
 				for (u32 i = 0, c = arrlenu(block->term.d_goto_pattern.patterns); i < c; i++) {
 					lir_term_pat_t *patternp = &block->term.d_goto_pattern.patterns[i];

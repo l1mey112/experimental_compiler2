@@ -1,31 +1,43 @@
-add: i32 -> i32 -> i32
-add: a b = a + b
-add: a 0 = a
-add: 0 b = b
-add: 0 0 = 0
+; add: i32 -> i32 -> i32
+; add: a b = a + b
+; add: a 0 = a
+; add: 0 b = b
+; add: 0 0 = 0
+; 
+; addsome: i32 -> i32
+; addsome: 'xs = xs += 20
+; 
+; addr: i32 -> i32
+; addr: x = (&x).*
+; 
+; select: bool -> i32 -> i32 -> i32
+; select: cond a b = if (cond) a else b
+; 
+; selectn: bool -> i32 -> ()
+; selectn: cond a = if (cond) a
+; 
+; eeepy: i32 -> (i32, i32)
+; eeepy: x = (x, undefined)
+; 
+; main: () -> ()
+; main: () = :t do
+;     brk :t 50 + 50
+; 
+; condbrk0: bool -> i32
+; condbrk0: cond = :t do
+;     brk :t if (cond) 50 + 50 else 25
+; 
+; c: bool -> i32
+; c: cond = if (cond) 50 + 50 else 25
 
-addsome: i32 -> i32
-addsome: 'xs = xs += 20
+idx_ret: i32 -> i32
+idx_ret: x = [1, 2, 3, 4, if (x) 20 else 25][x]
 
-addr: i32 -> i32
-addr: x = (&x).*
+slice_some: i32 -> i32 -> []i32 -> []i32
+slice_some: lo hi xs = do
+    let a = xs[lo..]
+    let b = xs[..hi]
+    let c = xs[lo..hi]
+    let d = xs[..]
 
-select: bool -> i32 -> i32 -> i32
-select: cond a b = if (cond) a else b
-
-selectn: bool -> i32 -> ()
-selectn: cond a = if (cond) a
-
-eeepy: i32 -> (i32, i32)
-eeepy: x = (x, undefined)
-
-main: () -> ()
-main: () = :t do
-    brk :t 50 + 50
-
-condbrk0: bool -> i32
-condbrk0: cond = :t do
-    brk :t if (cond) 50 + 50 else 25
-
-c: bool -> i32
-c: cond = if (cond) 50 + 50 else 25
+    ()

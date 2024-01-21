@@ -474,6 +474,7 @@ typedef u32 lir_rlocal_t;
 typedef u32 lir_rsym_t;
 
 #define BLOCK_NONE ((lir_rblock_t)-1)
+#define LOCAL_NONE ((lir_rlocal_t)-1)
 
 struct lir_local_t {
 	type_t type;
@@ -563,6 +564,7 @@ struct lir_inst_t {
 		//
 		INST_LVALUE,
 		INST_ADDRESS_OF,
+		INST_SLICE, // slices aren't lvalues
 		//
 		INST_CALL, // f(a, b, c)
 		INST_CAST,
@@ -582,6 +584,11 @@ struct lir_inst_t {
 			lir_lvalue_t lvalue;
 			bool is_mut;
 		} d_address_of;
+		struct {
+			lir_rlocal_t src;
+			lir_rlocal_t lo; // possible NULLs (LOCAL_NONE)
+			lir_rlocal_t hi; // possible NULLs (LOCAL_NONE)
+		} d_slice;
 		struct {
 			istr_t qualified_name; // TODO: remove
 		} d_symbol;
