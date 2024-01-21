@@ -458,7 +458,7 @@ const char *tok_dbg_str(token_t tok);
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
 
-typedef struct lir_symbol_t lir_symbol_t;
+typedef struct lir_sym_t lir_sym_t;
 typedef struct lir_proc_t lir_proc_t;
 typedef struct lir_block_t lir_block_t;
 typedef struct lir_term_t lir_term_t;
@@ -471,7 +471,7 @@ typedef struct lir_lvalue_t lir_lvalue_t;
 typedef struct lir_lvalue_proj_t lir_lvalue_proj_t;
 typedef u32 lir_rblock_t;
 typedef u32 lir_rlocal_t;
-typedef u32 lir_rsymbol_t;
+typedef u32 lir_rsym_t;
 
 #define BLOCK_NONE ((lir_rblock_t)-1)
 
@@ -528,8 +528,9 @@ struct lir_lvalue_proj_t {
 struct lir_lvalue_t {
 	union {
 		lir_rlocal_t local;
-		lir_rsymbol_t symbol;
+		lir_rsym_t symbol;
 	};
+	loc_t loc;
 	bool is_sym;
 	lir_lvalue_proj_t *proj;
 };
@@ -692,16 +693,24 @@ struct lir_proc_t {
 	lir_local_t *locals; // stack slots
 };
 
-// TODO: symbols into hashmap
-struct lir_symbol_t {
-	istr_t qualified_name;
-	istr_t short_name;
+struct lir_sym_t {
+	istr_t key; // key into hashmap, fully qualified name
+	//
 	rmod_t mod;
+	istr_t short_name;
 	loc_t loc;
+
+	// if true, this is a placeholder symbol
+	// nothing else is stored here, it's just an entry with a key
+	bool is_placeholder;
+
+	// if SYMBOL_TYPE, this is the type
+	type_t type;
 
 	enum : u8 {
 		SYMBOL_VAR,
 		SYMBOL_PROC,
+		SYMBOL_TYPE,
 	} kind;
 
 	union {
@@ -710,19 +719,22 @@ struct lir_symbol_t {
 };
 
 // search by qualified name
-extern lir_symbol_t *symbols;
+extern lir_sym_t *symbols;
+
+lir_rsym_t table_resolve(istr_t qualified_name);
+lir_rsym_t table_register(lir_sym_t desc);
 
 void lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
 // create local, local = inst
-lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc, lir_inst_t inst);
+lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
 
 lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local);
 lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut);
 lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name); // takes ownership of debug_name
-lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc);
+lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc);
 void lir_block_arg_assign(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local); // assert local is LOCAL_SSA
 void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
-void lir_print_symbol(lir_symbol_t *symbol);
+void lir_print_symbol(lir_sym_t *symbol);
 void lir_print_symbols(void);
 
 // INFO: in the parser we assign around lvalues willy nilly.
@@ -730,8 +742,9 @@ void lir_print_symbols(void);
 //       seem much of an issue for now.
 //
 //       multiple instructions may share the same lvalue
-
-lir_lvalue_t lir_lvalue(lir_rlocal_t local);
+//
+lir_lvalue_t lir_lvalue(lir_rlocal_t local, loc_t loc);
+lir_lvalue_t lir_lvalue_sym(lir_rsym_t sym, loc_t loc);
 void lir_lvalue_deref(lir_lvalue_t *lvalue, loc_t loc);
 void lir_lvalue_struct_field(lir_lvalue_t *lvalue, loc_t loc, istr_t field);
 void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx);

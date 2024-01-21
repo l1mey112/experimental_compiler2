@@ -562,7 +562,7 @@ void pblock_args_to_vars(lir_proc_t *proc, lir_rblock_t block, u32 var_lo, u32 v
 		lir_local_t *p = &proc->locals[local];
 		
 		assert(p->is_debuginfo);
-		lir_rlocal_t arg = lir_block_new_arg(proc, block, TYPE_INFER, &p->d_debuginfo.loc);
+		lir_rlocal_t arg = lir_block_new_arg(proc, block, TYPE_INFER, p->d_debuginfo.loc);
 
 		// local = arg
 		lir_inst(proc, block, (lir_inst_t){
@@ -765,9 +765,9 @@ u32 pblk_locate(istr_t opt_label, loc_t onerror) {
 }
 
 // construct a ! value using unreachable control flow
-rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t *loc) {
+rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc) {
 	rexpr_t expr;
-	expr.block = lir_block_new(proc, NULL);
-	expr.value = lir_lvalue(lir_block_new_arg(proc, expr.block, TYPE_BOTTOM, loc));
+	expr.block = lir_block_new(proc, "noreturn");
+	expr.value = lir_lvalue(lir_block_new_arg(proc, expr.block, TYPE_BOTTOM, loc), loc);
 	return expr;
 }

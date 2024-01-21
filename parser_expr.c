@@ -165,15 +165,13 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 				// load &variable
 				rexpr_t expr = (rexpr_t){
 					.block = block,
-					.value = lir_lvalue(entry->d_local.local),
+					.value = lir_lvalue(entry->d_local.local, loc),
 				};
 				
 				return expr;
 			}
 		}
 	}
-
-	assert_not_reached();
 
 	// 2. not found, return a symbol
 	//    insert a `PS_DEBUG_REFERENCE` to let further references know that
@@ -185,7 +183,7 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	// let g = x      (error: use before declaration in same scope)
 	// let x = 0      (hint: declaration here)
 	//
-	/* pscope_register((pscope_entry_t){
+	pscope_register((pscope_entry_t){
 		.kind = PS_DEBUG_REFERENCE,
 		.loc = loc,
 		.name = lit,
@@ -195,14 +193,8 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 
 	return (rexpr_t){
 		.block = block,
-		.value = lir_inst_value(proc, block, TYPE_INFER, loc, (lir_inst_t){
-			.kind = INST_SYMBOL,
-			.d_symbol = {
-				.qualified_name = qualified_name,
-			},
-		}),
-		.is_lvalue = true,
-	}; */
+		.value = lir_lvalue_sym(table_resolve(qualified_name), loc),
+	};
 }
 
 bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
@@ -331,7 +323,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 			},
 		});
 
-		do_brk_local = lir_block_new_arg(proc, do_brk, TYPE_INFER, &oloc);
+		do_brk_local = lir_block_new_arg(proc, do_brk, TYPE_INFER, oloc);
 		expr.block = do_rep;
 	}
 
@@ -363,9 +355,9 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 	// not EOF, something was present here but didn't return any value
 	// return () to either the brk param or just as a bare expression
 	if (!set) {
-		expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, &oloc, (lir_inst_t){
+		expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, oloc, (lir_inst_t){
 			.kind = INST_TUPLE_UNIT,
-		}));
+		}), oloc);
 	}
 
 	if (opt_label != ISTR_NONE) {
@@ -376,7 +368,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 				.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
 			},
 		});
-		expr.value = lir_lvalue(do_brk_local);
+		expr.value = lir_lvalue(do_brk_local, oloc);
 		expr.block = do_brk;
 	}
 	return expr;
@@ -390,7 +382,7 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 	lir_rblock_t loop_rep = lir_block_new(proc, "loop.entry");
 	lir_rblock_t loop_brk = lir_block_new(proc, "loop.exit");
 
-	lir_rlocal_t loop_brk_value = lir_block_new_arg(proc, loop_brk, TYPE_INFER, &oloc);
+	lir_rlocal_t loop_brk_value = lir_block_new_arg(proc, loop_brk, TYPE_INFER, oloc);
 
 	u8 blk_id = p.blks_len++;
 	p.blks[blk_id] = (pblk_t){
@@ -429,7 +421,7 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 
 	rexpr_t expr_ret = {
 		.block = loop_brk,
-		.value = lir_lvalue(loop_brk_value),
+		.value = lir_lvalue(loop_brk_value, oloc),
 	};
 
 	return expr_ret;
@@ -460,35 +452,35 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			//      ^^^^
 			expr = pexpr(proc, expr.block, 0, cfg); // ignore
 			// TODO: possibly insert `unused` instruction
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, &token.loc, (lir_inst_t){
+			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, token.loc, (lir_inst_t){
 				.kind = INST_TUPLE_UNIT,
-			}));
+			}), token.loc);
 			break;
 		}
 		case TOK_UNDEFINED: {
 			pnext();
 			// undefined must be an SSA constant
 			// it is also nonsensical to have undefined inside an immutable variable
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNDEFINED, &token.loc, (lir_inst_t){
+			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNDEFINED, token.loc, (lir_inst_t){
 				.kind = INST_UNDEFINED,
-			}));
+			}), token.loc);
 			break;
 		}
 		case TOK_TRUE:
 		case TOK_FALSE: {
 			pnext();
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_BOOL, &token.loc, (lir_inst_t){
+			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_BOOL, token.loc, (lir_inst_t){
 				.kind = INST_BOOL_LIT,
 				.d_bool_lit = token.kind == TOK_TRUE,
-			}));
+			}), token.loc);
 			break;
 		}
 		case TOK_INTEGER: {
 			pnext();
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, &token.loc, (lir_inst_t){
+			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 				.kind = INST_INTEGER_LIT,
 				.d_integer_lit = token.lit,
-			}));
+			}), token.loc);
 			break;
 		}
 		case TOK_IDENT: {
@@ -499,9 +491,9 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			loc_t oloc = p.token.loc;
 			pnext();
 			if (p.token.kind == TOK_CPAR) {
-				expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, &token.loc, (lir_inst_t){
+				expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, token.loc, (lir_inst_t){
 					.kind = INST_TUPLE_UNIT,
-				}));
+				}), token.loc);
 				pnext();
 				break;
 			}
@@ -528,10 +520,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			}
 			pnext();
 			if (elems != NULL) {
-				expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, &oloc, (lir_inst_t){
+				expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
 					.kind = INST_TUPLE,
 					.d_tuple = elems,
-				}));
+				}), oloc);
 			}
 			break;
 		}
@@ -609,7 +601,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				// exit(v) -> return v
 
 				exit = lir_block_new(proc, "if.exit");
-				exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, &oloc);
+				exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, oloc);
 
 				lir_block_term(proc, then.block, (lir_term_t){
 					.kind = TERM_GOTO,
@@ -631,7 +623,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			} else {
 				// return empty tuple
 				exit = lir_block_new(proc, "if.exit");
-				exit_value = lir_ssa_tmp_inst(proc, exit, TYPE_UNIT, &oloc, (lir_inst_t){
+				exit_value = lir_ssa_tmp_inst(proc, exit, TYPE_UNIT, oloc, (lir_inst_t){
 					.kind = INST_TUPLE_UNIT,
 				});
 
@@ -659,7 +651,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			});
 
 			expr.block = exit;
-			expr.value = lir_lvalue(exit_value);
+			expr.value = lir_lvalue(exit_value, oloc);
 			break;
 		}
 		case TOK_COLON: {
@@ -746,7 +738,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// we are breaking here
 			p.blks[blk_id].is_brk = true;
 
-			expr = pnoreturn_value(proc, &token.loc);
+			expr = pnoreturn_value(proc, token.loc);
 			break;
 		}
 		default: {
@@ -763,12 +755,12 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						expr = pexpr(proc, expr.block, PREC_PREFIX, cfg);
 						//
 						// perform unary
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, &token.loc, (lir_inst_t){
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = prefix_tbl[token.kind],
 							.d_unary = {
 								.src = lir_lvalue_spill(proc, expr.block, expr.value),
 							},
-						}));
+						}), token.loc);
 						break;
 					}
 					case TOK_SINGLE_AND: {
@@ -779,13 +771,13 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							pnext();
 						}
 						expr = pexpr(proc, expr.block, PREC_PREFIX, cfg);
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, &token.loc, (lir_inst_t){
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = INST_ADDRESS_OF,
 							.d_address_of = {
 								.lvalue = expr.value,
 								.is_mut = is_mut,
 							},
-						}));
+						}), token.loc);
 						break;
 					}
 					default: {
@@ -865,13 +857,13 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					lir_rlocal_t s0 =  lir_lvalue_spill(proc, expr.block, expr.value);
 
 					// s1 = 1
-					lir_rlocal_t s1 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, &token.loc, (lir_inst_t){
+					lir_rlocal_t s1 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 						.kind = INST_INTEGER_LIT,
 						.d_integer_lit = token.lit,
 					});
 
 					// s2 = s0 + s1
-					lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, &token.loc, (lir_inst_t){
+					lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 						.kind = token.kind == TOK_INC ? INST_ADD : INST_SUB,
 						.d_infix = {
 							.lhs = s0,
@@ -883,10 +875,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					lir_inst(proc, expr.block, (lir_inst_t){
 						.dest = expr.value, // original lvalue
 						.kind = INST_LVALUE,
-						.d_lvalue = lir_lvalue(s2),
+						.d_lvalue = lir_lvalue(s2, token.loc),
 					});
 
-					expr.value = lir_lvalue(s2);
+					expr.value = lir_lvalue(s2, token.loc);
 					//
 					// remember, SSA locals are semantically constants and are non lvalues
 					// we get this type of checks for free
@@ -968,13 +960,13 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					// cast
 					if (token.kind == TOK_COLON) {
 						type_t type = ptype();
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, type, &token.loc, (lir_inst_t){
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, type, token.loc, (lir_inst_t){
 							.kind = INST_CAST,
 							.d_cast = {
 								.src = lir_lvalue_spill(proc, expr.block, expr.value),
 								.type = type,
 							},
-						}));
+						}), token.loc);
 						continue;
 					}
 
@@ -1073,7 +1065,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						};
 
 						// s2 = s0 + s1
-						lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, prec_block, TYPE_INFER, &token.loc, (lir_inst_t){
+						lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, prec_block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = tok_to_op[kind],
 							.d_infix = {
 								.lhs = lhs,
@@ -1082,10 +1074,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						});
 
 						r_expr.block = prec_block;
-						r_expr.value = lir_lvalue(s2);
+						r_expr.value = lir_lvalue(s2, token.loc);
 					} else {
 						r_expr.block = prec_block;
-						r_expr.value = lir_lvalue(rhs);
+						r_expr.value = lir_lvalue(rhs, token.loc);
 					}
 
 					if (is_assign_op || kind == TOK_ASSIGN) {

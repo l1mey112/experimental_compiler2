@@ -92,7 +92,7 @@ void pfn(lir_proc_t *parent) {
 	// construct a tuple so it can unpack
 	// v3 = (v0, v1)
 
-	lir_rlocal_t tuple = lir_ssa_tmp_inst(&proc, entry, proc_typeinfo->d_fn.ret, &name_loc, (lir_inst_t){
+	lir_rlocal_t tuple = lir_ssa_tmp_inst(&proc, entry, proc_typeinfo->d_fn.ret, name_loc, (lir_inst_t){
 		.kind = INST_TUPLE,
 		.d_tuple = args,
 	});
@@ -178,16 +178,15 @@ void pfn(lir_proc_t *parent) {
 		arrpush(proc.blocks[entry].term.d_goto_pattern.blocks, block);
 	}
 
-	lir_symbol_t sym = {
-		.qualified_name = qualified_name,
-		.short_name = name,
+	table_register((lir_sym_t){
+		.key = qualified_name,
 		.mod = p.mod,
+		.short_name = name,
 		.loc = name_loc,
+		.type = proc_type,
 		.kind = SYMBOL_PROC,
 		.d_proc = proc,
-	};
-
-	arrpush(symbols, sym);
+	});
 }
 
 // v = 20

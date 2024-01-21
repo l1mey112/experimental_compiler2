@@ -1,9 +1,5 @@
 #include "all.h"
 
-lir_symbol_t *symbols;
-
-#include "stb_ds.h"
-
 lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local) {
 	u32 idx = arrlenu(proc->locals);
 	arrpush(proc->locals, local);
@@ -35,17 +31,15 @@ lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name) {
 	return idx;
 }
 
-lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc) {
+lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc) {
 	lir_local_t desc = (lir_local_t){
 		.kind = LOCAL_SSA,
 		.type = type,
+		.is_debuginfo = true,
+		.d_debuginfo.loc = loc,
+		.d_debuginfo.name = ISTR_NONE,
 	};
 
-	if (loc) {
-		desc.is_debuginfo = true;
-		desc.d_debuginfo.loc = *loc;
-	}
-	
 	lir_rlocal_t local = lir_local_new(proc, desc);
 	lir_block_arg_assign(proc, block, local);
 	return local;
@@ -69,35 +63,35 @@ void lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst) {
 }
 
 // create local, local = inst
-lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t *loc, lir_inst_t inst) {
+lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst) {
 	lir_local_t desc = (lir_local_t){
 		.kind = LOCAL_SSA,
 		.type = type,
+		.is_debuginfo = true,
+		.d_debuginfo.loc = loc,
+		.d_debuginfo.name = ISTR_NONE,
 	};
 
-	if (loc) {
-		desc.is_debuginfo = true;
-		desc.d_debuginfo.loc = *loc;
-	}
-	
 	lir_rlocal_t local = lir_local_new(proc, desc);
-	inst.dest = lir_lvalue(local);
+	inst.dest = lir_lvalue(local, loc);
 	lir_inst(proc, block, inst);
 	return local;
 }
 
-lir_lvalue_t lir_lvalue(lir_rlocal_t local) {
+lir_lvalue_t lir_lvalue(lir_rlocal_t local, loc_t loc) {
 	return (lir_lvalue_t){
 		.local = local,
 		.proj = NULL,
+		.loc = loc,
 	};
 }
 
-lir_lvalue_t lir_lvalue_sym(lir_rsymbol_t sym) {
+lir_lvalue_t lir_lvalue_sym(lir_rsym_t sym, loc_t loc) {
 	return (lir_lvalue_t){
 		.is_sym = true,
 		.symbol = sym,
 		.proj = NULL,
+		.loc = loc,
 	};
 }
 
@@ -153,7 +147,7 @@ lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t
 		return lvalue.local;
 	}
 
-	return lir_ssa_tmp_inst(proc, block, lvalue.local, &lvalue.proj[0].loc, (lir_inst_t){
+	return lir_ssa_tmp_inst(proc, block, TYPE_INFER, lvalue.loc, (lir_inst_t){
 		.kind = INST_LVALUE,
 		.d_lvalue = lvalue,
 	});
@@ -442,10 +436,10 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 	printf("\n");
 }
 
-void lir_print_proc(lir_symbol_t *symbol) {
+void lir_print_proc(lir_sym_t *symbol) {
 	assert(symbol->kind == SYMBOL_PROC);
 	lir_proc_t *proc = &symbol->d_proc;
-	printf("function %s\n", sv_from(symbol->qualified_name));
+	printf("function %s\n", sv_from(symbol->key));
 
 	// print locals
 	for (u32 i = 0, c = arrlenu(proc->locals); i < c; i++) {
@@ -548,7 +542,7 @@ void lir_print_proc(lir_symbol_t *symbol) {
 	}
 }
 
-void lir_print_symbol(lir_symbol_t *symbol) {
+void lir_print_symbol(lir_sym_t *symbol) {
 	switch (symbol->kind) {
 		case SYMBOL_PROC: {
 			lir_print_proc(symbol);
