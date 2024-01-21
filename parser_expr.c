@@ -781,7 +781,34 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// we are breaking here
 			p.blks[blk_id].is_brk = true;
 
-			expr = pnoreturn_value(proc, token.loc);
+			expr = pnoreturn_value(proc, token.loc, "!.brk");
+			break;
+		}
+		case TOK_CONTINUE: {
+			// most of the same, `rep` doesn't take in any expressions.
+			// copied code from above to resolve label and locate block
+			//
+			istr_t label = ISTR_NONE;
+			loc_t onerror = p.token.loc;
+			pnext();
+			// parse label
+			if (p.token.kind == TOK_COLON) {
+				pnext();
+				pcheck(TOK_IDENT);
+				label = p.token.lit;
+				onerror = p.token.loc;
+				pnext();
+			}
+			u8 blk_id = pblk_locate(label, onerror);
+
+			lir_block_term(proc, expr.block, (lir_term_t){
+				.kind = TERM_GOTO,
+				.d_goto = {
+					.block = p.blks[blk_id].rep,
+				},
+			});
+
+			expr = pnoreturn_value(proc, token.loc, "!.rep");
 			break;
 		}
 		default: {

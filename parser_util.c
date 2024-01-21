@@ -771,9 +771,9 @@ u32 pblk_locate(istr_t opt_label, loc_t onerror) {
 }
 
 // construct a ! value using unreachable control flow
-rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc) {
+rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc, const char *debug_name) {
 	rexpr_t expr;
-	expr.block = lir_block_new(proc, "noreturn");
+	expr.block = lir_block_new(proc, debug_name);
 	expr.value = lir_lvalue(lir_block_new_arg(proc, expr.block, TYPE_BOTTOM, loc), loc);
 	return expr;
 }

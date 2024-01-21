@@ -109,7 +109,7 @@ struct rexpr_t {
 
 // TODO: nicer interface with default vars?
 rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg);
-rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc);
+rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc, const char *debug_name);
 
 // shorthand for spilling an expression for reading, will void all mutable lvalue properties
 //

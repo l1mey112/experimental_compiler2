@@ -187,6 +187,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_IMPORT, "import") \
 	X(TOK_PUB, "pub") \
 	X(TOK_BREAK, "brk") \
+	X(TOK_CONTINUE, "rep") \
 	X(TOK_VOID, "void") \
 	X(TOK_IF, "if") \
 	X(TOK_ELSE, "else")

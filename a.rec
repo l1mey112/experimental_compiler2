@@ -45,13 +45,17 @@
 ; idx_ret0: i32 -> i32
 ; idx_ret0: x = [1, if (x) 2 else 2, 3][x]
 ;
-
-call: i32 -> i32 -> i32      ; (assume these types work)
-call: 'f 'x = do
-    let l
-    l = (if (c) f else 1) x x x x
-
+; 
+; call: i32 -> i32 -> i32      ; (assume these types work)
+; call: 'f 'x = do
+;     let l
+;     l = (if (c) f else 1) x x x x
+; 
 ; (now fixed with proper spilling)
 ;
 ; ssa_bug: i32 -> i32
 ; ssa_bug: 'x = x + (x += 1)
+
+repeat: () -> ()
+repeat: () = :t do
+    rep :t
