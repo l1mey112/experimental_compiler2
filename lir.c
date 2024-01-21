@@ -168,12 +168,10 @@ static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
 			break;
 		}
 		case LOCAL_SSA: {
-			printf("%%");
-			printf("%u", local);
+			printf("%%%u", local);
 			break;
 		}
 	}
-
 }
 
 // : type
@@ -439,7 +437,7 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 void lir_print_proc(lir_sym_t *symbol) {
 	assert(symbol->kind == SYMBOL_PROC);
 	lir_proc_t *proc = &symbol->d_proc;
-	printf("function %s\n", sv_from(symbol->key));
+	printf("function %s {\n", sv_from(symbol->key));
 
 	// print locals
 	for (u32 i = 0, c = arrlenu(proc->locals); i < c; i++) {
@@ -459,6 +457,8 @@ void lir_print_proc(lir_sym_t *symbol) {
 		printf("\n");
 	}
 
+	printf("\n");
+
 	// print blocks
 	for (u32 i = 0, c = arrlenu(proc->blocks); i < c; i++) {
 		lir_block_t *block = &proc->blocks[i];
@@ -466,14 +466,14 @@ void lir_print_proc(lir_sym_t *symbol) {
 
 		// entry(v0: i32, v1: i32)
 		//
-		u32 c = arrlenu(block->args);
-		if (c > 0) {
+		u32 args = arrlenu(block->args);
+		if (args > 0) {
 			printf("(");
-			for (u32 i = 0; i < c; i++) {
+			for (u32 i = 0; i < args; i++) {
 				lir_rlocal_t arg = block->args[i];
 				_print_local(proc, arg);
 				_print_local_type(proc, arg);
-				if (i + 1 < c) {
+				if (i + 1 < args) {
 					printf(", ");
 				}
 			}
@@ -539,7 +539,11 @@ void lir_print_proc(lir_sym_t *symbol) {
 				assert_not_reached();
 			}
 		}
+		if (i + 1 < c) {
+			printf("\n");
+		}
 	}
+	printf("}\n");
 }
 
 void lir_print_symbol(lir_sym_t *symbol) {
@@ -555,7 +559,7 @@ void lir_print_symbol(lir_sym_t *symbol) {
 }
 
 void lir_print_symbols(void) {
-	for (u32 i = 0, c = arrlenu(symbols); i < c; i++) {
+	for (u32 i = 0, c = hmlenu(symbols); i < c; i++) {
 		lir_print_symbol(&symbols[i]);
 		if (i + 1 < c) {
 			printf("\n");
