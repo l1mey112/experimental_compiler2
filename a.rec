@@ -1,2 +1,4 @@
 main: () -> i32
-main: () = loop ()
+main: () = do
+    let k = t
+    let t

@@ -489,8 +489,48 @@ int pimport_ident(istr_t name) {
 	return -1;
 }
 
-void pscope_register(pscope_entry_t entry) {
-	p.scope_entries[p.scope_entries_len++] = entry;
+// register a symbol, raise error if already exists
+void pscope_register(pscope_entry_t to_register) {
+	if (to_register.kind == PS_DEBUG_REFERENCE) {
+		goto success;
+	}
+	
+	// 1. can't shadow imports
+	int idx;
+	if ((idx = pimport_ident(to_register.name)) != -1) {
+		print_err_with_pos(to_register.loc, "variable `%s` cannot shadow import `%s`", sv_from(to_register.name), sv_from(to_register.name));
+		print_hint_with_pos(p.is[idx].loc, "import declared here");
+		err_unwind();
+	}
+
+	if (p.scope_len == 0) {
+		goto success;
+	}
+
+	// 2. no duplicate vars in the same scope
+	// 3. can't use var before def in same scope
+	u32 lo = p.scope[p.scope_len - 1];
+	u32 hi = p.scope_entries_len;
+	for (u32 i = lo; i < hi; i++) {
+		pscope_entry_t *entry = &p.scope_entries[i];
+
+		// still check masked entries
+
+		if (entry->kind == PS_DEBUG_REFERENCE) {
+			print_err_with_pos(entry->loc, "variable `%s` used before definition in the same scope", sv_from(to_register.name));
+			print_hint_with_pos(to_register.loc, "previous declaration here");
+			err_unwind();
+		}
+
+		if (entry->name == to_register.name) {
+			print_err_with_pos(to_register.loc, "variable `%s` already exists in this scope", sv_from(to_register.name));
+			print_hint_with_pos(entry->loc, "previous declaration here");
+			err_unwind();
+		}
+	}
+
+success:
+	p.scope_entries[p.scope_entries_len++] = to_register;
 }
 
 void ppush_scope(void) {
@@ -503,14 +543,38 @@ void ppop_scope(void) {
 	p.scope_entries_len = p.scope[p.scope_len];
 }
 
+void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask) {
+	for (u32 i = entries_lo; i < entries_hi; i++) {
+		pscope_entry_t *entry = &p.scope_entries[i];
+		entry->is_masked = mask;
+	}
+}
+
 static lir_term_pat_t *pattern_alloc(lir_term_pat_t pattern) {
 	lir_term_pat_t *ptr = malloc(sizeof(lir_term_pat_t));
 	*ptr = pattern;
 	return ptr;
 }
 
-// will insert into basic block and register inside the scope
-lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block) {
+// slice of vars
+void pblock_args_to_vars(lir_proc_t *proc, lir_rblock_t block, u32 var_lo, u32 var_hi) {
+	for (lir_rlocal_t local = var_lo; local < var_hi; local++) {
+		lir_local_t *p = &proc->locals[local];
+		
+		assert(p->is_debuginfo);
+		lir_rlocal_t arg = lir_block_new_arg(proc, block, TYPE_INFER, &p->d_debuginfo.loc);
+
+		// local = arg
+		lir_inst(proc, block, (lir_inst_t){
+			.dest = local, // original lvalue
+			.kind = INST_LVALUE,
+			.d_lvalue = arg,
+		});
+	}
+}
+
+// the only place where user variables are created
+lir_term_pat_t ppattern(lir_proc_t *proc) {
 	bool is_mut = false;
 	switch (p.token.kind) {
 		case TOK_UNDERSCORE: {
@@ -531,15 +595,9 @@ lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block) {
 			//
 			// construct block arg and assign to local
 
-			lir_rlocal_t arg = lir_block_new_arg(proc, block, TYPE_INFER, &name_loc);
 			lir_rlocal_t local = lir_local_new_named(proc, name, name_loc, TYPE_INFER, is_mut);
-
-			// local = arg
-			lir_inst(proc, block, (lir_inst_t){
-				.dest = local, // original lvalue
-				.kind = INST_LVALUE,
-				.d_lvalue = arg,
-			});
+			// TODO: error if already exists
+			//       error if name is already in scope
 
 			(void)pscope_register((pscope_entry_t){
 				.name = name,
@@ -579,12 +637,12 @@ lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block) {
 			lir_term_pat_t pattern;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
-					pattern = ppattern(proc, block);
+					pattern = ppattern(proc);
 				} else {
 					if (elems == NULL) {
 						arrpush(elems, pattern);
 					}
-					pattern = ppattern(proc, block);
+					pattern = ppattern(proc);
 					arrpush(elems, pattern);					
 				}
 
@@ -634,14 +692,14 @@ lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block) {
 					}
 					loc_t oloc = p.token.loc;
 					pnext();
-					pattern.d_array.match = pattern_alloc(ppattern(proc, block));
+					pattern.d_array.match = pattern_alloc(ppattern(proc));
 					pattern.d_array.match_lhs = false;
 					if (p.token.kind != TOK_CSQ) {
 						// TODO: dbg str for patterns instead of printing `xs...`
 						err_with_pos(oloc, "a `...xs` in array pattern must reside at the end");
 					}
 				} else {
-					lir_term_pat_t elem = ppattern(proc, block);
+					lir_term_pat_t elem = ppattern(proc);
 
 					// [xs..., x]
 					if (p.token.kind == TOK_TRIPLE_DOTS) {

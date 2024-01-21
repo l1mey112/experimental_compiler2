@@ -93,6 +93,14 @@ lir_lvalue_t lir_lvalue(lir_rlocal_t local) {
 	};
 }
 
+lir_lvalue_t lir_lvalue_sym(lir_rsymbol_t sym) {
+	return (lir_lvalue_t){
+		.is_sym = true,
+		.symbol = sym,
+		.proj = NULL,
+	};
+}
+
 void lir_lvalue_deref(lir_lvalue_t *lvalue, loc_t loc) {
 	lir_lvalue_proj_t desc = {
 		.kind = PROJ_DEREF,
@@ -141,7 +149,7 @@ void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index) {
 }
 
 lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
-	if (arrlenu(lvalue.proj) == 0) {
+	if (!lvalue.is_sym && arrlenu(lvalue.proj) == 0) {
 		return lvalue.local;
 	}
 

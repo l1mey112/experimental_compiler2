@@ -107,10 +107,6 @@ enum : u8 {
 	PEXPR_ET_ELSE,
 };
 
-// INFO: there is a very real risk with representing symbols as unwrapped module strings.
-//       sometimes there may be conflicting modules with different filesystem paths
-//       but they share the same module path. it's a small risk, but it's there.
-//
 // load ident ptr, set lvalue
 rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	pcheck(TOK_IDENT);
@@ -158,6 +154,11 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 
 		for (u32 i = lo; i < hi; i++) {
 			pscope_entry_t *entry = &p.scope_entries[i];
+
+			if (entry->is_masked) {
+				continue;
+			}
+			
 			if (entry->kind == PS_LOCAL && entry->name == lit) {
 				pnext();
 
@@ -172,8 +173,9 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 		}
 	}
 
-	assert(0 && "TODO: implement global symbols");
-	/* // 2. not found, return a symbol
+	assert_not_reached();
+
+	// 2. not found, return a symbol
 	//    insert a `PS_DEBUG_REFERENCE` to let further references know that
 	//    this variable is unresolved
 
@@ -183,7 +185,7 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	// let g = x      (error: use before declaration in same scope)
 	// let x = 0      (hint: declaration here)
 	//
-	pscope_register((pscope_entry_t){
+	/* pscope_register((pscope_entry_t){
 		.kind = PS_DEBUG_REFERENCE,
 		.loc = loc,
 		.name = lit,
@@ -203,11 +205,70 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	}; */
 }
 
-// returns true if `expr_out` has been written to in any way
+bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
+	pnext();
+
+	// let x = 0
+	// let y
+
+	u32 scope_olen = p.scope_entries_len;
+	u32 locals_olen = arrlenu(proc->locals);
+	lir_term_pat_t pattern = ppattern(proc);
+	u32 scope_rlen = p.scope_entries_len;
+	u32 locals_rlen = arrlenu(proc->locals);
+
+	// let x = 0
+	//
+	//     %0 = 0
+	//     goto_pattern next:
+	// next(%1):
+	//     x = %1
+	//
+	// let x       (evaluates to a no-op)
+	//
+
+	// no let rec here
+	pmask_scope(scope_olen, scope_rlen, true);
+
+	if (p.token.kind == TOK_ASSIGN) {
+		pnext();
+
+		rexpr_t expr = pexpr(proc, block, 0, 0);
+
+		// create goto_pattern
+
+		lir_rblock_t let_next = lir_block_new(proc, "let.next");
+		lir_block_term(proc, expr.block, (lir_term_t){
+			.kind = TERM_GOTO_PATTERN,
+			.d_goto_pattern = {
+				.value = lir_lvalue_spill(proc, expr.block, expr.value),
+				.patterns = arr(lir_term_pat_t, pattern),
+				.blocks = arr(lir_rblock_t, let_next),
+			},
+		});
+
+		// create variable bindings as block arguments
+		pblock_args_to_vars(proc, let_next, locals_olen, locals_rlen);
+
+		expr_out->block = let_next;
+	}
+
+	// unmask
+	pmask_scope(scope_olen, scope_rlen, false);
+
+	return false;
+}
+
+// returns true if a value was set
+// regardless the block field may or may not be written to
 bool pstmt(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 	bool set = false;
 
 	switch (p.token.kind) {
+		case TOK_LET: {
+			set = plet(proc, block, expr_out);
+			break;
+		}
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_COLON) {
 				assert_not_reached();
@@ -228,7 +289,7 @@ bool pstmt(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 	return set;
 }
 
-// TODO: add in expr_cfg ???
+// TODO: add in expr_cfg ??? (ehh i tried it, it doesn't work somehow)
 /*
 
 let v = (do

@@ -129,7 +129,13 @@ void pfn(lir_proc_t *parent) {
 		lir_rblock_t block = lir_block_new(&proc, debug_name);
 
 		while (true) {
-			lir_term_pat_t pattern = ppattern(&proc, block);
+			u32 locals_olen = arrlenu(proc.locals);
+			lir_term_pat_t pattern = ppattern(&proc);
+			u32 locals_rlen = arrlenu(proc.locals);
+
+			// insert args
+			pblock_args_to_vars(&proc, block, locals_olen, locals_rlen);
+
 			arrpush(patterns, pattern);
 			if (p.token.kind == TOK_ASSIGN) {
 				break;

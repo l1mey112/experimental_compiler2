@@ -471,6 +471,7 @@ typedef struct lir_lvalue_t lir_lvalue_t;
 typedef struct lir_lvalue_proj_t lir_lvalue_proj_t;
 typedef u32 lir_rblock_t;
 typedef u32 lir_rlocal_t;
+typedef u32 lir_rsymbol_t;
 
 #define BLOCK_NONE ((lir_rblock_t)-1)
 
@@ -525,7 +526,11 @@ struct lir_lvalue_proj_t {
 //       - we don't store the resultant type
 
 struct lir_lvalue_t {
-	lir_rlocal_t local; // TODO: global symbols
+	union {
+		lir_rlocal_t local;
+		lir_rsymbol_t symbol;
+	};
+	bool is_sym;
 	lir_lvalue_proj_t *proj;
 };
 
@@ -738,4 +743,6 @@ void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index);
 //
 //       after a write to the original lvalue, the spilled local is invalidated
 //       returns SSA locals
+//
+//       spills symbols to reads to an SSA local
 lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue);

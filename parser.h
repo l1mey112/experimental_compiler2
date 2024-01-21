@@ -31,6 +31,8 @@ struct pscope_entry_t {
 	istr_t name;
 	loc_t loc;
 
+	bool is_masked; // when masked it doesn't resolve to the entry
+
 	enum {
 		PS_LOCAL,
 		PS_DEBUG_REFERENCE,
@@ -87,12 +89,12 @@ void NORETURN punexpected(const char *err);
 type_t ptype(void);
 void pimport(void);
 int pimport_ident(istr_t name);
-
 void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);
 void ppop_scope(void);
-
-lir_term_pat_t ppattern(lir_proc_t *proc, lir_rblock_t block);
+void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
+lir_term_pat_t ppattern(lir_proc_t *proc);
+void pblock_args_to_vars(lir_proc_t *proc, lir_rblock_t block, u32 var_lo, u32 var_hi);
 u32 pblk_locate(istr_t opt_label, loc_t onerror);
 // result of parsing an expression
 typedef struct rexpr_t rexpr_t;
