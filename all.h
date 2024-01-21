@@ -744,6 +744,21 @@ void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
 void lir_print_symbol(lir_sym_t *symbol);
 void lir_print_symbols(void);
 
+// having named field tuples and options would be pretty nice
+
+typedef struct lir_find_inst_ssa_result_t lir_find_inst_ssa_result_t;
+
+struct lir_find_inst_ssa_result_t {
+	lir_rblock_t block;
+	u32 inst;
+	bool found;
+};
+
+// locate the instruction which is the definition of the SSA local
+// will return not found for block args
+// will return not found if the local is not SSA
+lir_find_inst_ssa_result_t lir_find_inst_ssa(lir_proc_t *proc, lir_rlocal_t local);
+
 // INFO: in the parser we assign around lvalues willy nilly.
 //       there is a possibility for aliasing, but it doesn't
 //       seem much of an issue for now.
@@ -757,12 +772,22 @@ void lir_lvalue_struct_field(lir_lvalue_t *lvalue, loc_t loc, istr_t field);
 void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx);
 void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index);
 
+// remove an instruction from a block, returning it
+lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst);
+
 // INFO: spill for READING only, writing to this would cause weird behaviour
 //       spill will return the local if it contains no projections
 //       otherwise unwrap projections into a new local and return it
 //
-//       after a write to the original lvalue, the spilled local is invalidated
-//       returns SSA locals
+//       ~~after a write to the original lvalue, the spilled local is invalidated~~
 //
-//       spills symbols to reads to an SSA local
+// UPDATE: spills locals with projections
+//         spills mutable locals to SSA values
+//
+//         this this is to guarantee a specific order of evaluation when lvalues
+//         are converted into locals for reading
+//
+//         it is safe to assume that all arguments to instructions are IMMUTABLE
+//         and without side effects from their neighbouring operands.
+//
 lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue);

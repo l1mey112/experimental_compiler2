@@ -440,6 +440,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 	// will set `is_root` on return path
 
 	token_t token = p.token;
+	u32 line_nr = p.token.loc.line_nr;
 
 	struct {
 		istr_t name;
@@ -543,7 +544,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 			pnext();
 			while (p.token.kind != TOK_CSQ) {
-				expr = pexpr(proc, expr.block, PEXPR_ET_ARRAY, 0);
+				expr = pexpr(proc, expr.block, 0, PEXPR_ET_ARRAY);
 
 				arrpush(elems, lir_lvalue_spill(proc, expr.block, expr.value));
 
@@ -950,7 +951,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						pnext();
 					} else {
 						// x[0]
-						expr0 = pexpr(proc, expr.block, PEXPR_ET_INDEX_LO, cfg);
+						expr0 = pexpr(proc, expr.block, 0, PEXPR_ET_INDEX_LO);
 						if (p.token.kind == TOK_CSQ) {
 							pnext();
 							expr.block = expr0.block;
@@ -978,7 +979,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							},
 						}), token.loc);
 					} else {
-						rexpr_t expr1 = pexpr(proc, expr.block, PEXPR_ET_INDEX_HI, cfg);
+						rexpr_t expr1 = pexpr(proc, expr.block, 0, PEXPR_ET_INDEX_HI);
 						pexpect(TOK_CSQ);
 
 						expr.block = expr1.block;
@@ -994,145 +995,202 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					continue;
 				}
 				default: {
-					if (!TOK_IS_INFIX(token.kind)) {
-						goto exit;
-					}
-					pnext();
-					
-					// cast
-					if (token.kind == TOK_COLON) {
-						type_t type = ptype();
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, type, token.loc, (lir_inst_t){
-							.kind = INST_CAST,
-							.d_cast = {
-								.src = lir_lvalue_spill(proc, expr.block, expr.value),
-								.type = type,
+					if (TOK_IS_INFIX(token.kind)) {
+						pnext();
+						
+						// cast
+						if (token.kind == TOK_COLON) {
+							type_t type = ptype();
+							expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, type, token.loc, (lir_inst_t){
+								.kind = INST_CAST,
+								.d_cast = {
+									.src = lir_lvalue_spill(proc, expr.block, expr.value),
+									.type = type,
+								},
+							}), token.loc);
+							continue;
+						}
+
+						// postfix deref: v.*
+						if (token.kind == TOK_DOT && p.token.kind == TOK_MUL) {
+							// append deref to the lvalue
+							lir_lvalue_deref(&expr.value, p.token.loc);
+							pnext();
+							continue;
+						}
+
+						// field access: v.x
+						// tuple access: v.0
+						if (token.kind == TOK_DOT) {
+							switch (p.token.kind) {
+								case TOK_INTEGER: {
+									u64 index = strtoull(sv_from(p.token.lit), NULL, 10);
+									// TODO: less than u16
+									assert(index <= 0xFFFF);
+									lir_lvalue_index_field(&expr.value, p.token.loc, index);
+									pnext();
+									continue;
+								}
+								case TOK_IDENT: {
+									istr_t field = p.token.lit;
+									lir_lvalue_index_field(&expr.value, p.token.loc, field);
+									continue;
+								}
+								default: {
+									punexpected("expected field name or tuple index after `.`");
+								}
+							}
+							continue;
+						}
+
+						// handles op= and infix op expressions 
+						//
+						// desugar(lvalue += s0:spilled):
+						//     s1 = spill lvalue
+						//     s2 = s1 + s0
+						//     lvalue = s2 
+						//     <- s2
+						//
+						// desugar(s0:spilled + s1:spilled):
+						//     s2 = s0 + s1
+						//     <- s2
+						//
+						// desugar(lvalue = s0:spilled):
+						//     lvalue = s0
+						//     <- s0
+						//
+						tok_t kind = token.kind;
+						bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
+						//
+						rexpr_t lhs_v = expr;
+						rexpr_t rhs_v = pexpr(proc, expr.block, nprec, cfg);
+						lir_rblock_t prec_block = rhs_v.block;
+
+						lir_rlocal_t lhs;
+						lir_rlocal_t rhs = lir_lvalue_spill(proc, rhs_v.block, rhs_v.value);
+
+						if (kind != TOK_ASSIGN) {
+							lhs = lir_lvalue_spill(proc, lhs_v.block, lhs_v.value);
+						}
+
+						if (is_assign_op) {
+							// sparse array
+							static const tok_t assign_tok_to_tok[] = {
+								[TOK_ASSIGN_ADD] = TOK_ADD,
+								[TOK_ASSIGN_SUB] = TOK_SUB,
+								[TOK_ASSIGN_MUL] = TOK_MUL,
+								[TOK_ASSIGN_DIV] = TOK_DIV,
+								[TOK_ASSIGN_MOD] = TOK_MOD,
+							};
+
+							kind = assign_tok_to_tok[kind];
+						}
+
+						rexpr_t r_expr = {};
+
+						if (kind != TOK_ASSIGN) {
+							static const u8 tok_to_op[] = {
+								[TOK_ADD] = INST_ADD,
+								[TOK_SUB] = INST_SUB,
+								[TOK_MUL] = INST_MUL,
+								[TOK_DIV] = INST_DIV,
+								[TOK_MOD] = INST_MOD,
+								[TOK_EQ] = INST_EQ,
+								[TOK_NE] = INST_NE,
+								[TOK_LT] = ISNT_LE,
+								[TOK_GT] = ISNT_LT,
+								[TOK_LE] = ISNT_GE,
+								[TOK_GE] = ISNT_GT,
+								[TOK_AND] = INST_AND,
+								[TOK_OR] = INST_OR,
+							};
+
+							// s2 = s0 + s1
+							lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, prec_block, TYPE_INFER, token.loc, (lir_inst_t){
+								.kind = tok_to_op[kind],
+								.d_infix = {
+									.lhs = lhs,
+									.rhs = rhs,
+								},
+							});
+
+							r_expr.block = prec_block;
+							r_expr.value = lir_lvalue(s2, token.loc);
+						} else {
+							r_expr.block = prec_block;
+							r_expr.value = lir_lvalue(rhs, token.loc);
+						}
+
+						if (is_assign_op || kind == TOK_ASSIGN) {
+							// lvalue = ?
+							lir_inst(proc, r_expr.block, (lir_inst_t){
+								.dest = expr.value, // original lvalue
+								.kind = INST_LVALUE,
+								.d_lvalue = r_expr.value,
+							});
+						}
+
+						expr = r_expr;
+						continue;
+					} else if (token.loc.line_nr == line_nr) {
+						// spill as soon as possible, good job
+						lir_rlocal_t f = pexpr_spill(proc, &expr);
+						//
+						rexpr_t expr0 = pexpr(proc, expr.block, PREC_CALL, cfg);
+						//
+						// don't bloat the IR, merge call expressions if the LHS is already a call expr
+						// the checker will unmerge calls based on type information
+						//
+						// call merging may happen on different basic block boundaries, which means
+						// you need to move the call forward into this one
+						//
+						// there is also an issue with order of evaluation, which is so obviously left
+						// to right. however an issue is posed when function arguments have side effects
+						// which may affect the previous arguments to a function. ~~this is where forwarding
+						// an lvalue to a possible mutable local as the function argument isn't possible~~
+						//
+						// UPDATE: this has been solved by spilling all mutable lvalues into SSA locals.
+						//         as all arguments must go through `lvalue_spill` the change was easy
+						//         and the affects were instantly apparent.
+						//
+						//         assume that all arguments to instructions are IMMUTABLE and without side
+						//         effects from their neighbouring operands.
+						//
+						lir_rlocal_t arg = lir_lvalue_spill(proc, expr0.block, expr0.value);
+
+						// functions are never assigned directly into non SSA lvalues
+						//
+						//     %10 = %9(%8)
+						//     l = %10
+						//
+						// they're always stored separately, which allows for reordering to work just fine
+						// since arguments are always spilled immutably
+						//
+						expr.block = expr0.block;
+						lir_find_inst_ssa_result_t r;
+						if (!expr.value.is_sym && (r = lir_find_inst_ssa(proc, expr.value.local)).found) {
+							// found an SSA local, try merging
+							lir_inst_t *instp = &proc->blocks[r.block].insts[r.inst];
+
+							if (instp->kind == INST_CALL) {
+								// merge
+								// keep expr the same
+								lir_inst_t inst = lir_inst_pop(proc, r.block, r.inst);
+								arrpush(inst.d_call.args, arg);
+								lir_inst(proc, expr0.block, inst);
+								continue;
+							}
+						}
+
+						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
+							.kind = INST_CALL,
+							.d_call = {
+								.f = f,
+								.args = arr(lir_rlocal_t, arg),
 							},
 						}), token.loc);
 						continue;
 					}
-
-					// postfix deref: v.*
-					if (token.kind == TOK_DOT && p.token.kind == TOK_MUL) {
-						// append deref to the lvalue
-						lir_lvalue_deref(&expr.value, p.token.loc);
-						pnext();
-						continue;
-					}
-
-					// field access: v.x
-					// tuple access: v.0
-					if (token.kind == TOK_DOT) {
-						switch (p.token.kind) {
-							case TOK_INTEGER: {
-								u64 index = strtoull(sv_from(p.token.lit), NULL, 10);
-								// TODO: less than u16
-								assert(index <= 0xFFFF);
-								lir_lvalue_index_field(&expr.value, p.token.loc, index);
-								pnext();
-								continue;
-							}
-							case TOK_IDENT: {
-								istr_t field = p.token.lit;
-								lir_lvalue_index_field(&expr.value, p.token.loc, field);
-								continue;
-							}
-							default: {
-								punexpected("expected field name or tuple index after `.`");
-							}
-						}
-						continue;
-					}
-
-					// handles op= and infix op expressions 
-					//
-					// desugar(lvalue += s0:spilled):
-					//     s1 = spill lvalue
-					//     s2 = s1 + s0
-					//     lvalue = s2 
-					//     <- s2
-					//
-					// desugar(s0:spilled + s1:spilled):
-					//     s2 = s0 + s1
-					//     <- s2
-					//
-					// desugar(lvalue = s0:spilled):
-					//     lvalue = s0
-					//     <- s0
-					//
-					tok_t kind = token.kind;
-					bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
-					//
-					rexpr_t lhs_v = expr;
-					rexpr_t rhs_v = pexpr(proc, expr.block, nprec, cfg);
-					lir_rblock_t prec_block = rhs_v.block;
-
-					lir_rlocal_t lhs;
-					lir_rlocal_t rhs = lir_lvalue_spill(proc, rhs_v.block, rhs_v.value);
-
-					if (kind != TOK_ASSIGN) {
-						lhs = lir_lvalue_spill(proc, lhs_v.block, lhs_v.value);
-					}
-
-					if (is_assign_op) {
-						// sparse array
-						static const tok_t assign_tok_to_tok[] = {
-							[TOK_ASSIGN_ADD] = TOK_ADD,
-							[TOK_ASSIGN_SUB] = TOK_SUB,
-							[TOK_ASSIGN_MUL] = TOK_MUL,
-							[TOK_ASSIGN_DIV] = TOK_DIV,
-							[TOK_ASSIGN_MOD] = TOK_MOD,
-						};
-
-						kind = assign_tok_to_tok[kind];
-					}
-
-					rexpr_t r_expr = {};
-
-					if (kind != TOK_ASSIGN) {
-						static const u8 tok_to_op[] = {
-							[TOK_ADD] = INST_ADD,
-							[TOK_SUB] = INST_SUB,
-							[TOK_MUL] = INST_MUL,
-							[TOK_DIV] = INST_DIV,
-							[TOK_MOD] = INST_MOD,
-							[TOK_EQ] = INST_EQ,
-							[TOK_NE] = INST_NE,
-							[TOK_LT] = ISNT_LE,
-							[TOK_GT] = ISNT_LT,
-							[TOK_LE] = ISNT_GE,
-							[TOK_GE] = ISNT_GT,
-							[TOK_AND] = INST_AND,
-							[TOK_OR] = INST_OR,
-						};
-
-						// s2 = s0 + s1
-						lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, prec_block, TYPE_INFER, token.loc, (lir_inst_t){
-							.kind = tok_to_op[kind],
-							.d_infix = {
-								.lhs = lhs,
-								.rhs = rhs,
-							},
-						});
-
-						r_expr.block = prec_block;
-						r_expr.value = lir_lvalue(s2, token.loc);
-					} else {
-						r_expr.block = prec_block;
-						r_expr.value = lir_lvalue(rhs, token.loc);
-					}
-
-					if (is_assign_op || kind == TOK_ASSIGN) {
-						// lvalue = ?
-						lir_inst(proc, expr.block, (lir_inst_t){
-							.dest = expr.value, // original lvalue
-							.kind = INST_LVALUE,
-							.d_lvalue = r_expr.value,
-						});
-					}
-
-					expr = r_expr;
-					continue;
 				}
 			}
 		}

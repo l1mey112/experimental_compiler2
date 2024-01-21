@@ -142,8 +142,9 @@ void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index) {
 	arrpush(lvalue->proj, desc);
 }
 
+// spill projections and mut values into a readonly SSA value
 lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
-	if (!lvalue.is_sym && arrlenu(lvalue.proj) == 0) {
+	if (!lvalue.is_sym && arrlenu(lvalue.proj) == 0 && proc->locals[lvalue.local].kind != LOCAL_MUT) {
 		return lvalue.local;
 	}
 
@@ -151,6 +152,42 @@ lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t
 		.kind = INST_LVALUE,
 		.d_lvalue = lvalue,
 	});
+}
+
+// TODO: searching backward would most likely be fastest
+lir_find_inst_ssa_result_t lir_find_inst_ssa(lir_proc_t *proc, lir_rlocal_t local) {
+	lir_local_t *localp = &proc->locals[local];
+	lir_find_inst_ssa_result_t r;
+	r.found = false;
+
+	if (localp->kind != LOCAL_SSA) {
+		return r;
+	}
+	
+	for (u32 i = 0, c = arrlenu(proc->blocks); i < c; i++) {
+		lir_block_t *block = &proc->blocks[i];
+		for (u32 j = 0, c = arrlenu(block->insts); j < c; j++) {
+			lir_inst_t *inst = &block->insts[j];
+
+			// SSA instructions don't have lvalue projections as a dest, it doesn't make sense for them to
+			if (inst->dest.local == local) {
+				r.block = i;
+				r.inst = j;
+				r.found = true;
+				return r;
+			}
+		}
+	}
+
+	return r;
+}
+
+lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst) {
+	lir_block_t *b = &proc->blocks[block];
+	assert(inst < arrlenu(b->insts));
+	lir_inst_t r = b->insts[inst];
+	arrdel(b->insts, inst);
+	return r;
 }
 
 static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
@@ -269,7 +306,12 @@ static void _print_blockterm(lir_proc_t *proc, lir_term_block_t block) {
 }
 
 static void _print_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
-	_print_local(proc, lvalue.local);
+	if (lvalue.is_sym) {
+		lir_sym_t *symbol = &symbols[lvalue.symbol];
+		printf("{%s}", sv_from(symbol->key));
+	} else {
+		_print_local(proc, lvalue.local);
+	}
 	for (u32 i = 0, c = arrlenu(lvalue.proj); i < c; i++) {
 		lir_lvalue_proj_t *proj = &lvalue.proj[i];
 		switch (proj->kind) {
@@ -575,6 +617,10 @@ void lir_print_symbol(lir_sym_t *symbol) {
 
 void lir_print_symbols(void) {
 	for (u32 i = 0, c = hmlenu(symbols); i < c; i++) {
+		if (symbols[i].is_placeholder) {
+			continue;
+		}
+
 		lir_print_symbol(&symbols[i]);
 		if (i + 1 < c) {
 			printf("\n");

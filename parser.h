@@ -110,3 +110,12 @@ struct rexpr_t {
 // TODO: nicer interface with default vars?
 rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg);
 rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc);
+
+// shorthand for spilling an expression for reading, will void all mutable lvalue properties
+//
+// ensure to spill as soon as possible and in the same block before you start evaluating
+// other expressions. if you don't you'll most likely end up with invalid state/order
+// of evaluation
+//
+// will also return a local if you want to use that too
+lir_rlocal_t pexpr_spill(lir_proc_t *proc, rexpr_t *expr);

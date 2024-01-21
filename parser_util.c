@@ -573,6 +573,12 @@ void pblock_args_to_vars(lir_proc_t *proc, lir_rblock_t block, u32 var_lo, u32 v
 	}
 }
 
+lir_rlocal_t pexpr_spill(lir_proc_t *proc, rexpr_t *expr) {
+	lir_rlocal_t spillage = lir_lvalue_spill(proc, expr->block, expr->value);
+	expr->value = lir_lvalue(spillage, expr->value.loc);
+	return spillage;
+}
+
 // the only place where user variables are created
 lir_term_pat_t ppattern(lir_proc_t *proc) {
 	bool is_mut = false;

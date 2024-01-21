@@ -29,15 +29,29 @@
 ; 
 ; c: bool -> i32
 ; c: cond = if (cond) 50 + 50 else 25
+; 
+; idx_ret: i32 -> i32
+; idx_ret: x = [1, 2, 3, 4, if (x) 20 else 25][x]
+; 
+; slice_some: i32 -> i32 -> []i32 -> []i32
+; slice_some: lo hi xs = do
+;     let a = xs[lo..]
+;     let b = xs[..hi]
+;     let c = xs[lo..hi]
+;     let d = xs[..]
+; 
+;     ()
+; 
+; idx_ret0: i32 -> i32
+; idx_ret0: x = [1, if (x) 2 else 2, 3][x]
+;
 
-idx_ret: i32 -> i32
-idx_ret: x = [1, 2, 3, 4, if (x) 20 else 25][x]
+call: i32 -> i32 -> i32      ; (assume these types work)
+call: 'f 'x = do
+    let l
+    l = f x x x x
 
-slice_some: i32 -> i32 -> []i32 -> []i32
-slice_some: lo hi xs = do
-    let a = xs[lo..]
-    let b = xs[..hi]
-    let c = xs[lo..hi]
-    let d = xs[..]
-
-    ()
+; (now fixed with proper spilling)
+;
+; ssa_bug: i32 -> i32
+; ssa_bug: 'x = x + (x += 1)
