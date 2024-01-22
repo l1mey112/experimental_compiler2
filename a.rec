@@ -87,5 +87,5 @@
 ; inc: i32 -> i32
 ; inc: x = ident x + 1
 
-apply: i32 -> i32 -> i32
-apply: f x = f x x x x x
+fact: i32 -> i32
+fact: n = if (n == 0) 1 else n * fact (n - 1)
