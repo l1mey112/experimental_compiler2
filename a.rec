@@ -44,15 +44,12 @@
 ; 
 ; idx_ret0: i32 -> i32
 ; idx_ret0: x = [1, if (x) 2 else 2, 3][x]
-;
 ; 
 ; call: i32 -> i32 -> i32      ; (assume these types work)
 ; call: 'f 'x = do
 ;     let l
 ;     l = (if (c) f else 1) x x x x
 ; 
-; (now fixed with proper spilling)
-;
 ; ssa_bug: i32 -> i32
 ; ssa_bug: 'x = x + (x += 1)
 ; 
@@ -68,21 +65,27 @@
 ;     let 'f = 1
 ;     loop do
 ;         if (i < 1) brk f
-;         f = f * num
+;         f = f * i
 ;         i--
-;
+; 
+; test: () -> ()
+; test: () = loop ret ()
+; 
 ; fact_full: i32 -> i32
 ; fact_full: n = do
 ;     if (n == 0) do
 ;         ret 1
 ;     else do
 ;         ret n * fact_full (n - 1)
+; 
+; inc_double: (i32, i32) -> (i32, i32)
+; inc_double: (x, y) = (inc x, inc y)
+; 
+; ident: i32 -> i32
+; ident: x = x
+; 
+; inc: i32 -> i32
+; inc: x = ident x + 1
 
-inc_double: (i32, i32) -> (i32, i32)
-inc_double: (x, y) = (inc x, inc y)
-
-ident: i32 -> i32
-ident: x = x
-
-inc: i32 -> i32
-inc: x = ident x + 1
+apply: i32 -> i32 -> i32
+apply: f x = f x x x x x

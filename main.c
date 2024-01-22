@@ -109,7 +109,7 @@ ret:
 	// TODO: register_root() etc for module system
 
 	lir_print_symbols();
-	lir_check();
+	// lir_check();
 	
 	/* if (!err && !setjmp(err_diag.unwind)) {
 		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {

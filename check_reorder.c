@@ -4,14 +4,21 @@ lir_rsym_t *creorder_sorted;
 
 static void visit(lir_rsym_t rsym);
 
-static void visit_dependent(lir_rsym_t rsym) {
-	if (symbols[rsym].is_placeholder) {
+static void visit_dependent(lir_rsym_t parent, lir_rsym_t rsym) {
+	lir_sym_t *sym = &symbols[rsym];
+	
+	if (sym->is_placeholder) {
 		// error user
 		assert_not_reached();
 		return;
 	}
+
+	// it's impossible to self recurse into incomplete functions	
+	if (sym->kind == SYMBOL_PROC && parent == rsym) {
+		return;
+	}
 	
-	if (symbols[rsym].is_visited) {
+	if (sym->is_visited) {
 		// cycle error
 		assert_not_reached();
 		return;
@@ -86,11 +93,11 @@ static void visit(lir_rsym_t rsym) {
 					lir_inst_t *i = &b->insts[inst];
 
 					if (i->kind == INST_LVALUE && i->d_lvalue.is_sym) {
-						visit_dependent(i->d_lvalue.symbol);
+						visit_dependent(rsym, i->d_lvalue.symbol);
 					}
 
 					if (i->dest.is_sym) {
-						visit_dependent(i->dest.symbol);
+						visit_dependent(rsym, i->dest.symbol);
 					}
 				}
 			}

@@ -947,7 +947,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					// s1 = 1
 					lir_rlocal_t s1 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 						.kind = INST_INTEGER_LIT,
-						.d_integer_lit = token.lit,
+						.d_integer_lit = sv_move("1"),
 					});
 
 					// s2 = s0 + s1
