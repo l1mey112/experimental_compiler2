@@ -789,7 +789,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// copied code from above to resolve label and locate block
 			//
 			istr_t label = ISTR_NONE;
-			loc_t onerror = p.token.loc;
+			loc_t onerror = token.loc;
 			pnext();
 			// parse label
 			if (p.token.kind == TOK_COLON) {
@@ -809,6 +809,24 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			});
 
 			expr = pnoreturn_value(proc, token.loc, "!.rep");
+			break;
+		}
+		case TOK_RETURN: {
+			// `ret` evaluates to ! like `brk` and `rep`
+			//
+			// just end the block with a `ret` terminator
+			//
+			pnext();
+			expr = pexpr(proc, expr.block, 0, cfg);
+
+			lir_block_term(proc, expr.block, (lir_term_t){
+				.kind = TERM_RET,
+				.d_ret = {
+					.value = lir_lvalue_spill(proc, expr.block, expr.value),
+				},
+			});
+
+			expr = pnoreturn_value(proc, token.loc, "!.ret");
 			break;
 		}
 		default: {

@@ -188,6 +188,7 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	X(TOK_PUB, "pub") \
 	X(TOK_BREAK, "brk") \
 	X(TOK_CONTINUE, "rep") \
+	X(TOK_RETURN, "ret") \
 	X(TOK_VOID, "void") \
 	X(TOK_IF, "if") \
 	X(TOK_ELSE, "else")
@@ -442,7 +443,13 @@ istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
+
+typedef struct lir_sym_t lir_sym_t;
+typedef u32 lir_rsym_t;
+
 void lir_process_file(rfile_t f);
+void lir_check(void);
+
 /* void hir_check_module(rmod_t mod);
 void hir_dump_module(rmod_t mod);
 void hir_typed_desugar(void); */
@@ -459,7 +466,6 @@ const char *tok_dbg_str(token_t tok);
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
 
-typedef struct lir_sym_t lir_sym_t;
 typedef struct lir_proc_t lir_proc_t;
 typedef struct lir_block_t lir_block_t;
 typedef struct lir_term_t lir_term_t;
@@ -472,7 +478,6 @@ typedef struct lir_lvalue_t lir_lvalue_t;
 typedef struct lir_lvalue_proj_t lir_lvalue_proj_t;
 typedef u32 lir_rblock_t;
 typedef u32 lir_rlocal_t;
-typedef u32 lir_rsym_t;
 
 #define BLOCK_NONE ((lir_rblock_t)-1)
 #define LOCAL_NONE ((lir_rlocal_t)-1)
@@ -711,12 +716,13 @@ struct lir_sym_t {
 	// if true, this is a placeholder symbol
 	// nothing else is stored here, it's just an entry with a key
 	bool is_placeholder;
+	bool is_visited; // for topological sort
 
 	// if SYMBOL_TYPE, this is the type
 	type_t type;
 
 	enum : u8 {
-		SYMBOL_VAR,
+		SYMBOL_GLOBAL,
 		SYMBOL_PROC,
 		SYMBOL_TYPE,
 	} kind;
