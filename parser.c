@@ -67,10 +67,20 @@ void pfn(lir_proc_t *parent) {
 	// add: i32 -> i32 -> i32
 	// add: a b = a + b
 	// add: 0 0 = 0
-
+	//
+	// desugar:
+	//
+	// add: i32 -> i32 -> i32
+	// add: _0 _1 = match (_0, _1)
+	//     a b -> a + b
+	//     0 0 -> 0
+	//
 	// create entry block with `len` args
 	// entry block must be the first block
+	// proper desugar into match arms
 	lir_rblock_t entry = lir_block_new(&proc, "entry");
+	lir_rblock_t exit = lir_block_new(&proc, "exit");
+	proc.blocks[entry].check.next_sequence = exit;
 
 	// TODO: we don't really store the locs of args???
 	// INFO: when DCEing locals or merging, take the loc of the one that actually has one
@@ -86,7 +96,7 @@ void pfn(lir_proc_t *parent) {
 			},
 			.def = entry,
 		});
-		lir_block_arg_assign(&proc,entry, v);
+		lir_block_arg_assign(&proc, entry, v);
 		arrpush(args, v);
 	}
 
@@ -106,6 +116,14 @@ void pfn(lir_proc_t *parent) {
 			.blocks = NULL,
 			.patterns = NULL,
 		},
+	});
+
+	// ret match (v0, v1)
+	//     ...
+	lir_rlocal_t exit_arg = lir_block_new_arg(&proc, exit, TYPE_INFER, name_loc);
+	lir_block_term(&proc, exit, (lir_term_t){
+		.kind = TERM_RET,
+		.d_ret = exit_arg,
 	});
 
 	// start parsing
@@ -170,8 +188,11 @@ void pfn(lir_proc_t *parent) {
 		ppop_scope();
 
 		lir_block_term(&proc, expr.block, (lir_term_t){
-			.kind = TERM_RET,
-			.d_ret = lir_lvalue_spill(&proc, expr.block, expr.value),
+			.kind = TERM_GOTO,
+			.d_goto = {
+				.block = exit,
+				.args = arr(lir_rlocal_t, lir_lvalue_spill(&proc, expr.block, expr.value)),
+			},
 		});
 		pat++;
 

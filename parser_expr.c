@@ -245,6 +245,8 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 				.blocks = arr(lir_rblock_t, let_next),
 			},
 		});
+		// set next sequence
+		proc->blocks[expr.block].check.next_sequence = let_next;
 
 		// create variable bindings as block arguments
 		pblock_args_to_vars(proc, let_next, locals_olen, locals_rlen);
@@ -329,6 +331,8 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 				.block = do_rep,
 			},
 		});
+		// set next sequence
+		proc->blocks[expr.block].check.next_sequence = do_rep;
 
 		do_brk_local = lir_block_new_arg(proc, do_brk, TYPE_INFER, oloc);
 		expr.block = do_rep;
@@ -388,6 +392,9 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 				.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
 			},
 		});
+		// set next sequence
+		proc->blocks[expr.block].check.next_sequence = do_brk;
+
 		expr.value = lir_lvalue(do_brk_local, oloc);
 		expr.block = do_brk;
 	}
@@ -420,6 +427,8 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 			.block = loop_rep,
 		},
 	});
+	// set next sequence
+	proc->blocks[block].check.next_sequence = loop_rep;
 
 	rexpr_t expr = pexpr(proc, loop_rep, 0, expr_cfg);
 
@@ -435,6 +444,8 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 			.block = loop_rep,
 		},
 	});
+	// set next sequence
+	proc->blocks[expr.block].check.next_sequence = loop_brk;
 
 	p.blks_len--;
 	if (!p.blks[p.blks_len].is_brk) {
@@ -584,127 +595,134 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			break;
 		}
 		case TOK_IF: {
-			loc_t oloc = p.token.loc;
 			// if (...) ... else ...
 			//
 			pnext();
 			pexpect(TOK_OPAR);
 			rexpr_t cond = pexpr(proc, expr.block, 0, PEXPR_ET_PAREN);
-			lir_rlocal_t cond_local = pexpr_spill(proc, &cond);
+			(void)pexpr_spill(proc, &cond);
 			pexpect(TOK_CPAR);
 
 			// if (...) ... else ...
 			//          ^^^
 
-			// desugar: return if (cond) 20 else 25
+			// desugar: if (cond) 20 else 25
 			//
 			// entry(cond):
 			//     s0 = spill cond
-			//     if s0 goto block_t else block_f
-			// block_t:
+			//     goto_pattern s0
+			//         true -> if.then
+			//         false -> if.else
+			// if.then:
 			//     s1 = 20
-			//     goto exit(s1)
-			// block_f:
+			//     goto if.exit(s1)
+			// if.else:
 			//     s2 = 25
-			//     goto exit(s2)
-			// exit(s3: i32):
+			//     goto if.exit(s2)
+			// if.exit(s3: i32):
 			//     <- s3
 			//
 
 			// don't forget to setup terminators, sometimes we return a value and others not
-			lir_rlocal_t block_t = lir_block_new(proc, "if.then");
-			rexpr_t then = pexpr(proc, block_t, 0, PEXPR_ET_ELSE);
-			lir_rlocal_t then_local = pexpr_spill(proc, &then);
+			rexpr_t then;
+			then.block = lir_block_new(proc, "if.then");
+			then = pexpr(proc, then.block, 0, PEXPR_ET_ELSE);
+			(void)pexpr_spill(proc, &then);
 
 			// if (...) ... else ...
 			//              ^^^^
 			//            optional
 			//
 			// when `else` is not present, we will create a unit tuple
-			// to return. just goto the exit label and ret `v0`.
+			// to return in the place of the missing else.
 			//
 			// desugar: return if (cond) 20
 			//
 			// entry(cond):
 			//     s0 = spill cond
-			//     if s0 goto block_t else exit
-			// block_t:
-			//     s1 = 20          (pure value ignored, mark as discard)
-			//     goto exit
-			// exit:
+			//     goto_pattern s0
+			//         true -> if.then
+			//         false -> if.else
+			// if.then:
+			//     s1 = 20
+			//     _ = s1
 			//     s2 = ()
-			//     <- s2
+			//     goto exit(s2)
+			// if.else:
+			//    s3 = ()
+			//    goto exit(s3)
+			// exit(s4):
+			//     <- s4
 			//
 
-			lir_rblock_t else_block;
-			lir_rblock_t exit;
-			lir_rlocal_t exit_value;
+			rexpr_t els;
+			els.block = lir_block_new(proc, "if.else");
 
 			if (p.token.kind == TOK_ELSE) {
 				pnext();
-				lir_rlocal_t block_f = lir_block_new(proc, "if.else");
-				rexpr_t els = pexpr(proc, block_f, 0, cfg);
-				
-				// cond -> block_t, block_f
-				// 'block_t -> exit(v)
-				// 'block_f -> exit(v)
-				// exit(v) -> return v
-
-				exit = lir_block_new(proc, "if.exit");
-				exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, oloc);
-
-				lir_block_term(proc, then.block, (lir_term_t){
-					.kind = TERM_GOTO,
-					.d_goto = {
-						.block = exit,
-						.args = arr(lir_rlocal_t, then_local),
-					},
-				});
-
-				lir_block_term(proc, els.block, (lir_term_t){
-					.kind = TERM_GOTO,
-					.d_goto = {
-						.block = exit,
-						.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, els.block, els.value)),
-					}
-				});
-
-				else_block = block_f;
+				els = pexpr(proc, els.block, 0, cfg);
+				(void)pexpr_spill(proc, &els);
 			} else {
-				// discard
-				lir_discard(proc, then.block, then_local);
+				// discard expr
+				lir_discard(proc, then.block, then.value.local);
 
 				// return empty tuple
-				exit = lir_block_new(proc, "if.exit");
-				exit_value = lir_ssa_tmp_inst(proc, exit, TYPE_UNIT, oloc, (lir_inst_t){
+				lir_rlocal_t then_unit = lir_ssa_tmp_inst(proc, then.block, TYPE_UNIT, token.loc, (lir_inst_t){
 					.kind = INST_TUPLE_UNIT,
 				});
+				then.value = lir_lvalue(then_unit, token.loc);
 
-				lir_block_term(proc, then.block, (lir_term_t){
-					.kind = TERM_GOTO,
-					.d_goto = {
-						.block = exit,
-					},
+				lir_rlocal_t else_unit = lir_ssa_tmp_inst(proc, els.block, TYPE_UNIT, token.loc, (lir_inst_t){
+					.kind = INST_TUPLE_UNIT,
 				});
-				else_block = exit;
+				els.value = lir_lvalue(else_unit, token.loc);
 			}
 
-			// join control flow
-			//
-			// cond -> block_t, block_f
-			// cond -> block_t, exit
-			//
-			lir_block_term(proc, expr.block, (lir_term_t){
-				.kind = TERM_IF,
-				.d_if = {
-					.cond = cond_local,
-					.then = block_t,
-					.els = else_block,
+			lir_rblock_t exit = lir_block_new(proc, "if.exit");
+
+			// entry -> [if.then, if.else]
+			lir_block_term(proc, cond.block, (lir_term_t){
+				.kind = TERM_GOTO_PATTERN,
+				.d_goto_pattern = {
+					.value = cond.value.local,
+					.blocks = arr(lir_rblock_t, then.block, els.block),
+					.patterns = arr(lir_term_pat_t, (lir_term_pat_t){
+						.kind = PATTERN_BOOL_LIT,
+						.loc = cond.value.loc,
+						.d_bool_lit = true,
+					}, (lir_term_pat_t){
+						.kind = PATTERN_BOOL_LIT,
+						.loc = cond.value.loc,
+						.d_bool_lit = false,
+					}),
 				},
 			});
 
+			// if.exit <- if.then
+			lir_block_term(proc, then.block, (lir_term_t){
+				.kind = TERM_GOTO,
+				.d_goto = {
+					.block = exit,
+					.args = arr(lir_rlocal_t, then.value.local),
+				},
+			});
+
+			// if.exit <- if.else
+			lir_block_term(proc, els.block, (lir_term_t){
+				.kind = TERM_GOTO,
+				.d_goto = {
+					.block = exit,
+					.args = arr(lir_rlocal_t, els.value.local),
+				}
+			});
+			
+			lir_rlocal_t exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, token.loc);
+
+			// set next sequence
+			proc->blocks[cond.block].check.next_sequence = exit;
+
 			expr.block = exit;
-			expr.value = lir_lvalue(exit_value, oloc);
+			expr.value = lir_lvalue(exit_value, token.loc);
 			break;
 		}
 		case TOK_COLON: {
@@ -1222,21 +1240,21 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						// they're always stored separately, which allows for reordering to work just fine
 						// since arguments are always spilled immutably
 						//
-						expr.block = expr0.block;
-						lir_find_inst_ssa_result_t r;
-						if (!expr.value.is_sym && (r = lir_find_inst_ssa(proc, expr.value.local)).found) {
+						u32 inst;
+						if (!expr.value.is_sym && (inst = lir_find_inst_ssa_block(proc, expr.block, expr.value.local)) != INST_NONE) {
 							// found an SSA local, try merging
-							lir_inst_t *instp = &proc->blocks[r.block].insts[r.inst];
+							lir_inst_t *instp = &proc->blocks[expr.block].insts[inst];
 
 							if (instp->kind == INST_CALL) {
 								// merge and forward instruction, expr.value stays the same
-								lir_inst_t inst = lir_inst_pop(proc, r.block, r.inst);
-								arrpush(inst.d_call.args, arg);
-								lir_inst(proc, expr.block, inst);
+								lir_inst_t pop_inst = lir_inst_pop(proc, expr.block, inst);
+								arrpush(pop_inst.d_call.args, arg);
+								lir_inst(proc, expr0.block, pop_inst);
 								continue;
 							}
 						}
 
+						expr.block = expr0.block;
 						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 							.kind = INST_CALL,
 							.d_call = {

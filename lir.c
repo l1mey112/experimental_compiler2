@@ -22,11 +22,11 @@ lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_
 }
 
 lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name) {
-	lir_block_t block = {};
-	
+	lir_block_t block = {
+		.debug_name = debug_name,
+		.check.next_sequence = BLOCK_NONE,
+	};
 	u32 idx = arrlenu(proc->blocks);
-	block.index = idx;
-	block.debug_name = debug_name;
 	arrpush(proc->blocks, block);
 	return idx;
 }
@@ -183,30 +183,6 @@ u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t l
 		}
 	}
 	return INST_NONE;
-}
-
-// TODO: searching backward would most likely be fastest
-lir_find_inst_ssa_result_t lir_find_inst_ssa(lir_proc_t *proc, lir_rlocal_t local) {
-	lir_local_t *localp = &proc->locals[local];
-	lir_find_inst_ssa_result_t r;
-	r.found = false;
-
-	if (localp->kind != LOCAL_SSA) {
-		return r;
-	}
-	
-	for (u32 i = 0, c = arrlenu(proc->blocks); i < c; i++) {
-		lir_block_t *block = &proc->blocks[i];
-		u32 inst = lir_find_inst_ssa_block(proc, i, local);
-		if (inst != INST_NONE) {
-			r.found = true;
-			r.block = i;
-			r.inst = inst;
-			return r;
-		}
-	}
-
-	return r;
 }
 
 lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst) {
@@ -598,16 +574,6 @@ void lir_print_proc(lir_sym_t *symbol) {
 				printf("\n");
 				break;
 			}
-			case TERM_IF: {
-				printf("  if (");
-				_print_local(proc, block->term.d_if.cond);
-				printf(") goto ");
-				_print_blockterm(proc, block->term.d_if.then);
-				printf(" else ");
-				_print_blockterm(proc, block->term.d_if.els);
-				printf("\n");
-				break;
-			}
 			case TERM_UNINIT: {
 				printf("  <none>\n");
 				break;
@@ -634,6 +600,11 @@ void lir_print_proc(lir_sym_t *symbol) {
 			default: {
 				assert_not_reached();
 			}
+		}
+		if (block->check.next_sequence != BLOCK_NONE) {
+			printf("  :n ");
+			_print_blockref(proc, block->check.next_sequence);
+			printf("\n");
 		}
 		if (i + 1 < c) {
 			printf("\n");

@@ -678,21 +678,17 @@ struct lir_term_t {
 	enum {
 		TERM_UNINIT, // shouldn't be this
 		TERM_GOTO,
-		TERM_IF,
-		TERM_SWITCH,
 		TERM_RET,
 		TERM_GOTO_PATTERN,
 	} kind;
 
-	// TODO: merge TERM_IF with TERM_SWITCH?
-
 	union {
 		lir_term_block_t d_goto;
-		struct {
+		/* struct {
 			lir_rlocal_t cond;
 			lir_term_block_t then;
 			lir_term_block_t els;
-		} d_if;
+		} d_if; */
 		/* struct {
 			lir_rvalue_t value;
 			lir_term_sc_t *cases;
@@ -718,9 +714,10 @@ struct lir_block_t {
 	lir_rlocal_t *args;
 	lir_term_t term;
 
-	// inserted by the parser, used by the checker
-	// pointless after check_types
-	lir_rblock_t sequence_point;
+	struct {
+		lir_rblock_t next_sequence; // inserted by the parser, used by the checker
+		bool reachable;
+	} check;
 };
 
 struct lir_proc_t {
@@ -776,19 +773,6 @@ void lir_print_symbols(void);
 void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc);
 
 // having named field tuples and options would be pretty nice
-
-typedef struct lir_find_inst_ssa_result_t lir_find_inst_ssa_result_t;
-
-struct lir_find_inst_ssa_result_t {
-	lir_rblock_t block;
-	u32 inst;
-	bool found;
-};
-
-// locate the instruction which is the definition of the SSA local
-// will return not found for block args
-// will return not found if the local is not SSA
-lir_find_inst_ssa_result_t lir_find_inst_ssa(lir_proc_t *proc, lir_rlocal_t local);
 
 // INST_NONE for none
 u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
