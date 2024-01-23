@@ -84,6 +84,7 @@ void pfn(lir_proc_t *parent) {
 			.d_debuginfo = {
 				.loc = name_loc,
 			},
+			.def = entry,
 		});
 		lir_block_arg_assign(&proc,entry, v);
 		arrpush(args, v);

@@ -343,6 +343,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 		.rep = do_rep,
 	};
 
+	bool first = true;
 	bool set = false;
 
 	u32 bcol = p.token.loc.col;
@@ -350,7 +351,19 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 	while (p.token.kind != TOK_EOF) {
 		u32 cln = p.token.loc.line_nr;
 
-		set |= pstmt(proc, expr.block, &expr);
+		rexpr_t new_expr = expr;
+		bool expr_set = pstmt(proc, new_expr.block, &new_expr);
+
+		// insert a discard if the last expression is not used
+		if (!first && expr_set) {
+			lir_discard(proc, expr.block, lir_lvalue_spill(proc, expr.block, expr.value));
+		}
+		if (expr_set) {
+			first = false;
+		}
+
+		expr = new_expr;		
+		set |= expr_set;
 
 		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
 			break;
@@ -409,7 +422,9 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 	});
 
 	rexpr_t expr = pexpr(proc, loop_rep, 0, expr_cfg);
-	// TODO: unused(expr)
+
+	// discard expr
+	lir_discard(proc, expr.block, lir_lvalue_spill(proc, expr.block, expr.value));
 
 	// expr.block -> loop.entry
 	// <- loop.exit
@@ -459,7 +474,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// void expr
 			//      ^^^^
 			expr = pexpr(proc, expr.block, 0, cfg); // ignore
-			// TODO: possibly insert `unused` instruction
+			lir_discard(proc, expr.block, lir_lvalue_spill(proc, expr.block, expr.value));
 			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, token.loc, (lir_inst_t){
 				.kind = INST_TUPLE_UNIT,
 			}), token.loc);
@@ -614,19 +629,11 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			//     s0 = spill cond
 			//     if s0 goto block_t else exit
 			// block_t:
-			//     s1 = 20          (pure value ignored)
+			//     s1 = 20          (pure value ignored, mark as discard)
 			//     goto exit
 			// exit:
 			//     s2 = ()
 			//     <- s2
-			//
-			// possibly raise error when a pure value is ignored
-			// could be done in two ways:
-			//
-			// 1. insert unused(v) instruction
-			// 2. mark all roots, then check if any roots are unused
-			//
-			// it's best we mark the expr value of `then` as a root
 			//
 
 			lir_rblock_t else_block;
@@ -664,6 +671,9 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 				else_block = block_f;
 			} else {
+				// discard
+				lir_discard(proc, then.block, then_local);
+
 				// return empty tuple
 				exit = lir_block_new(proc, "if.exit");
 				exit_value = lir_ssa_tmp_inst(proc, exit, TYPE_UNIT, oloc, (lir_inst_t){
@@ -960,11 +970,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					});
 
 					// lvalue = s2
-					lir_inst(proc, expr.block, (lir_inst_t){
-						.dest = expr.value, // original lvalue
-						.kind = INST_LVALUE,
-						.d_lvalue = lir_lvalue(s2, token.loc),
-					});
+					lir_inst_lvalue(proc, expr.block, expr.value, s2, token.loc);
 
 					expr.value = lir_lvalue(s2, token.loc);
 					//
@@ -1177,11 +1183,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 						if (is_assign_op || kind == TOK_ASSIGN) {
 							// lvalue = ?
-							lir_inst(proc, r_expr.block, (lir_inst_t){
-								.dest = expr.value, // original lvalue
-								.kind = INST_LVALUE,
-								.d_lvalue = r_expr.value,
-							});
+							lir_inst_lvalue(proc, r_expr.block, expr.value, lir_lvalue_spill(proc, r_expr.block, r_expr.value), token.loc);
 						}
 
 						expr = r_expr;

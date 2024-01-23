@@ -38,6 +38,7 @@ lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type
 		.is_debuginfo = true,
 		.d_debuginfo.loc = loc,
 		.d_debuginfo.name = ISTR_NONE,
+		.def = block,
 	};
 
 	lir_rlocal_t local = lir_local_new(proc, desc);
@@ -70,12 +71,43 @@ lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type,
 		.is_debuginfo = true,
 		.d_debuginfo.loc = loc,
 		.d_debuginfo.name = ISTR_NONE,
+		.def = block,
 	};
 
 	lir_rlocal_t local = lir_local_new(proc, desc);
 	inst.dest = lir_lvalue(local, loc);
 	lir_inst(proc, block, inst);
 	return local;
+}
+
+// spill projections and mut values into a readonly SSA value
+lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
+	if (!lvalue.is_sym && arrlenu(lvalue.proj) == 0 && proc->locals[lvalue.local].kind != LOCAL_MUT) {
+		return lvalue.local;
+	}
+
+	return lir_ssa_tmp_inst(proc, block, TYPE_INFER, lvalue.loc, (lir_inst_t){
+		.kind = INST_LVALUE,
+		.d_lvalue = lvalue,
+	});
+}
+
+// ensure no assignments to locals are made through non-SSA locals
+// requirement of tree LIR
+// spill anything but an SSA local
+void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc) {
+	if (proc->locals[src].kind != LOCAL_SSA) {
+		src = lir_ssa_tmp_inst(proc, block, TYPE_INFER, loc, (lir_inst_t){
+			.kind = INST_LVALUE,
+			.d_lvalue = lir_lvalue(src, loc),
+		});
+	}
+	
+	lir_inst(proc, block, (lir_inst_t){
+		.dest = dest,
+		.kind = INST_LVALUE,
+		.d_lvalue = lir_lvalue(src, loc),
+	});
 }
 
 lir_lvalue_t lir_lvalue(lir_rlocal_t local, loc_t loc) {
@@ -142,16 +174,15 @@ void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index) {
 	arrpush(lvalue->proj, desc);
 }
 
-// spill projections and mut values into a readonly SSA value
-lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
-	if (!lvalue.is_sym && arrlenu(lvalue.proj) == 0 && proc->locals[lvalue.local].kind != LOCAL_MUT) {
-		return lvalue.local;
+u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
+	lir_block_t *b = &proc->blocks[block];
+	for (u32 i = 0, c = arrlenu(b->insts); i < c; i++) {
+		lir_inst_t *inst = &b->insts[i];
+		if (inst->dest.local == local) {
+			return i;
+		}
 	}
-
-	return lir_ssa_tmp_inst(proc, block, TYPE_INFER, lvalue.loc, (lir_inst_t){
-		.kind = INST_LVALUE,
-		.d_lvalue = lvalue,
-	});
+	return INST_NONE;
 }
 
 // TODO: searching backward would most likely be fastest
@@ -166,16 +197,12 @@ lir_find_inst_ssa_result_t lir_find_inst_ssa(lir_proc_t *proc, lir_rlocal_t loca
 	
 	for (u32 i = 0, c = arrlenu(proc->blocks); i < c; i++) {
 		lir_block_t *block = &proc->blocks[i];
-		for (u32 j = 0, c = arrlenu(block->insts); j < c; j++) {
-			lir_inst_t *inst = &block->insts[j];
-
-			// SSA instructions don't have lvalue projections as a dest, it doesn't make sense for them to
-			if (inst->dest.local == local) {
-				r.block = i;
-				r.inst = j;
-				r.found = true;
-				return r;
-			}
+		u32 inst = lir_find_inst_ssa_block(proc, i, local);
+		if (inst != INST_NONE) {
+			r.found = true;
+			r.block = i;
+			r.inst = inst;
+			return r;
 		}
 	}
 
@@ -188,6 +215,13 @@ lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst) {
 	lir_inst_t r = b->insts[inst];
 	arrdel(b->insts, inst);
 	return r;
+}
+
+void lir_discard(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
+	lir_inst(proc, block, (lir_inst_t){
+		.kind = INST_DISCARD,
+		.d_unused = local,
+	});
 }
 
 static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
@@ -341,9 +375,14 @@ static void _print_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
 }
 
 static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
-	// assert(inst->kind < _INST_MAX);	
-
 	printf("  ");
+
+	if (inst->kind == INST_DISCARD) {
+		printf("_ = ");
+		_print_local(proc, inst->d_unused);
+		printf("\n");
+		return;
+	}
 
 	_print_lvalue(proc, inst->dest);
 

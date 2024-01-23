@@ -481,14 +481,29 @@ typedef u32 lir_rlocal_t;
 
 #define BLOCK_NONE ((lir_rblock_t)-1)
 #define LOCAL_NONE ((lir_rlocal_t)-1)
+#define INST_NONE ((u32)-1)
 
 struct lir_local_t {
 	type_t type;
-	enum {
+	enum : u8 {
 		LOCAL_MUT, // assigned multiple times
 		LOCAL_IMM, // assigned once in all flows of control
 		LOCAL_SSA, // assigned once (block args can only be SSA locals)
 	} kind;
+	
+	// for SSA locals
+	union {
+		lir_rblock_t def;
+	};
+
+
+	// for the checker in root finding pass
+	// only for SSA locals
+	/* enum : u8 {
+		STATUS_NONE,
+		STATUS_ROOT,
+		STATUS_MARKED,
+	} status; */
 
 	// semantically, SSA locals are constants
 	// they can't have their address taken or assigned to
@@ -575,7 +590,10 @@ struct lir_inst_t {
 		INST_CALL, // f(a, b, c)
 		INST_CAST,
 		INST_SIZEOF, // is usize
-		_INST_MAX,
+		//
+		INST_DISCARD, // dest is _, ignore it
+		// TODO: distinguish between user discard and compiler discard
+		//       INST_IGNORE is for user discard i guess?
 	} kind;
 
 	lir_lvalue_t dest;
@@ -586,6 +604,7 @@ struct lir_inst_t {
 		lir_rlocal_t *d_array;
 		lir_rlocal_t *d_tuple;
 		lir_lvalue_t d_lvalue;
+		lir_rlocal_t d_unused;
 		struct {
 			lir_lvalue_t lvalue;
 			bool is_mut;
@@ -694,11 +713,14 @@ struct lir_term_t {
 };
 
 struct lir_block_t {
-	lir_rblock_t index; // self
 	const char *debug_name;
 	lir_inst_t *insts;
 	lir_rlocal_t *args;
 	lir_term_t term;
+
+	// inserted by the parser, used by the checker
+	// pointless after check_types
+	lir_rblock_t sequence_point;
 };
 
 struct lir_proc_t {
@@ -751,6 +773,8 @@ void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
 void lir_print_symbol(lir_sym_t *symbol);
 void lir_print_symbols(void);
 
+void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc);
+
 // having named field tuples and options would be pretty nice
 
 typedef struct lir_find_inst_ssa_result_t lir_find_inst_ssa_result_t;
@@ -766,6 +790,9 @@ struct lir_find_inst_ssa_result_t {
 // will return not found if the local is not SSA
 lir_find_inst_ssa_result_t lir_find_inst_ssa(lir_proc_t *proc, lir_rlocal_t local);
 
+// INST_NONE for none
+u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
+
 // INFO: in the parser we assign around lvalues willy nilly.
 //       there is a possibility for aliasing, but it doesn't
 //       seem much of an issue for now.
@@ -778,6 +805,9 @@ void lir_lvalue_deref(lir_lvalue_t *lvalue, loc_t loc);
 void lir_lvalue_struct_field(lir_lvalue_t *lvalue, loc_t loc, istr_t field);
 void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx);
 void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index);
+
+// when discarding a value, call this to allow the checker to reach it
+void lir_discard(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
 
 // remove an instruction from a block, returning it
 lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst);
