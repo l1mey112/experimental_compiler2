@@ -38,7 +38,9 @@ lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type
 		.is_debuginfo = true,
 		.d_debuginfo.loc = loc,
 		.d_debuginfo.name = ISTR_NONE,
-		.def = block,
+		.ssa.is_arg = true,
+		.ssa.def_block = block,
+		.ssa.def_inst = INST_NONE,
 	};
 
 	lir_rlocal_t local = lir_local_new(proc, desc);
@@ -58,9 +60,11 @@ void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term) {
 	b->term = term;
 }
 
-void lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst) {
+u32 lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst) {
 	lir_block_t *b = &proc->blocks[block];
+	u32 idx = arrlenu(b->insts);
 	arrpush(b->insts, inst);
+	return idx;
 }
 
 // create local, local = inst
@@ -71,12 +75,14 @@ lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type,
 		.is_debuginfo = true,
 		.d_debuginfo.loc = loc,
 		.d_debuginfo.name = ISTR_NONE,
-		.def = block,
+		.ssa.def_block = block,
+		// .ssa.def_inst = INST_NONE,
 	};
 
 	lir_rlocal_t local = lir_local_new(proc, desc);
 	inst.dest = lir_lvalue(local, loc);
-	lir_inst(proc, block, inst);
+	u32 idx = lir_inst(proc, block, inst);
+	proc->locals[local].ssa.def_inst = idx;
 	return local;
 }
 
@@ -196,7 +202,7 @@ lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst) {
 void lir_discard(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
 	lir_inst(proc, block, (lir_inst_t){
 		.kind = INST_DISCARD,
-		.d_unused = local,
+		.d_discard = local,
 	});
 }
 
@@ -355,7 +361,7 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 
 	if (inst->kind == INST_DISCARD) {
 		printf("_ = ");
-		_print_local(proc, inst->d_unused);
+		_print_local(proc, inst->d_discard);
 		printf("\n");
 		return;
 	}

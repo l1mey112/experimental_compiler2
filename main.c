@@ -108,8 +108,12 @@ int main(int argc, const char *argv[]) {
 ret:
 	// TODO: register_root() etc for module system
 
-	lir_check();
 	lir_print_symbols();
+	
+
+	if (!err && !setjmp(err_diag.unwind)) {
+		lir_check();
+	}
 	
 	/* if (!err && !setjmp(err_diag.unwind)) {
 		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {

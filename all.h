@@ -493,7 +493,11 @@ struct lir_local_t {
 	
 	// for SSA locals
 	union {
-		lir_rblock_t def;
+		struct {
+			lir_rblock_t def_block;
+			u32 def_inst;
+			bool is_arg;
+		} ssa;
 	};
 
 
@@ -558,7 +562,6 @@ struct lir_lvalue_t {
 };
 
 struct lir_inst_t {
-	bool is_root; // for checker
 	enum : u8 {
 		INST_INTEGER_LIT,
 		INST_BOOL_LIT,
@@ -604,7 +607,7 @@ struct lir_inst_t {
 		lir_rlocal_t *d_array;
 		lir_rlocal_t *d_tuple;
 		lir_lvalue_t d_lvalue;
-		lir_rlocal_t d_unused;
+		lir_rlocal_t d_discard;
 		struct {
 			lir_lvalue_t lvalue;
 			bool is_mut;
@@ -716,6 +719,7 @@ struct lir_block_t {
 
 	struct {
 		lir_rblock_t next_sequence; // inserted by the parser, used by the checker
+		lir_rblock_t joining_node;  // if this block is where control flow joins, this is where control flow splits
 		bool reachable;
 	} check;
 };
@@ -757,7 +761,8 @@ extern lir_sym_t *symbols;
 lir_rsym_t table_resolve(istr_t qualified_name);
 lir_rsym_t table_register(lir_sym_t desc);
 
-void lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
+// returns inst idx
+u32 lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
 // create local, local = inst
 lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
 

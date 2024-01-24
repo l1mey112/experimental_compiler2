@@ -1,4 +1,8 @@
 #include "all.h"
+#include "check.h"
+
+// TODO: fix algorithm to a coloured one
+//       https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis/#color-dfs-and-edge-classification
 
 lir_rsym_t *creorder_sorted;
 
@@ -119,14 +123,12 @@ static void visit(lir_rsym_t rsym) {
 // 1. sanity checks on the table (placeholders)
 // 2. identifies cyclic dependencies
 // 3. returns a list of symbols in the order they should be processed
-void creorder(void) {
+void creorder_and_type(void) {
 	// raising an error on referencing a placeholder symbol (doesn't exist)
 	// it must be raised on the actual lvalue. so when visiting definitions,
 	// ignore placeholders. they'll be errors soon when we visit the dependents
 
 	// we store the visited status on the actual `lir_sym_t`, it's easier
-
-	creorder_sorted = NULL;
 
 	for (lir_rsym_t i = 0; i < hmlenu(symbols); i++) {
 		lir_sym_t *sym = &symbols[i];
@@ -140,5 +142,20 @@ void creorder(void) {
 		}
 
 		visit(i);
+	}
+
+	for (lir_rsym_t i = 0; i < arrlenu(creorder_sorted); i++) {
+		lir_sym_t *sym = &symbols[creorder_sorted[i]];
+
+		switch (sym->kind) {
+			case SYMBOL_PROC: {
+				ctype_proc(sym, &sym->d_proc);
+				break;
+			}
+			case SYMBOL_GLOBAL:
+			case SYMBOL_TYPE: {
+				assert_not_reached();
+			}
+		}
 	}
 }

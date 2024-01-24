@@ -87,8 +87,9 @@
 ; inc: i32 -> i32
 ; inc: x = ident x + 1
 
-fact: i32 -> i32
-fact: n = if (n == 0) 1 else n * fact (n - 1)
+; fact: i32 -> i32
+; fact: n = if (n == 0) 1 else n * fact (n - 1)
 
 main: () -> ()
-main: () = loop 20
+main: () = do
+    50
