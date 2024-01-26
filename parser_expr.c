@@ -460,6 +460,24 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 	return expr_ret;
 }
 
+/* void pverify_assign(lir_proc_t *proc, lir_lvalue_t dest) {
+	// %0 = 0
+	// %0 = 20
+	// ^^ not allowed, assign to constant
+
+	// %0 = 0:*i32
+	// %0.* = 20
+	// ^^^^ allowed, some indirection
+
+	if (dest.is_sym) {
+		return;
+	}
+
+	// %0 = ...
+	// %0.test = 20
+	// ^^^^^^^ with type information, this may be a auto-deref field
+} */
+
 // (                           a b                          )
 // ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break
 rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
@@ -1164,7 +1182,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							kind = assign_tok_to_tok[kind];
 						}
 
-						rexpr_t r_expr = {};
+						rexpr_t r_expr;
 
 						if (kind != TOK_ASSIGN) {
 							static const u8 tok_to_op[] = {

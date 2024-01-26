@@ -225,6 +225,29 @@ static void _type_dbg_str(type_t type, bool inner) {
 	}
 }
 
+bool type_is_number(type_t type) {
+	return (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END) ||
+		(type >= TYPE_UNSIGNED_INTEGERS_START && type <= TYPE_UNSIGNED_INTEGERS_END) ||
+		(type == TYPE_F32 || type == TYPE_F64);
+}
+
+bool type_is_integer(type_t type) {
+	return (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END) ||
+		(type >= TYPE_UNSIGNED_INTEGERS_START && type <= TYPE_UNSIGNED_INTEGERS_END);
+}
+
+bool type_is_float(type_t type) {
+	return type == TYPE_F32 || type == TYPE_F64;
+}
+
+bool type_is_signed(type_t type) {
+	return type_is_float(type) || (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END);
+}
+
+bool type_is_unsigned(type_t type) {
+	return (type >= TYPE_UNSIGNED_INTEGERS_START && type <= TYPE_UNSIGNED_INTEGERS_END);
+}
+
 // allocates using alloc_* functions
 const char *type_dbg_str(type_t type) {
 	// u8 *p = alloc_scratch(0);

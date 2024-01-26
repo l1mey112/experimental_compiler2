@@ -38,9 +38,6 @@ lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type
 		.is_debuginfo = true,
 		.d_debuginfo.loc = loc,
 		.d_debuginfo.name = ISTR_NONE,
-		.ssa.is_arg = true,
-		.ssa.def_block = block,
-		.ssa.def_inst = INST_NONE,
 	};
 
 	lir_rlocal_t local = lir_local_new(proc, desc);
@@ -67,6 +64,11 @@ u32 lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst) {
 	return idx;
 }
 
+void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_inst_t inst) {
+	lir_block_t *b = &proc->blocks[block];
+	arrins(b->insts, inst_idx, inst);
+}
+
 // create local, local = inst
 lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst) {
 	lir_local_t desc = (lir_local_t){
@@ -75,14 +77,12 @@ lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type,
 		.is_debuginfo = true,
 		.d_debuginfo.loc = loc,
 		.d_debuginfo.name = ISTR_NONE,
-		.ssa.def_block = block,
-		// .ssa.def_inst = INST_NONE,
 	};
 
 	lir_rlocal_t local = lir_local_new(proc, desc);
 	inst.dest = lir_lvalue(local, loc);
+	inst.is_ssa_def = true; // first def, creation
 	u32 idx = lir_inst(proc, block, inst);
-	proc->locals[local].ssa.def_inst = idx;
 	return local;
 }
 
@@ -101,6 +101,9 @@ lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t
 // ensure no assignments to locals are made through non-SSA locals
 // requirement of tree LIR
 // spill anything but an SSA local
+//
+// TODO: can be removed really, it doesn't matter anymore
+//       try relaxing it and see what it does
 void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc) {
 	if (proc->locals[src].kind != LOCAL_SSA) {
 		src = lir_ssa_tmp_inst(proc, block, TYPE_INFER, loc, (lir_inst_t){

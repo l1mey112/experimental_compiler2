@@ -463,6 +463,14 @@ const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);
 
+bool type_is_number(type_t type);
+// does not check for literals
+bool type_is_integer(type_t type);
+// does not check for literals
+bool type_is_float(type_t type);
+bool type_is_signed(type_t type);
+bool type_is_unsigned(type_t type);
+
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
 
@@ -490,16 +498,6 @@ struct lir_local_t {
 		LOCAL_IMM, // assigned once in all flows of control
 		LOCAL_SSA, // assigned once (block args can only be SSA locals)
 	} kind;
-	
-	// for SSA locals
-	union {
-		struct {
-			lir_rblock_t def_block;
-			u32 def_inst;
-			bool is_arg;
-		} ssa;
-	};
-
 
 	// for the checker in root finding pass
 	// only for SSA locals
@@ -599,6 +597,12 @@ struct lir_inst_t {
 		//       INST_IGNORE is for user discard i guess?
 	} kind;
 
+	// applies to SSA locals, %0 = 20
+	//
+	// implies dest has no projections and is not a symbol
+	// assigns to an SSA local
+	bool is_ssa_def;
+	//
 	lir_lvalue_t dest;
 
 	union {
@@ -765,6 +769,8 @@ lir_rsym_t table_register(lir_sym_t desc);
 u32 lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
 // create local, local = inst
 lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
+
+void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_inst_t inst);
 
 lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local);
 lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut);

@@ -2,5 +2,5 @@
 
 // shared checker defs
 
-void creorder(void);
-extern lir_rsym_t *creorder_sorted;
+void creorder_and_type(void);
+void ctype_proc(lir_sym_t *sym, lir_proc_t *proc);
