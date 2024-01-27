@@ -91,7 +91,4 @@
 ; fact: n = if (n == 0) 1 else n * fact (n - 1)
 
 f: () -> u8
-f: () = 1
-
-main: () -> ()
-main: () = loop ()
+f: () = 5

@@ -80,7 +80,6 @@ void pfn(lir_proc_t *parent) {
 	// proper desugar into match arms
 	lir_rblock_t entry = lir_block_new(&proc, "entry");
 	lir_rblock_t exit = lir_block_new(&proc, "exit");
-	proc.blocks[entry].check.next_sequence = exit;
 
 	// TODO: we don't really store the locs of args???
 	// INFO: when DCEing locals or merging, take the loc of the one that actually has one

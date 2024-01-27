@@ -134,7 +134,6 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	return len;
 }
 
-// TYPE_UNKNOWN is something else and non concrete
 #define TYPE_INFER ((type_t)-1)
 
 #define TYPE_X_CONCRETE_LITERALS_LIST \
@@ -161,7 +160,15 @@ static inline u32 ptrcpy(u8 *p, u8 *q, u32 len) {
 	TYPE_X_CONCRETE_LITERALS_LIST \
 	X(TYPE_UNIT, "()") \
 	X(TYPE_BOTTOM, "!") \
-	X(TYPE_UNDEFINED, "undefined")
+	X(TYPE_INT_LITERAL, "integer literal") \
+	X(TYPE_FLOAT_LITERAL, "float literal") \
+	X(TYPE_EMPTY_ARRAY, "[]")
+
+// TODO: not yet
+// X(TYPE_UNDEFINED, "undefined")
+
+// i never wanted to introduce literal types,
+// but they simplify things drastically.
 
 #define TOK_X_KEYWORDS_LIST \
 	X(TOK_I8, "i8") \
@@ -322,7 +329,9 @@ enum ti_kind {
     #undef X
 	_TYPE_CONCRETE_MAX,
 	//
-	TYPE_UNKNOWN, // reference to be filled in later
+	// TODO: change TYPE_UNKNOWN to type symbol referencing a symbol
+	//       there is no "filling in" with the type table, only symbol table
+	// TYPE_UNKNOWN, // reference to be filled in later
 	// TYPE_GENERIC, // generic (we don't make guarantees about polymorphism)
 	TYPE_TUPLE,
 	TYPE_FUNCTION,
@@ -364,7 +373,7 @@ struct tinfo_t {
 			type_t elem;
 		} d_slice;
 		struct {
-			size_t length;
+			size_t length; // TODO: length or constant symbol?
 			type_t elem;
 		} d_array;
 		struct {
@@ -374,10 +383,6 @@ struct tinfo_t {
 			type_t ref;
 			bool is_mut;
 		} d_ptr;
-		struct {
-			rmod_t mod;
-			istr_t name;
-		} d_named;
 	};
 };
 
@@ -456,13 +461,16 @@ void hir_typed_desugar(void); */
 
 type_t type_array_or_slice_to_slice(type_t type);
 type_t type_new_inc_mul(type_t type, bool is_mut);
-type_t type_new(tinfo_t typeinfo, loc_t *onerror);
+type_t type_new(tinfo_t typeinfo);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);
 const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);
 
+// only checks for literals
+bool type_is_literal_number(type_t type);
+// checks for literals
 bool type_is_number(type_t type);
 // does not check for literals
 bool type_is_integer(type_t type);
@@ -566,7 +574,7 @@ struct lir_inst_t {
 		INST_ARRAY,
 		INST_TUPLE_UNIT,
 		INST_TUPLE,
-		INST_UNDEFINED,
+		//INST_UNDEFINED,
 		//
 		INST_ADD, // infix
 		INST_SUB, // infix
@@ -584,7 +592,6 @@ struct lir_inst_t {
 		INST_NEG, // unary
 		INST_NOT, // unary
 		//
-		INST_LVALUE,
 		INST_ADDRESS_OF,
 		INST_SLICE, // slices aren't lvalues
 		//
@@ -592,18 +599,22 @@ struct lir_inst_t {
 		INST_CAST,
 		INST_SIZEOF, // is usize
 		//
-		INST_DISCARD, // dest is _, ignore it
+		//INST_DISCARD, // dest is _, ignore it
 		// TODO: distinguish between user discard and compiler discard
 		//       INST_IGNORE is for user discard i guess?
+		INST_LVALUE,
 	} kind;
 
-	// applies to SSA locals, %0 = 20
-	//
-	// implies dest has no projections and is not a symbol
-	// assigns to an SSA local
-	bool is_ssa_def;
-	//
-	lir_lvalue_t dest;
+	// lvalue = ssa         (INST_ASSIGN_LVALUE)
+	// ssa = lvalue
+	// ssa = op
+
+	bool lvalue_dest;
+
+	union  {
+		lir_rlocal_t ssa;
+		lir_lvalue_t lvalue;
+	} dest;
 
 	union {
 		istr_t d_integer_lit;
@@ -720,12 +731,7 @@ struct lir_block_t {
 	lir_inst_t *insts;
 	lir_rlocal_t *args;
 	lir_term_t term;
-
-	struct {
-		lir_rblock_t next_sequence; // inserted by the parser, used by the checker
-		lir_rblock_t joining_node;  // if this block is where control flow joins, this is where control flow splits
-		bool reachable;
-	} check;
+	bool visited; // easier to store here
 };
 
 struct lir_proc_t {
@@ -800,9 +806,6 @@ void lir_lvalue_deref(lir_lvalue_t *lvalue, loc_t loc);
 void lir_lvalue_struct_field(lir_lvalue_t *lvalue, loc_t loc, istr_t field);
 void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx);
 void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index);
-
-// when discarding a value, call this to allow the checker to reach it
-void lir_discard(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
 
 // remove an instruction from a block, returning it
 lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst);

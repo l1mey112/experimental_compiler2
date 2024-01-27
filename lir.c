@@ -24,7 +24,6 @@ lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_
 lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name) {
 	lir_block_t block = {
 		.debug_name = debug_name,
-		.check.next_sequence = BLOCK_NONE,
 	};
 	u32 idx = arrlenu(proc->blocks);
 	arrpush(proc->blocks, block);
@@ -79,9 +78,11 @@ lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type,
 		.d_debuginfo.name = ISTR_NONE,
 	};
 
+	// ssa = ...
+	assert(inst.lvalue_dest == false);
+
 	lir_rlocal_t local = lir_local_new(proc, desc);
-	inst.dest = lir_lvalue(local, loc);
-	inst.is_ssa_def = true; // first def, creation
+	inst.dest.ssa = local;
 	u32 idx = lir_inst(proc, block, inst);
 	return local;
 }
@@ -113,8 +114,9 @@ void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, li
 	}
 	
 	lir_inst(proc, block, (lir_inst_t){
-		.dest = dest,
+		.dest.lvalue = dest,
 		.kind = INST_LVALUE,
+		.lvalue_dest = true,
 		.d_lvalue = lir_lvalue(src, loc),
 	});
 }
@@ -187,7 +189,7 @@ u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t l
 	lir_block_t *b = &proc->blocks[block];
 	for (u32 i = 0, c = arrlenu(b->insts); i < c; i++) {
 		lir_inst_t *inst = &b->insts[i];
-		if (inst->dest.local == local) {
+		if (!inst->lvalue_dest && inst->dest.ssa == local) {
 			return i;
 		}
 	}
@@ -200,13 +202,6 @@ lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst) {
 	lir_inst_t r = b->insts[inst];
 	arrdel(b->insts, inst);
 	return r;
-}
-
-void lir_discard(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
-	lir_inst(proc, block, (lir_inst_t){
-		.kind = INST_DISCARD,
-		.d_discard = local,
-	});
 }
 
 static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
@@ -362,14 +357,11 @@ static void _print_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
 static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 	printf("  ");
 
-	if (inst->kind == INST_DISCARD) {
-		printf("_ = ");
-		_print_local(proc, inst->d_discard);
-		printf("\n");
-		return;
+	if (inst->lvalue_dest) {
+		_print_lvalue(proc, inst->dest.lvalue);
+	} else {
+		_print_local(proc, inst->dest.ssa);
 	}
-
-	_print_lvalue(proc, inst->dest);
 
 	printf(" = ");
 
@@ -394,10 +386,10 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 			printf("]");
 			break;
 		}
-		case INST_UNDEFINED: {
+		/* case INST_UNDEFINED: {
 			printf("undefined");
 			break;
-		}
+		} */
 		case INST_TUPLE_UNIT: {
 			printf("()");
 			break;
@@ -518,7 +510,7 @@ static void _print_inst(lir_proc_t *proc, lir_inst_t *inst) {
 void lir_print_proc(lir_sym_t *symbol) {
 	assert(symbol->kind == SYMBOL_PROC);
 	lir_proc_t *proc = &symbol->d_proc;
-	printf("function %s {\n", sv_from(symbol->key));
+	printf("function %s: %s lir {\n", sv_from(symbol->key), type_dbg_str(symbol->type));
 
 	// print locals
 	for (u32 i = 0, c = arrlenu(proc->locals); i < c; i++) {
@@ -609,11 +601,6 @@ void lir_print_proc(lir_sym_t *symbol) {
 			default: {
 				assert_not_reached();
 			}
-		}
-		if (block->check.next_sequence != BLOCK_NONE) {
-			printf("  :n ");
-			_print_blockref(proc, block->check.next_sequence);
-			printf("\n");
 		}
 		if (i + 1 < c) {
 			printf("\n");

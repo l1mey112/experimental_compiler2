@@ -245,8 +245,6 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 				.blocks = arr(lir_rblock_t, let_next),
 			},
 		});
-		// set next sequence
-		proc->blocks[expr.block].check.next_sequence = let_next;
 
 		// create variable bindings as block arguments
 		pblock_args_to_vars(proc, let_next, locals_olen, locals_rlen);
@@ -331,8 +329,6 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 				.block = do_rep,
 			},
 		});
-		// set next sequence
-		proc->blocks[expr.block].check.next_sequence = do_rep;
 
 		do_brk_local = lir_block_new_arg(proc, do_brk, TYPE_INFER, oloc);
 		expr.block = do_rep;
@@ -347,7 +343,6 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 		.rep = do_rep,
 	};
 
-	bool first = true;
 	bool set = false;
 
 	u32 bcol = p.token.loc.col;
@@ -355,19 +350,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 	while (p.token.kind != TOK_EOF) {
 		u32 cln = p.token.loc.line_nr;
 
-		rexpr_t new_expr = expr;
-		bool expr_set = pstmt(proc, new_expr.block, &new_expr);
-
-		// insert a discard if the last expression is not used
-		if (!first && expr_set) {
-			lir_discard(proc, expr.block, lir_lvalue_spill(proc, expr.block, expr.value));
-		}
-		if (expr_set) {
-			first = false;
-		}
-
-		expr = new_expr;		
-		set |= expr_set;
+		set |= pstmt(proc, expr.block, &expr);
 
 		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
 			break;
@@ -392,8 +375,6 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 				.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
 			},
 		});
-		// set next sequence
-		proc->blocks[expr.block].check.next_sequence = do_brk;
 
 		expr.value = lir_lvalue(do_brk_local, oloc);
 		expr.block = do_brk;
@@ -427,13 +408,8 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 			.block = loop_rep,
 		},
 	});
-	// set next sequence
-	proc->blocks[block].check.next_sequence = loop_rep;
 
 	rexpr_t expr = pexpr(proc, loop_rep, 0, expr_cfg);
-
-	// discard expr
-	lir_discard(proc, expr.block, lir_lvalue_spill(proc, expr.block, expr.value));
 
 	// expr.block -> loop.entry
 	// <- loop.exit
@@ -444,8 +420,6 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 			.block = loop_rep,
 		},
 	});
-	// set next sequence
-	proc->blocks[expr.block].check.next_sequence = loop_brk;
 
 	p.blks_len--;
 	if (!p.blks[p.blks_len].is_brk) {
@@ -503,13 +477,12 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// void expr
 			//      ^^^^
 			expr = pexpr(proc, expr.block, 0, cfg); // ignore
-			lir_discard(proc, expr.block, lir_lvalue_spill(proc, expr.block, expr.value));
 			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, token.loc, (lir_inst_t){
 				.kind = INST_TUPLE_UNIT,
 			}), token.loc);
 			break;
 		}
-		case TOK_UNDEFINED: {
+		/* case TOK_UNDEFINED: {
 			pnext();
 			// undefined must be an SSA constant
 			// it is also nonsensical to have undefined inside an immutable variable
@@ -517,7 +490,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				.kind = INST_UNDEFINED,
 			}), token.loc);
 			break;
-		}
+		} */
 		case TOK_TRUE:
 		case TOK_FALSE: {
 			pnext();
@@ -681,9 +654,6 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				els = pexpr(proc, els.block, 0, cfg);
 				(void)pexpr_spill(proc, &els);
 			} else {
-				// discard expr
-				lir_discard(proc, then.block, then.value.local);
-
 				// return empty tuple
 				lir_rlocal_t then_unit = lir_ssa_tmp_inst(proc, then.block, TYPE_UNIT, token.loc, (lir_inst_t){
 					.kind = INST_TUPLE_UNIT,
@@ -735,9 +705,6 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			});
 			
 			lir_rlocal_t exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, token.loc);
-
-			// set next sequence
-			proc->blocks[cond.block].check.next_sequence = exit;
 
 			expr.block = exit;
 			expr.value = lir_lvalue(exit_value, token.loc);

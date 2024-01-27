@@ -305,12 +305,12 @@ type_t ptype_expr(u8 prec) {
 					.kind = TYPE_ARRAY,
 					.d_array.length = len,
 					.d_array.elem = elem,
-				}, NULL);
+				});
 			} else {
 				type = type_new((tinfo_t){
 					.kind = TYPE_SLICE,
 					.d_slice.elem = elem,
-				}, NULL);
+				});
 			}
 			break;
 		}
@@ -378,7 +378,7 @@ type_t ptype_expr(u8 prec) {
 			type = type_new((tinfo_t){
 				.kind = TYPE_TUPLE,
 				.d_tuple.elems = elems,
-			}, NULL);
+			});
 			break;
 		}
 		default: {
@@ -426,7 +426,7 @@ type_t ptype_expr(u8 prec) {
 					.kind = TYPE_FUNCTION,
 					.d_fn.args = args,
 					.d_fn.ret = ret,
-				}, NULL);
+				});
 				continue;
 			}
 			default: {}

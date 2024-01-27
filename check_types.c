@@ -1,463 +1,249 @@
-#include "check.h"
 #include "all.h"
-#include <assert.h>
-//
-// typecheck pass for LIR
-//
-// this IR isn't in tree form like the original HIR. instead, it's a simple
-// SSAish with block parameters and control flow expressed as block edges.
-// since LIR is essentially a flattened HIR, we'll need to identify the
-// roots of each expression tree and check them as such.
-//
-// this pass assumes the LIR is just fresh out of the parser.
-//
-// 1. instruction dependencies and LIR resemble a tree, not a graph.
-//    no instructions of any sub-tree can be shared with another sub-tree.
-// 2. all block edges can pass 0 or 1 values, either one or the other.
-//    (except for pattern matches, but those are just simple resolved flows)
-// 3. the right hand side of assignments (INST_LVALUE) are always SSA locals
-//
-// the first point is the most important. it means that SSA locals can only
-// be used once, never duplicated, they're only used in a parent expression
-// once. point 2 is just a convention, point 3 makes things easier for us.
-//
-// what doesn't abide by this rule are user defined locals, immutable or
-// mutable. they can be used as many times as they want. we need to get to
-// them first before they're used in further expressions.
-//
-// think really, expressions in trees can only flow into 1 of 3 things:
-//
-// 1. unused, discarded completely
-// 2. assigned to a variable
-// 3. returned from a function
-//
-// oh yeah, im going to make a distinction here:
-//
-// LIR from the parser -> tree LIR
-// further processing  -> SSA LIR
-//
-// run passes and flood fill the tree LIR with types
-//
-// pass 1: fill user local's initialisers
-// pass 2: fill all SSA locals and identify unused roots
-//
+#include "check.h"
 
-#define FOR_BLOCKS(proc, block) for (lir_rblock_t block = 0, c = arrlenu((proc)->blocks); block < c; block++)
-#define FOR_BLOCK_ARGS(proc, block, arg) for (u32 arg = 0, c = arrlenu((proc)->blocks[block].args); arg < c; arg++)
-#define FOR_INSTS(block, inst) for (u32 inst = 0, c = arrlenu((proc)->blocks[block].insts); inst < c; inst++)
+// TODO: before commit, introduce back discard instructions
+
 #define FOR_STB(arr, i) for (u32 i = 0, c = arrlenu(arr); i < c; i++)
+#define FOR_BLOCKS(proc, block) for (lir_rblock_t block = 0, c = arrlenu((proc)->blocks); block < c; block++)
+#define FOR_INSTS(block, inst) for (u32 inst = 0, c = arrlenu((proc)->blocks[block].insts); inst < c; inst++)
 
-/*
+typedef struct ctyctx_t ctyctx_t;
+typedef struct ctyctx_ent_t ctyctx_ent_t;
 
-// blocks with parameters > 1 are considered to be pattern matches (goto_pattern) 
-// an upvalue doesn't make sense for them
-type_t ctype_block_preds(lir_proc_t *proc, lir_rblock_t block, type_t arg0_upvalue) {
+// TODO: on a write to a region that contains either `local` or `sym`
+//       the cached read needs to be undone
+//
+//       can be implemented by inserting a discard entry
+//       which replicates itself on merge
+//
+// INFO: implemented as TYPE_INFER meaning poisoned
+struct ctyctx_ent_t {
+	lir_rlocal_t local;
+	lir_rsym_t sym;
+	bool is_sym;
+	type_t sccp_type; // TYPE_INFER meaning poisoned
+};
 
-}
+struct ctyctx_t {
+	ctyctx_t *parent; // NULL for proc
+	ctyctx_ent_t *entries;
+};
 
-static bool is_local_in_args(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
-	lir_block_t *b = &proc->blocks[block];
-	for (u32 i = 0; i < arrlenu(b->args); i++) {
-		if (b->args[i] == local) {
-			return true;
-		}
-	}
-	return false;
-}
+// we aren't including lattice types inside the type system
+// i don't want to do it. it complicates things.
 
-void ctype_inst(lir_proc_t *proc, type_t upvalue, lir_inst_t *inst) {
-	switch (inst->kind) {
-		case INST_INTEGER_LIT:
-		case INST_BOOL_LIT:
-		case INST_ARRAY:
-		case INST_TUPLE_UNIT:
-		case INST_TUPLE:
-		case INST_UNDEFINED:
-		case INST_ADD:
-		case INST_SUB:
-		case INST_MUL:
-		case INST_DIV:
-		case INST_MOD:
-		case INST_EQ:
-		case INST_NE:
-		case ISNT_LE:
-		case ISNT_LT:
-		case ISNT_GE:
-		case ISNT_GT:
-		case INST_AND:
-		case INST_OR:
-		case INST_NEG:
-		case INST_NOT:
-		case INST_LVALUE:
-		case INST_ADDRESS_OF:
-		case INST_SLICE:
-		case INST_CALL:
-		case INST_CAST:
-		case INST_SIZEOF: {
-			assert_not_reached();
-		}
-	}
+/* 
+// TYPE_LITERAL_INT,   // 20
+// TYPE_LITERAL_FLOAT, // 20.5
+// TYPE_LITERAL_ARRAY, // []
+// TYPE_LITERAL_TUPLE, // (...)         (not empty)
+// TYPE_LITERAL_BOOL,  // false
+// TYPE_LITERAL_NONE,  // none
+struct {
+	i64 min, max;
+} d_literal_int;
+struct {
+	// maybe like, store NaN or ranges?
+} d_literal_float;
+struct {
+	type_t *elems; // list of literals | type, [1..2, 4, 5, i32, 6]
+} d_literal_array;
+struct {
+	type_t *elems; // list of literals | type, same as tuple
+} d_literal_tuple;
+bool d_literal_bool;
+// d_literal_none;
+ */
 
-}
+// TODO: currently, don't store any lattice information for locals all
+//       the setup is currently in `ctyctx_t`, just don't do it yet
 
-void ctype_local_ssa(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
+// TODO: implement GVN with respect to poisoning/region invalidations
+
+type_t ctype_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
+	type_t underlying;
 	
-	lir_local_t *l = &proc->locals[local];
-	assert(l->kind == LOCAL_SSA);
+	if (!lvalue.is_sym) {
+		lir_local_t *l = &proc->locals[lvalue.local];
+		underlying = l->type;
 
-	lir_rblock_t block = l->def; // SSA locals have this set
+		assert(l->is_debuginfo);
+		if (underlying == TYPE_INFER) {
+			err_with_pos(l->d_debuginfo.loc, "cannot infer type of local");
+		}
+	} else {
+		underlying = symbols[lvalue.symbol].type;
+	}
+
+
+	FOR_STB(lvalue.proj, i) {
+		lir_lvalue_proj_t *proj = &lvalue.proj[i];
+
+		// unimplemented
+		assert_not_reached();
+	}
+
+	return underlying;
+}
+
+void ctype_insts(lir_proc_t *proc, lir_rblock_t block) {
 	lir_block_t *b = &proc->blocks[block];
 
-	printf("block %u, local %u\n", block, local);
+	FOR_INSTS(block, i) {
+		lir_inst_t *inst = &b->insts[i];
 
-	if (is_local_in_args(proc, block, local)) {
-		ctype_block_preds(proc, block, upvalue);
-		assert(l->type != TYPE_INFER);
-	} else {
-		u32 inst_idx;
-		assert((inst_idx = lir_find_inst_ssa_block(proc, block, local)) != INST_NONE);
-		lir_inst_t *inst = &b->insts[inst_idx];
-		ctype_inst(proc, upvalue, inst);
+		type_t rhs;
+
+		// TODO: later on perform fixups with assign proper types to literals
+
+		switch (inst->kind) {
+			case INST_INTEGER_LIT: {
+				rhs = TYPE_INT_LITERAL;
+				break;
+			}
+			case INST_BOOL_LIT: {
+				rhs = TYPE_BOOL;
+				break;
+			}
+			case INST_LVALUE: {
+				rhs = ctype_lvalue(proc, inst->d_lvalue);
+				break;
+			}
+			case INST_TUPLE_UNIT: {
+				rhs = TYPE_TUPLE;
+				break;
+			}
+			case INST_ARRAY:
+			case INST_ADD:
+			case INST_SUB:
+			case INST_MUL:
+			case INST_DIV:
+			case INST_MOD:
+			case INST_EQ:
+			case INST_NE:
+			case ISNT_LE:
+			case ISNT_LT:
+			case ISNT_GE:
+			case ISNT_GT:
+			case INST_AND:
+			case INST_OR:
+			case INST_NEG:
+			case INST_NOT:
+			case INST_ADDRESS_OF:
+			case INST_SLICE:
+			case INST_CALL:
+			case INST_CAST:
+			case INST_SIZEOF:
+			default: {
+				assert_not_reached();
+			}
+		}
+
+		if (inst->lvalue_dest && inst->dest.lvalue.is_sym) {
+			assert_not_reached();
+		} else if (inst->lvalue_dest) {
+			lir_local_t *l = &proc->locals[inst->dest.lvalue.local];
+			if (l->type == TYPE_INFER) {
+				l->type = rhs;
+			} else {
+				(void)ctype_unify(l->type, rhs, inst->d_lvalue.loc);
+			}
+		} else {
+			lir_local_t *l = &proc->locals[inst->dest.ssa];
+			l->type = rhs;
+		}
 	}
 }
 
-// for SSA locals, only a single def
-// for other locals, unify multiple defs
-void ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
-	lir_local_t *l = &proc->locals[local];
+void ctype_block(lir_proc_t *proc, lir_rblock_t block) {
+	lir_block_t *b = &proc->blocks[block];
 
-	if (l->kind != LOCAL_SSA) {
-		assert_not_reached();
-	} else {
-		ctype_local_ssa(proc, upvalue, local);
-	}
-} */
+	printf("block %u (", block);
 
-/* void cmark_block(lir_proc_t *proc, lir_rblock_t block) {
-    lir_block_t *b = &proc->blocks[block];
-    assert(!b->is_trivially_reachable);
-    b->is_trivially_reachable = true;
-
-    switch (b->term.kind) {
-		case TERM_GOTO: {
-			cmark_term(proc, block, b->term.d_goto);
-			break;
+	for (u32 i = 0, c = arrlenu(b->args); i < c; i++) {
+		lir_rlocal_t input = b->args[i];
+		printf("%u: %s", input, type_dbg_str(proc->locals[input].type));
+		if (i + 1 < c) {
+			printf(", ");
 		}
-		case TERM_IF: {
-			// if usually has ZERO arguments flowing in
-			
-			// TODO: ctype_local
-			ctype_local(proc, TYPE_BOOL, b->term.d_if.cond);
-			cmark_term(proc, block, b->term.d_if.then);
-			cmark_term(proc, block, b->term.d_if.els);
+	}
+	printf(")\n");
+
+	ctype_insts(proc, block);
+
+	switch (b->term.kind) {
+		case TERM_GOTO: {
+			// collate inputs
+			ctype_block(proc, b->term.d_goto.block);
 			break;
 		}
 		case TERM_RET: {
-			cmark_value(proc, block, b->term.d_ret.value);
+			
+		}
+		case TERM_GOTO_PATTERN: {
+			// collate inputs
+			assert_not_reached();
+			
+			// visit the blocks down the chain on branches
+			FOR_STB(b->term.d_goto_pattern.blocks, i) {
+				lir_rblock_t branch = b->term.d_goto_pattern.blocks[i];
+				//ctype_block_visit(proc, branch);
+			}
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+void ctype_block_visit_po_dfs(lir_proc_t *proc, lir_rblock_t **po, lir_rblock_t block) {
+	lir_block_t *b = &proc->blocks[block];
+
+	b->visited = true;
+
+	// visit the successors
+	switch (b->term.kind) {
+		case TERM_GOTO: {
+			if (proc->blocks[b->term.d_goto.block].visited) {
+				break;
+			}
+			ctype_block_visit_po_dfs(proc, po, b->term.d_goto.block);
 			break;
 		}
 		case TERM_GOTO_PATTERN: {
-			cmark_value(proc, block, b->term.d_goto_pattern.value);
-			break;
-		}
-		default: {
-			assert_not_reached();
-		}
-	}
-} */
-
-// check a block with a goto_pattern terminator
-// filling in all the types of the param edges
-void ctype_pattern(lir_proc_t *proc, lir_rblock_t block, type_t upvalue) {
-	assert_not_reached();
-}
-
-
-/* type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
-	// find where the local came from, what it is
-	// if it's an SSA local, find the instruction that defines it
-	// iterate recursively
-
-	lir_local_t *l = &proc->locals[local];
-
-	switch (l->kind) {
-		case LOCAL_IMM:
-		case LOCAL_MUT: {
-			assert(l->is_debuginfo);
-			if (l->type == TYPE_INFER) {
-				err_with_pos(l->d_debuginfo.loc, "cannot infer type of local");
-			}
-			return l->type;
-		}
-		case LOCAL_SSA: {
-			break;
-		}
-	}
-
-	// ssa
-	if (l->type != TYPE_INFER) {
-		return l->type;
-	}
-
-	if (l->ssa.is_arg) {
-		ctype_block_unify_edges(proc, l->ssa.def_block, upvalue);
-		return l->type;
-	}
-
-	lir_rblock_t block = l->ssa.def_block;
-	lir_block_t *b = &proc->blocks[block];
-	u32 inst = l->ssa.def_inst;
-	lir_inst_t *i = &b->insts[inst];
-
-	switch (i->kind) {
-		case INST_INTEGER_LIT: {
-			l->type = TYPE_I32;
-			break;
-		}
-		case INST_BOOL_LIT: {
-			l->type = TYPE_BOOL;
-			break;
-		}
-		default: {
-			assert_not_reached();
-		}
-	}
-
-	printf("local %u: %s\n", local, type_dbg_str(l->type));
-
-	assert(l->type != TYPE_INFER);
-	return l->type;
-}
- */
-
-
-/* void ctype_block(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
-	lir_block_t *b = &proc->blocks[block];
-
-	printf("block %u\n", block);
-
-	// 1. run through roots in a block
-	//    1. _ = discard
-	//    2. a = assignment to user local
-	//    3. ret out of the function
-	// 2. jump to next block
-	//    should be tailed actually, but we expand it in ctype_proc
-	//
-	FOR_INSTS(b, inst) {
-		lir_inst_t *i = &b->insts[inst];
-
-		if (i->kind == INST_DISCARD) {
-			type_t d = ctype_local(proc, TYPE_INFER, i->d_discard);
-			(void)d;
-			printf("discarded: %s\n", type_dbg_str(d));
-			// TODO: proper pure discard checks
-			continue;
-		}
-
-		// use dest
-
-		// TODO: proper lvalues
-		//       need to allow %0.* = 20
-		//lir_local_t *d_local;
-		//if (!i->dest.is_sym && (d_local = &proc->locals[i->dest.local])->kind == LOCAL_SSA) {
-		//	// user writing to a constant
-		//	printf("hello %u %u %u %u\n", d_local->ssa.def_block, block, d_local->ssa.def_inst, inst);
-		//	if (!d_local->ssa.is_arg && (d_local->ssa.def_block != block || d_local->ssa.def_inst != inst)) {
-		//		err_with_pos(i->dest.loc, "cannot assign to constant");
-		//	}
-		//}
-	}
-
-	if (b->term.kind == TERM_RET) {
-		// if ret_type == TYPE_INFER perform unification all around here
-		type_t ret_type = type_get(sym->type)->d_fn.ret;
-		type_t assumed = ctype_local(proc, ret_type, b->term.d_ret.value);
-		// unify ret_type and assumed
-	}
-} */
-
-type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local);
-
-void ctype_block_unify_edges(lir_proc_t *proc, lir_rblock_t block, type_t arg0_upvalue) {
-	// evaluate every single edge
-
-	lir_block_t *target = &proc->blocks[block];
-	lir_rblock_t *preds = NULL;
-
-	FOR_BLOCKS(proc, i) {
-		lir_block_t *pred = &proc->blocks[i];
-		
-		switch (pred->term.kind) {
-			case TERM_GOTO: {
-				if (pred->term.d_goto.block == block) {
-					arrpush(preds, i);
+			FOR_STB(b->term.d_goto_pattern.blocks, i) {
+				lir_rblock_t branch = b->term.d_goto_pattern.blocks[i];
+				if (proc->blocks[branch].visited) {
+					continue;
 				}
-				break;
-			}
-			case TERM_GOTO_PATTERN: {
-				FOR_STB(pred->term.d_goto_pattern.blocks, i) {
-					if (pred->term.d_goto_pattern.blocks[i] == block) {
-						arrpush(preds, i);
-						goto done;
-					}
-				}
-				break;
-			}
-			default: {} // nothing else can pass values
-		}
-	}
-done:
-
-	// %0  %1  %2  %3   extract types
-	//  |   |   |   |
-	// p0, p1, p2, p3
-	// \-----------/    unify single arg
-	//       |       :t %4 = %0 ∪ %1 ∪ %2 ∪ %3
-	//   block(%4)
-	//
-
-	FOR_STB(preds, pred) {
-		lir_block_t *p = &proc->blocks[pred];
-		type_t p_type = ctype_local(proc, arg0_upvalue, p->args[0]);
-		(void)p_type;
-	}
-}
-
-typedef struct ssa_location_t ssa_location_t;
-
-struct ssa_location_t {
-	lir_rblock_t block;
-	u32 inst; // INST_NONE for block arg
-};
-
-ssa_location_t cfind_ssa_def(lir_proc_t *proc, lir_rlocal_t local) {
-	lir_local_t *l = &proc->locals[local];
-	assert(l->kind == LOCAL_SSA);
-
-	// search everywhere for the definition of this local
-
-	FOR_BLOCKS(proc, block) {
-		FOR_BLOCK_ARGS(proc, block, arg) {
-			if (proc->blocks[block].args[arg] == local) {
-				return (ssa_location_t){
-					.block = block,
-					.inst = INST_NONE,
-				};
-			}
-		}
-
-		FOR_INSTS(block, inst) {
-			lir_inst_t *i = &proc->blocks[block].insts[inst];
-
-			if (i->is_ssa_def && i->d_lvalue.local == local) {
-				return (ssa_location_t){
-					.block = block,
-					.inst = inst,
-				};
-			}
-		}
-	}
-
-	assert_not_reached();
-}
-
-type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
-	// find where the local came from, what it is
-	// if it's an SSA local, find the instruction that defines it
-	// iterate recursively
-
-	lir_local_t *l = &proc->locals[local];
-
-	switch (l->kind) {
-		case LOCAL_IMM:
-		case LOCAL_MUT: {
-			assert(l->is_debuginfo);
-			if (l->type == TYPE_INFER) {
-				err_with_pos(l->d_debuginfo.loc, "cannot infer type of local");
-			}
-			return l->type;
-		}
-		case LOCAL_SSA: {
-			break;
-		}
-	}
-
-	// ssa
-	if (l->type != TYPE_INFER) {
-		return l->type;
-	}
-
-	// whereisit
-	ssa_location_t ssa = cfind_ssa_def(proc, local);
-
-	if (ssa.inst == INST_NONE) {
-		ctype_block_unify_edges(proc, ssa.block, upvalue);
-		assert(l->type != TYPE_INFER);
-		return l->type;
-	}
-
-	lir_block_t *b = &proc->blocks[ssa.block];
-	lir_inst_t *inst = &b->insts[ssa.inst];
-
-	switch (inst->kind) {
-		case INST_INTEGER_LIT: {
-			if (upvalue != TYPE_INFER && type_is_integer(upvalue)) {
-				l->type = upvalue;
-			} else {
-				l->type = TYPE_I32;
+				ctype_block_visit_po_dfs(proc, po, branch);
 			}
 			break;
 		}
-		case INST_BOOL_LIT: {
-			l->type = TYPE_BOOL;
-			break;
-		}
+		case TERM_RET: break;
 		default: {
 			assert_not_reached();
 		}
 	}
 
-	printf("local %u: %s\n", local, type_dbg_str(l->type));
-
-	assert(l->type != TYPE_INFER);
-	return l->type;
-}
-
-void ctype_block(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
-	lir_block_t *b = &proc->blocks[block];
-
-	printf("block %u\n", block);
-
-	// 1. run through roots in a block
-	//    1. _ = discard
-	//    2. a = assignment to user local
-	//    3. ret out of the function
-	//
-	for (u32 inst = 0, len = arrlenu(b->insts); inst < len; inst++) {
-		//ctype_inst(proc, block, inst);
-
-		// the code can prepend to the current instruction, be aware of that
-		if (arrlenu(b->insts) > len) {
-			u32 new_length = arrlenu(b->insts);
-			printf("inserted %u\n", new_length - len);
-			inst += new_length - len;
-			len = new_length;
-		}
-	}
-
-	assert_not_reached();
-}
-
-void ctype_block_walk_roots(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
-	do {
-		ctype_block(proc, sym, block);
-	} while((block = proc->blocks[block].check.next_sequence) != BLOCK_NONE);
+	arrpush(*po, block);
 }
 
 void ctype_proc(lir_sym_t *sym, lir_proc_t *proc) {
-	printf("typing\n");
+	printf("typing %s\n", sv_from(sym->key));
 
 	assert(type_kind(sym->type) == TYPE_FUNCTION);
-	ctype_block_walk_roots(proc, sym, 0); // entry block all the way down
 
+	// compute postorder, then traverse reversed
+	lir_rblock_t *po = NULL;
+	ctype_block_visit_po_dfs(proc, &po, 0);
+
+	// RPO
+	for (u32 i = arrlenu(po); i-- > 0;) {
+		lir_rblock_t block = po[i];
+		ctype_block(proc, block);
+	}
+
+	// TODO: then process blocks that aren't visited, set their arguments to !
 }

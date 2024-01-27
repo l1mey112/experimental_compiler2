@@ -1,7 +1,8 @@
 #include "all.h"
 #include "check.h"
 
-// TODO: fix algorithm to a coloured one
+// TODO: fix algorithm to a coloured one, then reverse the list
+//       this one is quite broken
 //       https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis/#color-dfs-and-edge-classification
 
 lir_rsym_t *creorder_sorted;
@@ -100,8 +101,8 @@ static void visit(lir_rsym_t rsym) {
 						visit_dependent(rsym, i->d_lvalue.symbol);
 					}
 
-					if (i->dest.is_sym) {
-						visit_dependent(rsym, i->dest.symbol);
+					if (i->lvalue_dest && i->dest.lvalue.is_sym) {
+						visit_dependent(rsym, i->dest.lvalue.symbol);
 					}
 				}
 			}
