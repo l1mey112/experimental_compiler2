@@ -484,16 +484,16 @@ bool type_is_unsigned(type_t type);
 
 typedef struct lir_proc_t lir_proc_t;
 typedef struct lir_block_t lir_block_t;
-typedef struct lir_term_t lir_term_t;
-typedef struct lir_inst_t lir_inst_t;
 typedef struct lir_local_t lir_local_t;
-typedef struct lir_term_sc_t lir_term_sc_t;
-typedef struct lir_term_block_t lir_term_block_t;
-typedef struct lir_term_pat_t lir_term_pat_t; // pattern match abstraction
+typedef struct lir_pattern_t lir_pattern_t;
+typedef struct lir_term_t lir_term_t;
 typedef struct lir_lvalue_t lir_lvalue_t;
 typedef struct lir_lvalue_proj_t lir_lvalue_proj_t;
 typedef u32 lir_rblock_t;
 typedef u32 lir_rlocal_t;
+
+typedef struct lir_value_t lir_value_t;
+typedef struct lir_stmt_t lir_stmt_t;
 
 #define BLOCK_NONE ((lir_rblock_t)-1)
 #define LOCAL_NONE ((lir_rlocal_t)-1)
@@ -504,29 +504,15 @@ struct lir_local_t {
 	enum : u8 {
 		LOCAL_MUT, // assigned multiple times
 		LOCAL_IMM, // assigned once in all flows of control
-		LOCAL_SSA, // assigned once (block args can only be SSA locals)
 	} kind;
-
-	// for the checker in root finding pass
-	// only for SSA locals
-	/* enum : u8 {
-		STATUS_NONE,
-		STATUS_ROOT,
-		STATUS_MARKED,
-	} status; */
-
-	// semantically, SSA locals are constants
-	// they can't have their address taken or assigned to
 
 	// TODO: optimised out or removed flag so debuggers
 	//       like GDB can let the user know that
 
-	// TODO: instead of duplicating debuginfo on SSA locals, make it point to the derived original local
-	bool is_debuginfo;
-	struct {
-		loc_t loc;
-		istr_t name;
-	} d_debuginfo;
+	// TODO: we desperately need a NULL value for locations or
+	//       just revamp locations entirely which we should
+	loc_t loc;
+	istr_t name;
 };
 
 #define PROJ_IDX_INVALID ((u16)-1)
@@ -567,94 +553,113 @@ struct lir_lvalue_t {
 	lir_lvalue_proj_t *proj;
 };
 
-struct lir_inst_t {
+struct lir_value_t {
 	enum : u8 {
-		INST_INTEGER_LIT,
-		INST_BOOL_LIT,
-		INST_ARRAY,
-		INST_TUPLE_UNIT,
-		INST_TUPLE,
-		//INST_UNDEFINED,
+		VALUE_INTEGER_LIT,
+		VALUE_BOOL_LIT,
+		VALUE_ARRAY,
+		VALUE_TUPLE_UNIT,
+		VALUE_TUPLE,
 		//
-		INST_ADD, // infix
-		INST_SUB, // infix
-		INST_MUL, // infix
-		INST_DIV, // infix
-		INST_MOD, // infix
-		INST_EQ,  // infix
-		INST_NE,  // infix
-		ISNT_LE,  // infix
-		ISNT_LT,  // infix
-		ISNT_GE,  // infix
-		ISNT_GT,  // infix
-		INST_AND, // infix
-		INST_OR,  // infix
-		INST_NEG, // unary
-		INST_NOT, // unary
+		VALUE_ADD, // infix
+		VALUE_SUB, // infix
+		VALUE_MUL, // infix
+		VALUE_DIV, // infix
+		VALUE_MOD, // infix
+		VALUE_EQ,  // infix
+		VALUE_NE,  // infix
+		VALUE_LE,  // infix
+		VALUE_LT,  // infix
+		VALUE_GE,  // infix
+		VALUE_GT,  // infix
+		VALUE_AND, // infix
+		VALUE_OR,  // infix
+		VALUE_NEG, // unary
+		VALUE_NOT, // unary
 		//
-		INST_ADDRESS_OF,
-		INST_SLICE, // slices aren't lvalues
+		VALUE_ADDRESS_OF,
+		VALUE_SLICE, // slices aren't lvalues
 		//
-		INST_CALL, // f(a, b, c)
-		INST_CAST,
-		INST_SIZEOF, // is usize
+		VALUE_CALL, // f(a, b, c)
+		VALUE_CAST,
+		VALUE_SIZEOF, // is usize
+		VALUE_LVALUE,
 		//
-		//INST_DISCARD, // dest is _, ignore it
-		// TODO: distinguish between user discard and compiler discard
-		//       INST_IGNORE is for user discard i guess?
-		INST_LVALUE,
+		VALUE_CTRL_TEMP, // control flow evaluating to a value, spliced away after type check
+		VALUE_CTRL_NORETURN, // construction of ! type, deleted before analysis
 	} kind;
 
-	// lvalue = ssa         (INST_ASSIGN_LVALUE)
-	// ssa = lvalue
-	// ssa = op
+	// sizeof will be lowered into a constant
+	// after visiting a symbol it's fields is reordered based on attributes
+	// and then when visiting sizeof it will be lowered into a constant
 
-	bool lvalue_dest;
-
-	union  {
-		lir_rlocal_t ssa;
-		lir_lvalue_t lvalue;
-	} dest;
+	type_t type; // value numbering will take type into account
+	loc_t loc;
 
 	union {
-		istr_t d_integer_lit;
+		// u64 d_integer_lit;
+		istr_t d_integer_lit; // we need to know types really
 		bool d_bool_lit;
-		lir_rlocal_t *d_array;
-		lir_rlocal_t *d_tuple;
+		lir_value_t *d_array;
+		lir_value_t *d_tuple;
 		lir_lvalue_t d_lvalue;
-		lir_rlocal_t d_discard;
 		struct {
 			lir_lvalue_t lvalue;
 			bool is_mut;
 		} d_address_of;
 		struct {
-			lir_rlocal_t src;
-			lir_rlocal_t lo; // possible NULLs (LOCAL_NONE)
-			lir_rlocal_t hi; // possible NULLs (LOCAL_NONE)
+			lir_value_t *src;
+			lir_value_t *lo; // possible NULLs (LOCAL_NONE)
+			lir_value_t *hi; // possible NULLs (LOCAL_NONE)
 		} d_slice;
 		struct {
-			istr_t qualified_name; // TODO: remove
-		} d_symbol;
-		struct {
-			lir_rlocal_t lhs;
-			lir_rlocal_t rhs;
+			lir_value_t *lhs;
+			lir_value_t *rhs;
 		} d_infix;
 		struct {
-			lir_rlocal_t src;
+			lir_value_t *src;
 		} d_unary;
 		struct {
-			lir_rlocal_t f;
-			lir_rlocal_t *args;
+			lir_value_t *f;
+			lir_value_t *args;
 		} d_call;
 		struct {
-			lir_rlocal_t src;
-			type_t type;
+			lir_value_t *src; // `type` filled in as cast type dest
 		} d_cast;
+		//
+		// control flow that can return values it's prepared seperately
+		// by the parser, then expanded and spliced into place 
+		//
+		struct {
+			lir_rlocal_t local; // imm local that is the target of assignments
+			lir_rblock_t entry; // the exit block is the block we're currently in right now
+			// splice: term(DOM(current)) = goto(entry)
+		} d_ctrl_temp;
 	};
 };
 
+struct lir_stmt_t {
+	// all statements in LIR are assignments
+	// l = f      (lvalue assignment)          -> lir_assign()
+	// _ = f      (user/explicit discard)      -> lir_discard()
+	// f          (compiler ignore value)      -> lir_ignore()
+	enum : u8 {
+		STMT_LVALUE,
+		STMT_DISCARD,
+		STMT_IGNORE,
+	} kind;
+	
+	// TODO: flags for brk operations
+
+	union {
+		lir_lvalue_t dest;
+	};
+
+	lir_value_t value;
+};
+
 // recurse in the same direction
-struct lir_term_pat_t {
+struct lir_pattern_t {
 	enum pattern_kind_t {
 		PATTERN_LOCAL,
 		PATTERN_UNDERSCORE,
@@ -670,11 +675,11 @@ struct lir_term_pat_t {
 	union {
 		lir_rlocal_t d_local; // index into local args
 		struct {
-			lir_term_pat_t *elems;
+			lir_pattern_t *elems;
 		} d_tuple;
 		struct {
-			lir_term_pat_t *elems;
-			lir_term_pat_t *match; // single pattern, possible NULL
+			lir_pattern_t *elems;
+			lir_pattern_t *match; // single pattern, possible NULL
 			bool match_lhs; // else, rhs
 		} d_array;
 		istr_t d_integer_lit;
@@ -682,16 +687,6 @@ struct lir_term_pat_t {
 	};
 };
 
-struct lir_term_block_t {
-	lir_rblock_t block;
-	lir_rlocal_t *args;
-};
-
-/* struct lir_term_sc_t {
-	lir_lvalue_t value;
-	lir_term_block_t block;
-};
- */
 struct lir_term_t {
 	enum {
 		TERM_UNINIT, // shouldn't be this
@@ -701,42 +696,29 @@ struct lir_term_t {
 	} kind;
 
 	union {
-		lir_term_block_t d_goto;
-		/* struct {
-			lir_rlocal_t cond;
-			lir_term_block_t then;
-			lir_term_block_t els;
-		} d_if; */
-		/* struct {
-			lir_rvalue_t value;
-			lir_term_sc_t *cases;
-			lir_term_block_t default_block; // BLOCK_NONE for no default
-		} d_switch; */
+		lir_rblock_t d_goto;
 		struct {
-			lir_rlocal_t value;
+			lir_value_t value;
 		} d_ret;
-		//
-		// abstractions/intrinsics
-		//
 		struct {
-			lir_rlocal_t value;
+			lir_value_t value;
 			lir_rblock_t *blocks;
-			lir_term_pat_t *patterns;
+			lir_pattern_t *patterns;
 		} d_goto_pattern;
 	};
 };
 
 struct lir_block_t {
 	const char *debug_name;
-	lir_inst_t *insts;
-	lir_rlocal_t *args;
+	lir_stmt_t *stmts;
 	lir_term_t term;
 	bool visited; // easier to store here
 };
 
 struct lir_proc_t {
 	lir_block_t *blocks; // block 0 is always entry block
-	lir_local_t *locals; // stack slots
+	lir_local_t *locals; // variables
+	u16 arguments;       // first [0..arguments] are locals with types inserted
 };
 
 struct lir_sym_t {
@@ -771,28 +753,45 @@ extern lir_sym_t *symbols;
 lir_rsym_t table_resolve(istr_t qualified_name);
 lir_rsym_t table_register(lir_sym_t desc);
 
-// returns inst idx
-u32 lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
-// create local, local = inst
-lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
+// l = f      (lvalue assignment)
+void lir_assign(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue, lir_value_t value);
+// _ = f      (user/explicit discard)
+void lir_discard(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
+// f          (compiler ignore value)
+void lir_ignore(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
 
-void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_inst_t inst);
+// local
+void lir_assign_local(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_value_t value);
+
+// local
+lir_value_t lir_local_value(lir_rlocal_t local, loc_t loc);
+lir_lvalue_t lir_local_lvalue(lir_rlocal_t local, loc_t loc);
+
+// malloc and copy
+lir_value_t *lir_dup(lir_value_t value);
+
+// construct value from lvalue
+lir_value_t lir_value_lvalue(lir_lvalue_t lvalue);
+
+// returns inst idx
+// u32 lir_inst(lir_proc_t *proc, lir_rblock_t block, lir_inst_t inst);
+// create local, local = inst
+// lir_rlocal_t lir_ssa_tmp_inst(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc, lir_inst_t inst);
+
+//void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_inst_t inst);
 
 lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local);
-lir_rlocal_t lir_local_new_named(lir_proc_t *proc, istr_t name, loc_t loc, type_t type, bool is_mut);
 lir_rblock_t lir_block_new(lir_proc_t *proc, const char *debug_name); // takes ownership of debug_name
-lir_rlocal_t lir_block_new_arg(lir_proc_t *proc, lir_rblock_t block, type_t type, loc_t loc);
-void lir_block_arg_assign(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local); // assert local is LOCAL_SSA
 void lir_block_term(lir_proc_t *proc, lir_rblock_t block, lir_term_t term);
 void lir_print_symbol(lir_sym_t *symbol);
 void lir_print_symbols(void);
 
-void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc);
+//void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc);
 
 // having named field tuples and options would be pretty nice
 
 // INST_NONE for none
-u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
+//u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local);
 
 // INFO: in the parser we assign around lvalues willy nilly.
 //       there is a possibility for aliasing, but it doesn't
@@ -808,7 +807,7 @@ void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx);
 void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index);
 
 // remove an instruction from a block, returning it
-lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst);
+/* lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst);
 
 // INFO: spill for READING only, writing to this would cause weird behaviour
 //       spill will return the local if it contains no projections
@@ -825,4 +824,4 @@ lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst);
 //         it is safe to assume that all arguments to instructions are IMMUTABLE
 //         and without side effects from their neighbouring operands.
 //
-lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue);
+lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue); */

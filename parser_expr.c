@@ -162,10 +162,14 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 			if (entry->kind == PS_LOCAL && entry->name == lit) {
 				pnext();
 
-				// load &variable
-				rexpr_t expr = (rexpr_t){
+				// create lvalue
+				rexpr_t expr = {
 					.block = block,
-					.value = lir_lvalue(entry->d_local.local, loc),
+					.is_lvalue = true,
+					.lvalue = {
+						.local = entry->d_local.local,
+						.loc = loc,
+					},
 				};
 				
 				return expr;
@@ -190,11 +194,20 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	});
 
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, lit);
+	lir_rsym_t symbol = table_resolve(qualified_name);
 
-	return (rexpr_t){
+	rexpr_t expr = {
 		.block = block,
-		.value = lir_lvalue_sym(table_resolve(qualified_name), loc),
+		.is_lvalue = true,
+		.lvalue = {
+			.symbol = symbol,
+			.loc = loc,
+			.is_sym = true,
+		},
 	};
+
+	// create lvalue
+	return expr;
 }
 
 bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
@@ -205,25 +218,39 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 
 	u32 scope_olen = p.scope_entries_len;
 	u32 locals_olen = arrlenu(proc->locals);
-	lir_term_pat_t pattern = ppattern(proc);
+	lir_pattern_t pattern = ppattern(proc);
 	u32 scope_rlen = p.scope_entries_len;
 	u32 locals_rlen = arrlenu(proc->locals);
 
-	// let x = 0
-	//
-	//     %0 = 0
-	//     goto_pattern next:
-	// next(%1):
-	//     x = %1
-	//
-	// let x       (evaluates to a no-op)
-	//
+	// let v: i32 = ...
+	if (pattern.kind == PATTERN_LOCAL && p.token.kind == TOK_COLON) {
+		pnext();
+		type_t type = ptype();
+		proc->locals[pattern.d_local].type = type;
+	}
 
+	// legal syntax
 	//
-	// TODO: make a single match on `_` just evaluate to a unused() instruction
+	//     let ident: i32 = ...
+	//     let ident
+	//     let pattern = ...
 	//
-	// let _ = expr
+	// these below get special consideration, there
+	// is no pattern to unwrap basically.
 	//
+	//     let _ = ...
+	//     let ident = ...
+	//
+	//
+	// let (x, y) = expr       (desugared to a goto_pattern with single branch)
+	//
+	// entry:
+	//     ...
+	//     goto_pattern expr
+	//       (x, y) -> let.next
+	//
+	// let.next:
+	//     ... use x and y
 	//
 
 	// no let rec here
@@ -233,23 +260,46 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 		pnext();
 
 		rexpr_t expr = pexpr(proc, block, 0, 0);
+		lir_value_t value = pexpr_eu(proc, expr);
 
-		// create goto_pattern
+		switch (pattern.kind) {
+			case PATTERN_LOCAL: {
+				// create lvalue
+				lir_lvalue_t lvalue = {
+					.local = pattern.d_local,
+					.loc = pattern.loc,
+				};
+				
+				// assignment
+				lir_assign(proc, expr.block, lvalue, value);
+				expr_out->block = expr.block;
+				break;
+			}
+			case PATTERN_UNDERSCORE: {
+				// user discard
+				lir_discard(proc, expr.block, value);
+				expr_out->block = expr.block;
+				break;
+			}
+			default: {
+				lir_rblock_t let_next = lir_block_new(proc, "let.next");
 
-		lir_rblock_t let_next = lir_block_new(proc, "let.next");
-		lir_block_term(proc, expr.block, (lir_term_t){
-			.kind = TERM_GOTO_PATTERN,
-			.d_goto_pattern = {
-				.value = lir_lvalue_spill(proc, expr.block, expr.value),
-				.patterns = arr(lir_term_pat_t, pattern),
-				.blocks = arr(lir_rblock_t, let_next),
-			},
-		});
+				lir_block_term(proc, expr.block, (lir_term_t){
+					.kind = TERM_GOTO_PATTERN,
+					.d_goto_pattern = {
+						.value = pexpr_eu(proc, expr),
+						.patterns = arr(lir_pattern_t, pattern),
+						.blocks = arr(lir_rblock_t, let_next),
+					},
+				});
 
-		// create variable bindings as block arguments
-		pblock_args_to_vars(proc, let_next, locals_olen, locals_rlen);
-
-		expr_out->block = let_next;
+				expr_out->block = let_next;
+				break;
+			}
+		}
+	} else if (pattern.kind != PATTERN_LOCAL) {
+		// pattern must have an initialiser
+		punexpected("expected `=` after pattern");
 	}
 
 	// unmask
@@ -315,34 +365,102 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 		.block = block,
 	};
 
+	// TODO: note that the `:do` syntax isn't implemented yet
+	//
+	// let v = :do       (desugar brk into intermediate variable stores)
+	//     brk 20
+	//     50
+	//     60
+
+	// `do` block introduces control flow as a value, we must nest it
+	// creating a special (do block) expression that expands into the
+	// proper basic block representation when finished by splicing them
+	// together.
+
+	// desugar from the parser:
+	//
+	// entry:
+	//     ...
+	//     goto do.exit
+	// do.exit:
+	//     v = ctrl {entry: do.entry, local: _0}
+	//
+
+	// do block expansion here:
+	//
+	// entry:
+	//     goto do.entry
+	// do.entry:
+	//     _0 = 20
+	//     goto do.exit
+	// do.0:
+	//     _ = 50
+	//     _0 = 60
+	//     goto do.exit
+	// do.exit:
+	//     v = _0           (<- _0)
+	//
+
+	// NOTE: this applies to `loop` and `do` with a label, they're implemented
+	//       using the same mechanisms
+	// NOTE: a traversal in reverse postorder would be ruined after splicing
+	//       you'll need to recompute and start again from there??
+	//       lets hope not. keep an updatable stack or something.
+	//
+
+	// when reaching a `VALUE_CTRL_TEMP` you must splice the CFG:
+	//
+	// 1. term(DOM(current)) = goto(begin)
+	//    set all terminators of all blocks that dominate the current
+	//    block to a goto that points to the beginning of the do block
+	// 2. value = local
+	//    the current value should be a lvalue copy referencing
+	//    the intermediary local that was created to store the
+	//    values of the do block at all brks
+
+	bool branchable = false;
+
+	branchable = opt_label != ISTR_NONE;
+
+	lir_rblock_t origin = block;
 	lir_rblock_t do_rep = BLOCK_NONE;
 	lir_rblock_t do_brk = BLOCK_NONE;
 	lir_rlocal_t do_brk_local;
 
-	if (opt_label != ISTR_NONE) {
+	if (branchable) {
 		do_rep = lir_block_new(proc, "do.entry");
 		do_brk = lir_block_new(proc, "do.exit");
 
-		lir_block_term(proc, expr.block, (lir_term_t){
+		// term(origin) = do_rep
+		lir_block_term(proc, origin, (lir_term_t){
 			.kind = TERM_GOTO,
-			.d_goto = {
-				.block = do_rep,
-			},
+			.d_goto = do_rep,
 		});
 
-		do_brk_local = lir_block_new_arg(proc, do_brk, TYPE_INFER, oloc);
+		// TODO: would be nice to name the var after the label
+		//       but currently have no way to distinguish compiler
+		//       locals from program locals
+		do_brk_local = lir_local_new(proc, (lir_local_t){
+			.kind = LOCAL_IMM,
+			.loc = oloc,
+			.name = ISTR_NONE,
+			.type = TYPE_INFER,
+		});
+
 		expr.block = do_rep;
+
+		u8 blk_id = p.blks_len++;
+		p.blks[blk_id] = (pblk_t){
+			.label = opt_label,
+			.loc = opt_loc,
+			.always_brk = false,
+			.brk = do_brk,
+			.rep = do_rep,
+			.brk_local = do_brk_local,
+		};
 	}
 
-	u8 blk_id = p.blks_len++;
-	p.blks[blk_id] = (pblk_t){
-		.label = opt_label,
-		.loc = opt_loc,
-		.always_brk = false,
-		.brk = do_brk,
-		.rep = do_rep,
-	};
-
+	bool first = true;
 	bool set = false;
 
 	u32 bcol = p.token.loc.col;
@@ -350,33 +468,68 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 	while (p.token.kind != TOK_EOF) {
 		u32 cln = p.token.loc.line_nr;
 
-		set |= pstmt(proc, expr.block, &expr);
+		rexpr_t new_expr = expr;
+		bool expr_set = pstmt(proc, new_expr.block, &new_expr);
+
+		// TODO: disinguish between user just dumping shit
+		//       and the user explicitly going `let _ = ...`
+
+		// insert a discard if the last expression is not used
+		if (!first && expr_set) {
+			lir_discard(proc, expr.block, pexpr_eu(proc, expr));
+		}
+		if (expr_set) {
+			first = false;
+		}
+
+		expr = new_expr;		
+		set |= expr_set;
 
 		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
 			break;
 		}
 	}
 	ppop_scope();
-	p.blks_len--;
+	
+	if (branchable) {
+		p.blks_len--;
+	}
 
 	// not EOF, something was present here but didn't return any value
 	// return () to either the brk param or just as a bare expression
 	if (!set) {
-		expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, oloc, (lir_inst_t){
-			.kind = INST_TUPLE_UNIT,
-		}), oloc);
+		expr.value = (lir_value_t){
+			.kind = VALUE_TUPLE_UNIT,
+			.type = TYPE_UNIT,
+			.loc = oloc,
+		};
+		
+		// even though there was no branches, we still need to use the variable
+		if (branchable) {
+			// _0 = ()
+			lir_assign_local(proc, expr.block, do_brk_local, expr.value);
+			expr.value = lir_local_value(do_brk_local, oloc);
+		}
+
+		expr.block = do_brk;
 	}
 
-	if (opt_label != ISTR_NONE) {
-		lir_block_term(proc, expr.block, (lir_term_t){
+	if (set && branchable) {
+		// term(origin) = do_brk
+		lir_block_term(proc, origin, (lir_term_t){
 			.kind = TERM_GOTO,
-			.d_goto = {
-				.block = do_brk,
-				.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
-			},
+			.d_goto = do_brk,
 		});
 
-		expr.value = lir_lvalue(do_brk_local, oloc);
+		expr.value = (lir_value_t){
+			.kind = VALUE_CTRL_TEMP,
+			.loc = oloc,
+			.type = TYPE_INFER,
+			.d_ctrl_temp = {
+				.entry = do_rep,
+				.local = do_brk_local,
+			},
+		};
 		expr.block = do_brk;
 	}
 	return expr;
@@ -387,11 +540,61 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 	loc_t oloc = p.token.loc;
 	pnext();
 
+	// use the information from `pdo` to understand the control flow value abstraction
+
+	// let v = loop do
+	//     1 + 2
+	//     brk 20
+
+	// desugar from the parser:
+	//
+	// entry:
+	//     ...
+	//     goto loop.exit
+	// loop.exit:
+	//     v = ctrl {entry: loop.entry, local: _0}
+
+	// loop block expansion here:
+	//
+	// entry:
+	//     goto loop.entry
+	// loop.entry:
+	//     _ = 1 + 2
+	// loop.0:
+	//     _ = 50
+	//     _0 = 20
+	//     goto loop.exit:
+	// !.brk:
+	//     _ = !
+	//     goto loop.entry
+	// loop.exit:
+	//     v = _0           (<- _0)
+	//
+
+	// for expressions inside the loop, the user might go:
+	//
+	//     loop ()
+	//     loop 1
+	//     loop 2 + 4
+	//
+	// if the value is `()`, don't raise a warn on ignoring the value.
+	// this is the idomatic way to write an infinite loop, anything else
+	// is a warning on pure values.
+	//
+	// TODO: don't raise for now though. raise later
+	//
+
+	lir_rblock_t origin = block;
 	lir_rblock_t loop_rep = lir_block_new(proc, "loop.entry");
 	lir_rblock_t loop_brk = lir_block_new(proc, "loop.exit");
 
-	lir_rlocal_t loop_brk_value = lir_block_new_arg(proc, loop_brk, TYPE_INFER, oloc);
-
+	lir_rlocal_t loop_brk_local = lir_local_new(proc, (lir_local_t){
+		.kind = LOCAL_IMM,
+		.loc = oloc,
+		.name = ISTR_NONE,
+		.type = TYPE_INFER,
+	});
+	
 	u8 blk_id = p.blks_len++;
 	p.blks[blk_id] = (pblk_t){
 		.label = opt_label,
@@ -399,39 +602,48 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 		.always_brk = true,
 		.brk = loop_brk,
 		.rep = loop_rep,
+		.brk_local = loop_brk_local,
 	};
 
-	// block -> loop.entry
-	lir_block_term(proc, block, (lir_term_t){
-		.kind = TERM_GOTO,
-		.d_goto = {
-			.block = loop_rep,
-		},
-	});
 
 	rexpr_t expr = pexpr(proc, loop_rep, 0, expr_cfg);
 
-	// expr.block -> loop.entry
-	// <- loop.exit
+	(void)expr; // TODO: like i said before, should mark unused?
 
+	// close the infinite loop
 	lir_block_term(proc, expr.block, (lir_term_t){
 		.kind = TERM_GOTO,
-		.d_goto = {
-			.block = loop_rep,
-		},
+		.d_goto = loop_rep,
 	});
+
+	// term(origin) = loop_brk
+	// <- loop_brk
+
+	lir_block_term(proc, origin, (lir_term_t){
+		.kind = TERM_GOTO,
+		.d_goto = loop_brk,
+	});
+
+	// TODO: i am averse to writing ! to a local.
+	//       we have `VALUE_CTRL_NORETURN` to construct one.
 
 	p.blks_len--;
 	if (!p.blks[p.blks_len].is_brk) {
-		proc->locals[loop_brk_value].type = TYPE_BOTTOM; // infinite loop, expr is !
+		assert_not_reached();
 	}
 
-	rexpr_t expr_ret = {
-		.block = loop_brk,
-		.value = lir_lvalue(loop_brk_value, oloc),
+	expr.block = loop_brk;
+	expr.value = (lir_value_t){
+		.kind = VALUE_CTRL_TEMP,
+		.loc = oloc,
+		.type = TYPE_INFER,
+		.d_ctrl_temp = {
+			.entry = loop_rep,
+			.local = loop_brk_local,
+		},
 	};
 
-	return expr_ret;
+	return expr;
 }
 
 /* void pverify_assign(lir_proc_t *proc, lir_lvalue_t dest) {
@@ -477,9 +689,12 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// void expr
 			//      ^^^^
 			expr = pexpr(proc, expr.block, 0, cfg); // ignore
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, token.loc, (lir_inst_t){
-				.kind = INST_TUPLE_UNIT,
-			}), token.loc);
+			lir_discard(proc, expr.block, pexpr_eu(proc, expr));
+			expr.value = (lir_value_t){
+				.kind = VALUE_TUPLE_UNIT,
+				.type = TYPE_UNIT,
+				.loc = token.loc,
+			};
 			break;
 		}
 		/* case TOK_UNDEFINED: {
@@ -494,18 +709,22 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 		case TOK_TRUE:
 		case TOK_FALSE: {
 			pnext();
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_BOOL, token.loc, (lir_inst_t){
-				.kind = INST_BOOL_LIT,
+			expr.value = (lir_value_t){
+				.kind = VALUE_BOOL_LIT,
+				.type = TYPE_BOOL,
+				.loc = token.loc,
 				.d_bool_lit = token.kind == TOK_TRUE,
-			}), token.loc);
+			};
 			break;
 		}
 		case TOK_INTEGER: {
 			pnext();
-			expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
-				.kind = INST_INTEGER_LIT,
+			expr.value = (lir_value_t){
+				.kind = VALUE_INTEGER_LIT,
+				.type = TYPE_INFER,
+				.loc = token.loc,
 				.d_integer_lit = token.lit,
-			}), token.loc);
+			};
 			break;
 		}
 		case TOK_IDENT: {
@@ -516,23 +735,34 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			loc_t oloc = p.token.loc;
 			pnext();
 			if (p.token.kind == TOK_CPAR) {
-				expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_UNIT, token.loc, (lir_inst_t){
-					.kind = INST_TUPLE_UNIT,
-				}), token.loc);
+				expr.value = (lir_value_t){
+					.kind = VALUE_TUPLE_UNIT,
+					.type = TYPE_UNIT,
+					.loc = token.loc,
+				};
 				pnext();
 				break;
 			}
+
+			// perform late uses here, since we compose them all into a single unit
+
+			// TODO: should commaless containers, we have the option to
+			//
+			//  let v = (1
+			//           1
+			//           1)
+			//
 			bool first = true;
-			lir_rlocal_t *elems = NULL;
+			lir_value_t *elems = NULL;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
 					expr = pexpr(proc, expr.block, 0, PEXPR_ET_PAREN);
 				} else {
 					if (elems == NULL) {
-						arrpush(elems, lir_lvalue_spill(proc, expr.block, expr.value));
+						arrpush(elems, pexpr_lu(proc, expr));
 					}
 					expr = pexpr(proc, expr.block, 0, PEXPR_ET_PAREN);
-					arrpush(elems, lir_lvalue_spill(proc, expr.block, expr.value));
+					arrpush(elems, pexpr_lu(proc, expr));
 				}
 
 				if (p.token.kind == TOK_COMMA) {
@@ -545,16 +775,20 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			}
 			pnext();
 			if (elems != NULL) {
-				expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
-					.kind = INST_TUPLE,
+				expr.value = (lir_value_t){
+					.kind = VALUE_TUPLE,
+					.type = TYPE_INFER,
+					.loc = oloc,
 					.d_tuple = elems,
-				}), oloc);
+				};
 			}
 			break;
 		}
 		case TOK_OSQ: {
 			loc_t oloc = p.token.loc;
-			lir_rlocal_t *elems = NULL;
+			lir_value_t *elems = NULL;
+
+			// again, perform late uses here
 
 			// [ 1, 2, 3, 4, 5 ]
 			// ^
@@ -563,7 +797,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			while (p.token.kind != TOK_CSQ) {
 				expr = pexpr(proc, expr.block, 0, PEXPR_ET_ARRAY);
 
-				arrpush(elems, lir_lvalue_spill(proc, expr.block, expr.value));
+				arrpush(elems, pexpr_lu(proc, expr));
 
 				if (p.token.kind == TOK_COMMA) {
 					pnext();
@@ -576,16 +810,15 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			//                 ^
 			pnext();
 
-			expr = (rexpr_t){
-				.block = expr.block,
-				.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, oloc, (lir_inst_t){
-					.kind = INST_ARRAY,
-					.d_array = elems,
-				}), oloc),
+			expr.value = (lir_value_t){
+				.kind = VALUE_ARRAY,
+				.type = TYPE_INFER,
+				.loc = oloc,
+				.d_array = elems,
 			};
 			break;
 		}
-		case TOK_IF: {
+		/* case TOK_IF: {
 			// if (...) ... else ...
 			//
 			pnext();
@@ -674,11 +907,11 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				.d_goto_pattern = {
 					.value = cond.value.local,
 					.blocks = arr(lir_rblock_t, then.block, els.block),
-					.patterns = arr(lir_term_pat_t, (lir_term_pat_t){
+					.patterns = arr(lir_pattern_t, (lir_pattern_t){
 						.kind = PATTERN_BOOL_LIT,
 						.loc = cond.value.loc,
 						.d_bool_lit = true,
-					}, (lir_term_pat_t){
+					}, (lir_pattern_t){
 						.kind = PATTERN_BOOL_LIT,
 						.loc = cond.value.loc,
 						.d_bool_lit = false,
@@ -709,7 +942,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			expr.block = exit;
 			expr.value = lir_lvalue(exit_value, token.loc);
 			break;
-		}
+		} */
 		case TOK_COLON: {
 			// label
 			pnext();
@@ -752,48 +985,26 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				onerror = p.token.loc;
 				pnext();
 			}
-			u8 blk_id = pblk_locate(label, onerror);
+			u32 blk_id = pblk_locate(label, onerror);
 			expr = pexpr(proc, expr.block, 0, cfg);
 
-			// below unifies just fine. remember that a `brk` always
-			// returns a ! type, so it's always a valid expression.
-			//
-			// returning a ! type is involved though since it requires
-			// unreachable control flow. construct a new block with a
-			// ! parameter and then use that as the expr return.
-			//
-			// the checker is aware of any blocks that produce a ! type
-			// and will remove them from the CFG after checking.
-			//
-			// desugar:
-			//
-			// :t do
-			//     20 + brk :t 50
-			//
-			// entry:
-			//     goto do.0
-			// do.0:
-			//     %0 = 20
-			//     %1 = 50
-			//     goto do.exit(%1)
-			// do.1(%3: !):
-			//     %4 = %0 + %3
-			//     goto do.exit(%4)
-			// do.exit(%2: i32):
-			//     (use %2)
-			//
-			//
+			// `brk` always returns a ! type, it's a valid expression
+
+			pblk_t *blk = &p.blks[blk_id];
+
+			// write to the brk local
+			// _0 = expr
+			lir_assign_local(proc, expr.block, blk->brk_local, pexpr_eu(proc, expr));
+
+			// then branch away
+
 			lir_block_term(proc, expr.block, (lir_term_t){
 				.kind = TERM_GOTO,
-				.d_goto = {
-					.block = p.blks[blk_id].brk,
-					.args = arr(lir_rlocal_t, lir_lvalue_spill(proc, expr.block, expr.value)),
-				},
+				.d_goto = blk->brk,
 			});
 
 			// we are breaking here
-			p.blks[blk_id].is_brk = true;
-
+			blk->is_brk = true;
 			expr = pnoreturn_value(proc, token.loc, "!.brk");
 			break;
 		}
@@ -807,7 +1018,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			// parse label
 			if (p.token.kind == TOK_COLON) {
 				pnext();
-				pcheck(TOK_IDENT);
+				pcheck(TOK_IDENT); // TODO: something like: "expected label" ??
 				label = p.token.lit;
 				onerror = p.token.loc;
 				pnext();
@@ -816,11 +1027,8 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 			lir_block_term(proc, expr.block, (lir_term_t){
 				.kind = TERM_GOTO,
-				.d_goto = {
-					.block = p.blks[blk_id].rep,
-				},
+				.d_goto = p.blks[blk_id].rep,
 			});
-
 			expr = pnoreturn_value(proc, token.loc, "!.rep");
 			break;
 		}
@@ -835,10 +1043,9 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 			lir_block_term(proc, expr.block, (lir_term_t){
 				.kind = TERM_RET,
 				.d_ret = {
-					.value = lir_lvalue_spill(proc, expr.block, expr.value),
+					.value = pexpr_eu(proc, expr),
 				},
 			});
-
 			expr = pnoreturn_value(proc, token.loc, "!.ret");
 			break;
 		}
@@ -849,19 +1056,22 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					case TOK_NOT:
 					case TOK_SUB: {
 						const u8 prefix_tbl[] = {
-							[TOK_NOT] = INST_NOT,
-							[TOK_SUB] = INST_NEG,
+							[TOK_NOT] = VALUE_NOT,
+							[TOK_SUB] = VALUE_NEG,
 						};
 
 						expr = pexpr(proc, expr.block, PREC_PREFIX, cfg);
 						//
 						// perform unary
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
+
+						expr.value = (lir_value_t){
 							.kind = prefix_tbl[token.kind],
+							.type = TYPE_INFER,
+							.loc = token.loc,
 							.d_unary = {
-								.src = lir_lvalue_spill(proc, expr.block, expr.value),
+								.src = lir_dup(pexpr_eu(proc, expr)),
 							},
-						}), token.loc);
+						};
 						break;
 					}
 					case TOK_SINGLE_AND: {
@@ -872,13 +1082,15 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							pnext();
 						}
 						expr = pexpr(proc, expr.block, PREC_PREFIX, cfg);
-						expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
-							.kind = INST_ADDRESS_OF,
+						expr.value = (lir_value_t){
+							.kind = VALUE_ADDRESS_OF,
+							.type = TYPE_INFER,
+							.loc = token.loc,
 							.d_address_of = {
-								.lvalue = expr.value,
+								.lvalue = pexpr_lvalue(proc, expr),
 								.is_mut = is_mut,
 							},
-						}), token.loc);
+						};
 						break;
 					}
 					default: {
@@ -955,7 +1167,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					// remember, spill for reading only
 					//
 					// s0 = spill lvalue
-					lir_rlocal_t s0 =  lir_lvalue_spill(proc, expr.block, expr.value);
+					/* lir_rlocal_t s0 =  lir_lvalue_spill(proc, expr.block, expr.value);
 
 					// s1 = 1
 					lir_rlocal_t s1 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
@@ -984,15 +1196,96 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					// v++++;      (error: expression is not assignable)
 					//    ~~
 					//
+					continue; */
+
+					// _0 = p + 1
+					// p = _0
+					// <- _0
+
+					lir_lvalue_t lvalue = pexpr_lvalue(proc, expr);
+
+					// loc_t:   p++ 
+					//         / ||
+					//    p = p + 1
+					lir_value_t p_plus_plus = {
+						.kind = VALUE_ADD,
+						.type = TYPE_INFER,
+						.loc = token.loc,
+						.d_infix = {
+							.lhs = lir_dup(lir_value_lvalue(lvalue)),
+							.rhs = lir_dup((lir_value_t){
+								.kind = VALUE_INTEGER_LIT,
+								.type = TYPE_INFER,
+								.loc = token.loc,
+								.d_integer_lit = sv_move("1"),
+							}),
+						},
+					};
+
+					lir_value_t _0 = pexpr_spill(proc, expr.block, p_plus_plus);
+
+					// p = _0
+					lir_assign(proc, expr.block, lvalue, _0);
+
+					// <- _0
+					expr.value = _0;
 					continue;
 				}
-				case TOK_OSQ: {
+				/* case TOK_OSQ: {
 					// x[0..1] and x[0]
 					pnext();
 					//
-					// ive introduced spillage without care for repeated operations
-					// ive vetted this code here and i hope it conforms with order of evaluation
-					pexpr_spill(proc, &expr);
+					// order of evaluation problems
+					//
+					//     x[expr that mut x] = ...
+					//
+					// what do you do about this expr? if was a simple use, then we'd
+					// just spill it with a late use and use the spilled value.
+					// but no, we can't. this is an lvalue assignment.
+					//
+					// two options:
+					// 1. deal with it, ignore left to right evaluation order.
+					//    the idea of "left to right" evaluation order falls apart
+					//    given an expression like this anyway.
+					//    no languages that i know of define this behaviour, they
+					//    just go with path `1`.
+					//
+					// 2. disallow effects inside the index that may cause overwrites
+					//    to the lvalue on the left hand side, raise hard errors.
+					//    not impossible, it's going to be in our type system anyway.
+					//
+					// TODO: stick with `1` until a better solution arises, or don't.
+					//
+					// ```rust
+					// pub fn main() {
+					//     let mut x = [1, 2, 3];
+					// 
+					//     x[{
+					//         x = [1, 4, 5];         (uhh, where are we writing to again?)
+ 					//        2
+ 					//    }] = 5;
+					// }
+					// ```
+					//
+					// though, we're kind of royally fucked here. in rust, the expression
+					// below respects ordering. in this language though, index expressions
+					// are forced lvalues. this means the value `x`'s LATE USE is suddenly
+					// invalidated before the index.
+					//
+					// ```rust
+					// let v = x[{
+					//     x = [1, 4, 5];      (rust raises warning "value is never read")
+					//     2
+					// }];
+					// ```
+					//
+					// we'll end up with semantics like this. TODO: this is bad.
+					//
+					// ```rust
+					// x = [1, 4, 5]
+					// let v = x[2];
+					// ```
+					//
 
 					// INFO: currently slices AREN'T lvalues
 					//
@@ -1054,28 +1347,32 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						expr.block = expr1.block;
 					}
 					continue;
-				}
+				} */
 				default: {
-					if (TOK_IS_INFIX(token.kind)) {
+					/* if (TOK_IS_INFIX(token.kind)) {
 						pnext();
 						
 						// cast
 						if (token.kind == TOK_COLON) {
 							type_t type = ptype();
-							expr.value = lir_lvalue(lir_ssa_tmp_inst(proc, expr.block, type, token.loc, (lir_inst_t){
-								.kind = INST_CAST,
+							expr.value = (lir_value_t){
+								.kind = VALUE_CAST,
+								.type = type,
+								.loc = token.loc,
 								.d_cast = {
-									.src = lir_lvalue_spill(proc, expr.block, expr.value),
-									.type = type,
+									.src = lir_dup(pexpr_eu(proc, expr)),
 								},
-							}), token.loc);
+							};
 							continue;
 						}
+
+						// TODO: also issues here with possibly invalid lvalues
 
 						// postfix deref: v.*
 						if (token.kind == TOK_DOT && p.token.kind == TOK_MUL) {
 							// append deref to the lvalue
-							lir_lvalue_deref(&expr.value, p.token.loc);
+							(void)pexpr_lvalue(proc, expr); // assert lvalue
+							lir_lvalue_deref(&expr.lvalue, p.token.loc);
 							pnext();
 							continue;
 						}
@@ -1083,24 +1380,32 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						// field access: v.x
 						// tuple access: v.0
 						if (token.kind == TOK_DOT) {
+							// TODO: read the comments from `pexpr_lvalue_from()`
+							//       there is obviously a big issue here
+
+							lir_lvalue_t lvalue = pexpr_lvalue_from(proc, expr);
+							
 							switch (p.token.kind) {
 								case TOK_INTEGER: {
 									u64 index = strtoull(sv_from(p.token.lit), NULL, 10);
 									// TODO: less than u16
 									assert(index <= 0xFFFF);
-									lir_lvalue_index_field(&expr.value, p.token.loc, index);
+									lir_lvalue_index_field(&lvalue, p.token.loc, index);
 									pnext();
-									continue;
+									break;
 								}
 								case TOK_IDENT: {
 									istr_t field = p.token.lit;
-									lir_lvalue_index_field(&expr.value, p.token.loc, field);
-									continue;
+									lir_lvalue_index_field(&lvalue, p.token.loc, field);
+									break;
 								}
 								default: {
 									punexpected("expected field name or tuple index after `.`");
 								}
 							}
+
+							expr.is_lvalue = true;
+							expr.lvalue = lvalue;
 							continue;
 						}
 
@@ -1178,10 +1483,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							});
 
 							r_expr.block = prec_block;
-							r_expr.value = lir_lvalue(s2, token.loc);
+							r_expr.value = lir_value_lvalue(s2, token.loc);
 						} else {
 							r_expr.block = prec_block;
-							r_expr.value = lir_lvalue(rhs, token.loc);
+							r_expr.value = lir_value_lvalue(rhs, token.loc);
 						}
 
 						if (is_assign_op || kind == TOK_ASSIGN) {
@@ -1228,7 +1533,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						u32 inst;
 						if (!expr.value.is_sym && (inst = lir_find_inst_ssa_block(proc, expr.block, expr.value.local)) != INST_NONE) {
 							// found an SSA local, try merging
-							lir_inst_t *instp = &proc->blocks[expr.block].insts[inst];
+							lir_inst_t *instp = &proc->blocks[expr.block].stmts[inst];
 
 							if (instp->kind == INST_CALL) {
 								// merge and forward instruction, expr.value stays the same
@@ -1248,7 +1553,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							},
 						}), token.loc);
 						continue;
-					}
+					} */
 				}
 			}
 		}

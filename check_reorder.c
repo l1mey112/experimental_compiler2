@@ -5,7 +5,7 @@
 //       this one is quite broken
 //       https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis/#color-dfs-and-edge-classification
 
-lir_rsym_t *creorder_sorted;
+/* lir_rsym_t *creorder_sorted;
 
 static void visit(lir_rsym_t rsym);
 
@@ -119,7 +119,7 @@ static void visit(lir_rsym_t rsym) {
 
 	sym->is_visited = false;
 	arrpush(creorder_sorted, rsym);
-}
+} */
 
 // 1. sanity checks on the table (placeholders)
 // 2. identifies cyclic dependencies
@@ -131,7 +131,7 @@ void creorder_and_type(void) {
 
 	// we store the visited status on the actual `lir_sym_t`, it's easier
 
-	for (lir_rsym_t i = 0; i < hmlenu(symbols); i++) {
+	/* for (lir_rsym_t i = 0; i < hmlenu(symbols); i++) {
 		lir_sym_t *sym = &symbols[i];
 
 		if (sym->is_placeholder) {
@@ -158,5 +158,5 @@ void creorder_and_type(void) {
 				assert_not_reached();
 			}
 		}
-	}
+	} */
 }

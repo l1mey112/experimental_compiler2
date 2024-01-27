@@ -550,42 +550,19 @@ void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask) {
 	}
 }
 
-static lir_term_pat_t *pattern_alloc(lir_term_pat_t pattern) {
-	lir_term_pat_t *ptr = malloc(sizeof(lir_term_pat_t));
+static lir_pattern_t *pattern_alloc(lir_pattern_t pattern) {
+	lir_pattern_t *ptr = malloc(sizeof(lir_pattern_t));
 	*ptr = pattern;
 	return ptr;
 }
 
-// slice of vars
-void pblock_args_to_vars(lir_proc_t *proc, lir_rblock_t block, u32 var_lo, u32 var_hi) {
-	for (lir_rlocal_t local = var_lo; local < var_hi; local++) {
-		lir_local_t *p = &proc->locals[local];
-		
-		assert(p->is_debuginfo);
-		lir_rlocal_t arg = lir_block_new_arg(proc, block, TYPE_INFER, p->d_debuginfo.loc);
-
-		// local = arg
-		lir_inst(proc, block, (lir_inst_t){
-			.dest = local, // original lvalue
-			.kind = INST_LVALUE,
-			.d_lvalue = arg,
-		});
-	}
-}
-
-lir_rlocal_t pexpr_spill(lir_proc_t *proc, rexpr_t *expr) {
-	lir_rlocal_t spillage = lir_lvalue_spill(proc, expr->block, expr->value);
-	expr->value = lir_lvalue(spillage, expr->value.loc);
-	return spillage;
-}
-
 // the only place where user variables are created
-lir_term_pat_t ppattern(lir_proc_t *proc) {
+lir_pattern_t ppattern(lir_proc_t *proc) {
 	bool is_mut = false;
 	switch (p.token.kind) {
 		case TOK_UNDERSCORE: {
 			pnext();
-			return (lir_term_pat_t){
+			return (lir_pattern_t){
 				.kind = PATTERN_UNDERSCORE,
 			};
 		}
@@ -601,9 +578,12 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 			//
 			// construct block arg and assign to local
 
-			lir_rlocal_t local = lir_local_new_named(proc, name, name_loc, TYPE_INFER, is_mut);
-			// TODO: error if already exists
-			//       error if name is already in scope
+			lir_rlocal_t local = lir_local_new(proc, (lir_local_t){
+				.kind = is_mut ? LOCAL_MUT : LOCAL_IMM,
+				.type = TYPE_INFER,
+				.loc = name_loc,
+				.name = name,
+			});
 
 			(void)pscope_register((pscope_entry_t){
 				.name = name,
@@ -612,7 +592,7 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 				.d_local = local,
 			});
 
-			return (lir_term_pat_t){
+			return (lir_pattern_t){
 				.loc = name_loc,
 				.kind = PATTERN_LOCAL,
 				.d_local = local,
@@ -622,7 +602,7 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 			istr_t val = p.token.lit;
 			loc_t loc = p.token.loc;
 			pnext();
-			return (lir_term_pat_t){
+			return (lir_pattern_t){
 				.loc = loc,
 				.kind = PATTERN_INTEGER_LIT,
 				.d_integer_lit = val,
@@ -633,14 +613,14 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 			pnext();
 			if (p.token.kind == TOK_CPAR) {
 				pnext();
-				return (lir_term_pat_t){
+				return (lir_pattern_t){
 					.kind = PATTERN_TUPLE_UNIT,
 					.loc = oloc,
 				};
 			}
 			bool first = true;
-			lir_term_pat_t *elems = NULL;
-			lir_term_pat_t pattern;
+			lir_pattern_t *elems = NULL;
+			lir_pattern_t pattern;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
 					pattern = ppattern(proc);
@@ -662,7 +642,7 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 			}
 			pnext();
 			if (elems != NULL) {
-				pattern = (lir_term_pat_t){
+				pattern = (lir_pattern_t){
 					.kind = PATTERN_TUPLE,
 					.loc = oloc,
 					.d_tuple.elems = elems,
@@ -674,9 +654,9 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 			// [1, a, b]
 			// ^
 			loc_t oloc = p.token.loc;
-			lir_term_pat_t *elems = NULL;
+			lir_pattern_t *elems = NULL;
 
-			lir_term_pat_t pattern = {
+			lir_pattern_t pattern = {
 				.kind = PATTERN_ARRAY,
 				.loc = oloc,
 			};
@@ -705,7 +685,7 @@ lir_term_pat_t ppattern(lir_proc_t *proc) {
 						err_with_pos(oloc, "a `...xs` in array pattern must reside at the end");
 					}
 				} else {
-					lir_term_pat_t elem = ppattern(proc);
+					lir_pattern_t elem = ppattern(proc);
 
 					// [xs..., x]
 					if (p.token.kind == TOK_TRIPLE_DOTS) {
@@ -772,8 +752,82 @@ u32 pblk_locate(istr_t opt_label, loc_t onerror) {
 
 // construct a ! value using unreachable control flow
 rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc, const char *debug_name) {
-	rexpr_t expr;
+	rexpr_t expr = {};
 	expr.block = lir_block_new(proc, debug_name);
-	expr.value = lir_lvalue(lir_block_new_arg(proc, expr.block, TYPE_BOTTOM, loc), loc);
+	expr.value = (lir_value_t){
+		.kind = VALUE_CTRL_NORETURN,
+		.loc = loc,
+	};
 	return expr;
+}
+
+lir_rlocal_t pexpr_spill_local(lir_proc_t *proc, lir_rblock_t block, lir_value_t value) {
+	lir_rlocal_t l = lir_local_new(proc, (lir_local_t){
+		.kind = LOCAL_IMM,
+		.type = value.type,
+		.loc = value.loc,
+		.name = ISTR_NONE,
+	});
+
+	lir_assign_local(proc, block, l, value);
+
+	return l;
+}
+
+lir_value_t pexpr_spill(lir_proc_t *proc, lir_rblock_t block, lir_value_t value) {
+	lir_rlocal_t l = pexpr_spill_local(proc, block, value);
+	return lir_local_value(l, value.loc);
+}
+
+// early use
+// if lvalue, construct value
+// else, return value
+lir_value_t pexpr_eu(lir_proc_t *proc, rexpr_t expr) {
+	if (expr.is_lvalue) {
+		return (lir_value_t){
+			.kind = VALUE_LVALUE,
+			.loc = expr.lvalue.loc,
+			.d_lvalue = expr.lvalue,
+		};
+	} else {
+		return expr.value;
+	}
+}
+
+// late use
+// construct early use, write to temporary
+lir_value_t pexpr_lu(lir_proc_t *proc, rexpr_t expr) {
+	lir_value_t value = pexpr_eu(proc, expr);
+	
+	// TODO: this is a regression
+	//       don't spill if the value is immutable
+	return pexpr_spill(proc, expr.block, value);
+}
+
+lir_lvalue_t pexpr_lvalue(lir_proc_t *proc, rexpr_t expr) {
+	if (!expr.is_lvalue) {
+		err_with_pos(expr.value.loc, "expected lvalue");
+	}
+	return expr.lvalue;
+}
+
+// TODO: we need to be more fine grained than a lvalue
+//
+//       1.test = 20
+//
+//       will not be caught by the parser, we need to
+//       create some sort of "readonly" or "dirty"
+//       lvalues for reading ONLY
+//
+
+// construct an lvalue from an expr
+// if an lvalue, return lvalue
+// if not lvalue, construct temporary and return lvalue
+lir_lvalue_t pexpr_lvalue_from(lir_proc_t *proc, rexpr_t expr) {
+	if (expr.is_lvalue) {
+		return expr.lvalue;
+	} else {
+		lir_rlocal_t l = pexpr_spill_local(proc, expr.block, expr.value);
+		return lir_local_lvalue(l, expr.value.loc);
+	}
 }

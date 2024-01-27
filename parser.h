@@ -18,6 +18,7 @@ struct pblk_t {
 	lir_rblock_t brk;
 	lir_rblock_t rep;
 	bool is_brk; // if broken to (used with loop)
+	lir_rlocal_t brk_local; // immutable intermediate local to store `brk`
 };
 
 struct pimport_t {
@@ -93,22 +94,27 @@ void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);
 void ppop_scope(void);
 void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
-lir_term_pat_t ppattern(lir_proc_t *proc);
-void pblock_args_to_vars(lir_proc_t *proc, lir_rblock_t block, u32 var_lo, u32 var_hi);
+lir_pattern_t ppattern(lir_proc_t *proc);
 u32 pblk_locate(istr_t opt_label, loc_t onerror);
 // result of parsing an expression
 typedef struct rexpr_t rexpr_t;
+
+// make sure to zero initialise an `rexpr_t` for the best experience
 
 // parsing an expression:
 // 1. results in a value or lvalue
 // 2. could introduce control flow (block changing)
 struct rexpr_t {
 	lir_rblock_t block;
-	lir_lvalue_t value;
+	lir_value_t value;
+	lir_lvalue_t lvalue;
+	bool is_lvalue;
 };
 
 // TODO: nicer interface with default vars?
 rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg);
+
+// create a ! value by creating an unreachable block and returning a ! literal
 rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc, const char *debug_name);
 
 // shorthand for spilling an expression for reading, will void all mutable lvalue properties
@@ -118,4 +124,42 @@ rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc, const char *debug_name);
 // of evaluation
 //
 // will also return a local if you want to use that too
-lir_rlocal_t pexpr_spill(lir_proc_t *proc, rexpr_t *expr);
+// lir_rlocal_t pexpr_spill(lir_proc_t *proc, rexpr_t *expr);
+
+// be careful, as specified above, misuse of these functions could result in incorrect behavior
+
+// force a spill, like a late use
+lir_value_t pexpr_spill(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
+lir_rlocal_t pexpr_spill_local(lir_proc_t *proc, lir_rblock_t block, lir_value_t value);
+
+// extract lvalue, raises error if not an lvalue
+lir_lvalue_t pexpr_lvalue(lir_proc_t *proc, rexpr_t expr);
+
+// construct an lvalue from an expr
+lir_lvalue_t pexpr_lvalue_from(lir_proc_t *proc, rexpr_t expr);
+
+// late use
+lir_value_t pexpr_lu(lir_proc_t *proc, rexpr_t expr);
+// early use
+lir_value_t pexpr_eu(lir_proc_t *proc, rexpr_t expr);
+//
+// when composing multiple expressions together, all expressions
+// except for the last one are "late use" which means they must
+// be spilled to respect the order of evaluation with the presense
+// of control flow.
+//
+//    expr   +   expr
+//    ^^^^       ^^^^
+//  late use   early use
+//
+//  [expr, expr, expr, expr]
+//   ^^^^^^^^^^^^^^^^  ^^^^
+//       late use    early use
+//
+// this is an expanded definition of the lvalue_spill used before
+// to be more specific about semantics.
+//
+// it also matters WHEN you emit a late use, since it void the purpose
+// if you did it after some kind of side effecting operation. do it
+// as soon as possible.
+//
