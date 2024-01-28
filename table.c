@@ -15,26 +15,26 @@
 // and if it is, we raise an error
 //
 
-lir_sym_t *symbols;
+sym_t *symbols;
 
-lir_rsym_t table_resolve(istr_t qualified_name) {
+rsym_t table_resolve(istr_t qualified_name) {
 	ptrdiff_t sym = hmgeti(symbols, qualified_name);
 	
 	if (sym != -1) {
 		return sym;
 	}
 
-	lir_sym_t desc = {
+	sym_t desc = {
 		.key = qualified_name,
 		.is_placeholder = true,
 	};
 
 	hmputs(symbols, desc);
 
-	return (lir_rsym_t)hmlenu(symbols) - 1;
+	return (rsym_t)hmlenu(symbols) - 1;
 }
 
-lir_rsym_t table_register(lir_sym_t desc) {
+rsym_t table_register(sym_t desc) {
 	ptrdiff_t sym = hmgeti(symbols, desc.key);
 
 	if (sym != -1 && !symbols[sym].is_placeholder) {
@@ -50,5 +50,11 @@ lir_rsym_t table_register(lir_sym_t desc) {
 		return sym;
 	}
 
-	return (lir_rsym_t)hmlenu(symbols) - 1;
+	return (rsym_t)hmlenu(symbols) - 1;
+}
+
+rlocal_t proc_local_new(proc_t *proc, local_t local) {
+	u32 idx = arrlenu(proc->locals);
+	arrpush(proc->locals, local);
+	return idx;
 }

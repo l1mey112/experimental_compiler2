@@ -194,7 +194,7 @@ rexpr_t pident(lir_proc_t *proc, lir_rblock_t block) {
 	});
 
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, lit);
-	lir_rsym_t symbol = table_resolve(qualified_name);
+	rsym_t symbol = table_resolve(qualified_name);
 
 	rexpr_t expr = {
 		.block = block,
@@ -218,7 +218,7 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 
 	u32 scope_olen = p.scope_entries_len;
 	u32 locals_olen = arrlenu(proc->locals);
-	lir_pattern_t pattern = ppattern(proc);
+	pattern_t pattern = ppattern(proc);
 	u32 scope_rlen = p.scope_entries_len;
 	u32 locals_rlen = arrlenu(proc->locals);
 
@@ -288,7 +288,7 @@ bool plet(lir_proc_t *proc, lir_rblock_t block, rexpr_t *expr_out) {
 					.kind = TERM_GOTO_PATTERN,
 					.d_goto_pattern = {
 						.value = pexpr_eu(proc, expr),
-						.patterns = arr(lir_pattern_t, pattern),
+						.patterns = arr(pattern_t, pattern),
 						.blocks = arr(lir_rblock_t, let_next),
 					},
 				});
@@ -425,7 +425,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 	lir_rblock_t origin = block;
 	lir_rblock_t do_rep = BLOCK_NONE;
 	lir_rblock_t do_brk = BLOCK_NONE;
-	lir_rlocal_t do_brk_local;
+	rlocal_t do_brk_local;
 
 	if (branchable) {
 		do_rep = lir_block_new(proc, "do.entry");
@@ -440,7 +440,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 		// TODO: would be nice to name the var after the label
 		//       but currently have no way to distinguish compiler
 		//       locals from program locals
-		do_brk_local = lir_local_new(proc, (lir_local_t){
+		do_brk_local = lir_local_new(proc, (local_t){
 			.kind = LOCAL_IMM,
 			.loc = oloc,
 			.name = ISTR_NONE,
@@ -592,7 +592,7 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 	lir_rblock_t loop_rep = lir_block_new(proc, "loop.entry");
 	lir_rblock_t loop_brk = lir_block_new(proc, "loop.exit");
 
-	lir_rlocal_t loop_brk_local = lir_local_new(proc, (lir_local_t){
+	rlocal_t loop_brk_local = lir_local_new(proc, (local_t){
 		.kind = LOCAL_IMM,
 		.loc = oloc,
 		.name = ISTR_NONE,
@@ -876,12 +876,12 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				(void)pexpr_spill(proc, &els);
 			} else {
 				// return empty tuple
-				lir_rlocal_t then_unit = lir_ssa_tmp_inst(proc, then.block, TYPE_UNIT, token.loc, (lir_inst_t){
+				rlocal_t then_unit = lir_ssa_tmp_inst(proc, then.block, TYPE_UNIT, token.loc, (lir_inst_t){
 					.kind = INST_TUPLE_UNIT,
 				});
 				then.value = lir_lvalue(then_unit, token.loc);
 
-				lir_rlocal_t else_unit = lir_ssa_tmp_inst(proc, els.block, TYPE_UNIT, token.loc, (lir_inst_t){
+				rlocal_t else_unit = lir_ssa_tmp_inst(proc, els.block, TYPE_UNIT, token.loc, (lir_inst_t){
 					.kind = INST_TUPLE_UNIT,
 				});
 				els.value = lir_lvalue(else_unit, token.loc);
@@ -895,11 +895,11 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				.d_goto_pattern = {
 					.value = cond.value.local,
 					.blocks = arr(lir_rblock_t, then.block, els.block),
-					.patterns = arr(lir_pattern_t, (lir_pattern_t){
+					.patterns = arr(pattern_t, (pattern_t){
 						.kind = PATTERN_BOOL_LIT,
 						.loc = cond.value.loc,
 						.d_bool_lit = true,
-					}, (lir_pattern_t){
+					}, (pattern_t){
 						.kind = PATTERN_BOOL_LIT,
 						.loc = cond.value.loc,
 						.d_bool_lit = false,
@@ -912,7 +912,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				.kind = TERM_GOTO,
 				.d_goto = {
 					.block = exit,
-					.args = arr(lir_rlocal_t, then.value.local),
+					.args = arr(rlocal_t, then.value.local),
 				},
 			});
 
@@ -921,11 +921,11 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 				.kind = TERM_GOTO,
 				.d_goto = {
 					.block = exit,
-					.args = arr(lir_rlocal_t, els.value.local),
+					.args = arr(rlocal_t, els.value.local),
 				}
 			});
 			
-			lir_rlocal_t exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, token.loc);
+			rlocal_t exit_value = lir_block_new_arg(proc, exit, TYPE_INFER, token.loc);
 
 			expr.block = exit;
 			expr.value = lir_lvalue(exit_value, token.loc);
@@ -1155,16 +1155,16 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					// remember, spill for reading only
 					//
 					// s0 = spill lvalue
-					/* lir_rlocal_t s0 =  lir_lvalue_spill(proc, expr.block, expr.value);
+					/* rlocal_t s0 =  lir_lvalue_spill(proc, expr.block, expr.value);
 
 					// s1 = 1
-					lir_rlocal_t s1 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
+					rlocal_t s1 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 						.kind = INST_INTEGER_LIT,
 						.d_integer_lit = sv_move("1"),
 					});
 
 					// s2 = s0 + s1
-					lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
+					rlocal_t s2 = lir_ssa_tmp_inst(proc, expr.block, TYPE_INFER, token.loc, (lir_inst_t){
 						.kind = token.kind == TOK_INC ? INST_ADD : INST_SUB,
 						.d_infix = {
 							.lhs = s0,
@@ -1348,7 +1348,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					continue;
 				} */
 				default: {
-					if (TOK_IS_INFIX(token.kind)) {
+					/* if (TOK_IS_INFIX(token.kind)) {
 						pnext();
 						
 						// cast
@@ -1433,7 +1433,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						rexpr_t lhs_v = expr;
 
 						// remember, spill before pexpr() calls
-						lir_rlocal_t lhs;
+						rlocal_t lhs;
 						if (kind != TOK_ASSIGN) {
 							lhs = lir_lvalue_spill(proc, lhs_v.block, lhs_v.value);
 						}
@@ -1441,7 +1441,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						rexpr_t rhs_v = pexpr(proc, expr.block, nprec, cfg);
 						lir_rblock_t prec_block = rhs_v.block;
 
-						lir_rlocal_t rhs = lir_lvalue_spill(proc, rhs_v.block, rhs_v.value);
+						rlocal_t rhs = lir_lvalue_spill(proc, rhs_v.block, rhs_v.value);
 
 						if (is_assign_op) {
 							// sparse array
@@ -1476,7 +1476,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							};
 
 							// s2 = s0 + s1
-							lir_rlocal_t s2 = lir_ssa_tmp_inst(proc, prec_block, TYPE_INFER, token.loc, (lir_inst_t){
+							rlocal_t s2 = lir_ssa_tmp_inst(proc, prec_block, TYPE_INFER, token.loc, (lir_inst_t){
 								.kind = tok_to_op[kind],
 								.d_infix = {
 									.lhs = lhs,
@@ -1500,7 +1500,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						continue;
 					} else if (token.loc.line_nr == line_nr) {
 						// spill as soon as possible, good job
-						lir_rlocal_t f = pexpr_spill(proc, &expr);
+						rlocal_t f = pexpr_spill(proc, &expr);
 						//
 						rexpr_t expr0 = pexpr(proc, expr.block, PREC_CALL, cfg);
 						//
@@ -1522,7 +1522,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						//         assume that all arguments to instructions are IMMUTABLE and without side
 						//         effects from their neighbouring operands.
 						//
-						lir_rlocal_t arg = lir_lvalue_spill(proc, expr0.block, expr0.value);
+						rlocal_t arg = lir_lvalue_spill(proc, expr0.block, expr0.value);
 
 						// functions are never assigned directly into non SSA lvalues
 						//
@@ -1551,11 +1551,11 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							.kind = INST_CALL,
 							.d_call = {
 								.f = f,
-								.args = arr(lir_rlocal_t, arg),
+								.args = arr(rlocal_t, arg),
 							},
 						}), token.loc);
 						continue;
-					}
+					} */
 				}
 			}
 		}

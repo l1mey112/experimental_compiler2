@@ -18,8 +18,8 @@ typedef struct ctyctx_ent_t ctyctx_ent_t;
 //
 // INFO: implemented as TYPE_INFER meaning poisoned
 struct ctyctx_ent_t {
-	lir_rlocal_t local;
-	lir_rsym_t sym;
+	rlocal_t local;
+	rsym_t sym;
 	bool is_sym;
 	type_t sccp_type; // TYPE_INFER meaning poisoned
 };
@@ -64,7 +64,7 @@ type_t ctype_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
 	type_t underlying;
 	
 	if (!lvalue.is_sym) {
-		lir_local_t *l = &proc->locals[lvalue.local];
+		local_t *l = &proc->locals[lvalue.local];
 		underlying = l->type;
 
 		assert(l->is_debuginfo);
@@ -142,14 +142,14 @@ void ctype_insts(lir_proc_t *proc, lir_rblock_t block) {
 		if (inst->lvalue_dest && inst->dest.lvalue.is_sym) {
 			assert_not_reached();
 		} else if (inst->lvalue_dest) {
-			lir_local_t *l = &proc->locals[inst->dest.lvalue.local];
+			local_t *l = &proc->locals[inst->dest.lvalue.local];
 			if (l->type == TYPE_INFER) {
 				l->type = rhs;
 			} else {
 				(void)ctype_unify(l->type, rhs, inst->d_lvalue.loc);
 			}
 		} else {
-			lir_local_t *l = &proc->locals[inst->dest.ssa];
+			local_t *l = &proc->locals[inst->dest.ssa];
 			l->type = rhs;
 		}
 	}
@@ -161,7 +161,7 @@ void ctype_block(lir_proc_t *proc, lir_rblock_t block) {
 	printf("block %u (", block);
 
 	for (u32 i = 0, c = arrlenu(b->args); i < c; i++) {
-		lir_rlocal_t input = b->args[i];
+		rlocal_t input = b->args[i];
 		printf("%u: %s", input, type_dbg_str(proc->locals[input].type));
 		if (i + 1 < c) {
 			printf(", ");
@@ -230,7 +230,7 @@ void ctype_block_visit_po_dfs(lir_proc_t *proc, lir_rblock_t **po, lir_rblock_t 
 	arrpush(*po, block);
 }
 
-void ctype_proc(lir_sym_t *sym, lir_proc_t *proc) {
+void ctype_proc(sym_t *sym, lir_proc_t *proc) {
 	printf("typing %s\n", sv_from(sym->key));
 
 	assert(type_kind(sym->type) == TYPE_FUNCTION);

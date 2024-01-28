@@ -5,12 +5,12 @@
 //       this one is quite broken
 //       https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis/#color-dfs-and-edge-classification
 
-/* lir_rsym_t *creorder_sorted;
+/* rsym_t *creorder_sorted;
 
-static void visit(lir_rsym_t rsym);
+static void visit(rsym_t rsym);
 
-static void visit_dependent(lir_rsym_t parent, lir_rsym_t rsym) {
-	lir_sym_t *sym = &symbols[rsym];
+static void visit_dependent(rsym_t parent, rsym_t rsym) {
+	sym_t *sym = &symbols[rsym];
 	
 	if (sym->is_placeholder) {
 		// error user
@@ -32,8 +32,8 @@ static void visit_dependent(lir_rsym_t parent, lir_rsym_t rsym) {
 	visit(rsym);
 }
 
-static void visit(lir_rsym_t rsym) {
-	lir_sym_t *sym = &symbols[rsym];
+static void visit(rsym_t rsym) {
+	sym_t *sym = &symbols[rsym];
 
 	// contains
 	for (u32 i = 0; i < arrlenu(creorder_sorted); i++) {
@@ -129,10 +129,10 @@ void creorder_and_type(void) {
 	// it must be raised on the actual lvalue. so when visiting definitions,
 	// ignore placeholders. they'll be errors soon when we visit the dependents
 
-	// we store the visited status on the actual `lir_sym_t`, it's easier
+	// we store the visited status on the actual `sym_t`, it's easier
 
-	/* for (lir_rsym_t i = 0; i < hmlenu(symbols); i++) {
-		lir_sym_t *sym = &symbols[i];
+	/* for (rsym_t i = 0; i < hmlenu(symbols); i++) {
+		sym_t *sym = &symbols[i];
 
 		if (sym->is_placeholder) {
 			continue;
@@ -145,8 +145,8 @@ void creorder_and_type(void) {
 		visit(i);
 	}
 
-	for (lir_rsym_t i = 0; i < arrlenu(creorder_sorted); i++) {
-		lir_sym_t *sym = &symbols[creorder_sorted[i]];
+	for (rsym_t i = 0; i < arrlenu(creorder_sorted); i++) {
+		sym_t *sym = &symbols[creorder_sorted[i]];
 
 		switch (sym->kind) {
 			case SYMBOL_PROC: {

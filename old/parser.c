@@ -1,19 +1,27 @@
-#include "all.h"
-#include "hir.h"
 #include "parser.h"
+#include "all.h"
 
 pctx_t p;
 
-void pfn(void) {
-	//assert(parent == NULL);
+// valid transformation:
+//
+// add: i32 -> i32 -> i32
+// add: a b = a + b
+// add: 0 0 = 0
+//
+// TODO: the "valid transformation" is in constant flux, ive gone through 5 different LIR iterations
+//       fix later.
+// 
+void pfn(lir_proc_t *parent) {
+	assert(parent == NULL);
 
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
-	/* if (parent != NULL) {
+	if (parent != NULL) {
 		// reference to var, insert into scope/vars
-	} */
+	}
 
 	pnext();
 	pexpect(TOK_COLON);
@@ -39,7 +47,7 @@ void pfn(void) {
 		},
 	});
 
-	proc_t proc = {};
+	lir_proc_t proc = {};
 	proc.arguments = proc_len; // arg length
 
 	// add: i32 -> i32 -> i32
@@ -53,44 +61,48 @@ void pfn(void) {
 	//     a b -> a + b
 	//     0 0 -> 0
 	//
+	// create entry block with `len` args
+	// entry block must be the first block
 	// proper desugar into match arms
+	lir_rblock_t entry = lir_block_new(&proc, "entry");
 
-	hir_expr_t *args = NULL;
+	// TODO: we don't really store the locs of args???
+	// INFO: when DCEing locals or merging, take the loc of the one that actually has one
+
+	lir_value_t *args = NULL;
 	for (u32 i = 0; i < proc_len; i++) {
-		rlocal_t v = proc_local_new(&proc, (local_t){
+		rlocal_t v = lir_local_new(&proc, (local_t){
 			.kind = LOCAL_IMM,
 			.type = proc_typeinfo->d_fn.args[i],
 			.name = ISTR_NONE,
-			.loc = LOC_NONE,
 		});
-		hir_expr_t expr = {
-			.kind = EXPR_LOCAL,
-			.d_local = v,
-			.type = TYPE_INFER,
-			.loc = LOC_NONE,
+		lir_value_t nv = {
+			.kind = VALUE_LVALUE,
+			.type = proc_typeinfo->d_fn.args[i],
+			.d_lvalue = {
+				.local = v,
+			},
 		};
-		arrpush(args, expr);
+		arrpush(args, nv);
 	}
 
 	// construct a tuple so it can unpack
 
-	hir_expr_t tuple = {
+	lir_value_t tuple = {
 		.kind = VALUE_TUPLE,
-		.type = TYPE_INFER,
+		.type = proc_typeinfo->d_fn.ret,
 		.d_tuple = args,
 	};
 
-	hir_expr_t match = {
-		.kind = EXPR_MATCH,
-		.type = TYPE_INFER,
-		.loc = LOC_NONE,
-		.d_match = {
-			.expr = hir_dup(tuple),
+	// use the tuple to construct a goto_pattern after we're done with all the patterns
+	lir_block_term(&proc, entry, (lir_term_t){
+		.kind = TERM_GOTO_PATTERN,
+		.d_goto_pattern = {
+			.value = tuple,
+			.blocks = NULL,
 			.patterns = NULL,
-			.exprs = NULL,
 		},
-	};
-
+	});
 
 	// start parsing
 
@@ -108,6 +120,10 @@ void pfn(void) {
 
 		ppush_scope();
 		pattern_t *patterns = NULL;
+
+		char *debug_name;
+		asprintf(&debug_name, "pattern%u", pat);
+		lir_rblock_t block = lir_block_new(&proc, debug_name);
 
 		while (true) {
 			u32 locals_olen = arrlenu(proc.locals);
@@ -142,14 +158,20 @@ void pfn(void) {
 		// with pattern, construct a basic block for it
 
 		ppush_scope();
-		hir_expr_t expr = pexpr(&proc, 0, 0);
+		rexpr_t expr = pexpr(&proc, block, 0, 0);
 		ppop_scope();
 		ppop_scope();
 
+		lir_block_term(&proc, expr.block, (lir_term_t){
+			.kind = TERM_RET,
+			.d_ret = {
+				.value = pexpr_eu(&proc, expr),
+			},
+		});
 		pat++;
 
-		arrpush(match.d_match.patterns, pattern);
-		arrpush(match.d_match.exprs, expr);
+		arrpush(proc.blocks[entry].term.d_goto_pattern.patterns, pattern);
+		arrpush(proc.blocks[entry].term.d_goto_pattern.blocks, block);
 	}
 
 	table_register((sym_t){
@@ -163,7 +185,12 @@ void pfn(void) {
 	});
 }
 
-// functions, constants, globals, types, attributes, etc.
+// v = 20
+// 'v = 30
+// fn: ...
+// fn: ...
+// fn: ...
+//
 void ptop_stmt(void) {
 	if (p.token.kind != TOK_IMPORT) {
 		p.has_done_imports = true;
@@ -188,7 +215,7 @@ void ptop_stmt(void) {
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_COLON) {
 				// fn
-				pfn();
+				pfn(NULL);
 				break;
 			} else if (p.peek.kind == TOK_ASSIGN) {
 				// v = 20
@@ -198,6 +225,17 @@ void ptop_stmt(void) {
 		}
 		default: {
 			punexpected("expected top-level statement");
+			/* hir_node_t expr;
+			bool set = pstmt(&expr, NULL, p.modp->exprs);
+			if (set) {
+				arrpush(p.modp->exprs, expr);
+			}
+			if (is_pub && set) {
+				pmake_pub(&arrlast(p.modp->exprs));
+			} else if (is_pub) {
+				err_with_pos(oloc, "cannot make this expression public");
+			}
+			break; */
 		}
 	}
 }

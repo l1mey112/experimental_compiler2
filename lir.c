@@ -1,6 +1,6 @@
 #include "all.h"
 
-lir_rlocal_t lir_local_new(lir_proc_t *proc, lir_local_t local) {
+rlocal_t lir_local_new(lir_proc_t *proc, local_t local) {
 	u32 idx = arrlenu(proc->locals);
 	arrpush(proc->locals, local);
 	return idx;
@@ -38,7 +38,7 @@ void lir_stmt_at(lir_proc_t *proc, lir_rblock_t block, u32 idx, lir_stmt_t stmt)
 	arrins(b->stmts, idx, stmt);
 }
 
-void lir_assign_local(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local, lir_value_t value) {
+void lir_assign_local(lir_proc_t *proc, lir_rblock_t block, rlocal_t local, lir_value_t value) {
 	lir_assign(proc, block, lir_local_lvalue(local, value.loc), value);
 }
 
@@ -73,7 +73,7 @@ lir_value_t lir_value_lvalue(lir_lvalue_t lvalue) {
 	};
 }
 
-lir_lvalue_t lir_local_lvalue(lir_rlocal_t local, loc_t loc) {
+lir_lvalue_t lir_local_lvalue(rlocal_t local, loc_t loc) {
 	return (lir_lvalue_t){
 		.local = local,
 		.proj = NULL,
@@ -81,7 +81,7 @@ lir_lvalue_t lir_local_lvalue(lir_rlocal_t local, loc_t loc) {
 	};
 }
 
-lir_value_t lir_local_value(lir_rlocal_t local, loc_t loc) {
+lir_value_t lir_local_value(rlocal_t local, loc_t loc) {
 	return (lir_value_t){
 		.kind = VALUE_LVALUE,
 		.type = TYPE_INFER,
@@ -103,7 +103,7 @@ void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_ins
 } */
 
 // spill projections and mut values into an immutable value
-/* lir_rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
+/* rlocal_t lir_lvalue_spill(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t lvalue) {
 	if (!lvalue.is_sym && arrlenu(lvalue.proj) == 0 && proc->locals[lvalue.local].kind != LOCAL_MUT) {
 		return lvalue.local;
 	}
@@ -120,7 +120,7 @@ void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_ins
 //
 // TODO: can be removed really, it doesn't matter anymore
 //       try relaxing it and see what it does
-/* void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, lir_rlocal_t src, loc_t loc) {
+/* void lir_inst_lvalue(lir_proc_t *proc, lir_rblock_t block, lir_lvalue_t dest, rlocal_t src, loc_t loc) {
 	if (proc->locals[src].kind != LOCAL_SSA) {
 		src = lir_ssa_tmp_inst(proc, block, TYPE_INFER, loc, (lir_inst_t){
 			.kind = INST_LVALUE,
@@ -136,7 +136,7 @@ void lir_inst_insert(lir_proc_t *proc, lir_rblock_t block, u32 inst_idx, lir_ins
 	});
 } */
 
-lir_lvalue_t lir_lvalue(lir_rlocal_t local, loc_t loc) {
+lir_lvalue_t lir_lvalue(rlocal_t local, loc_t loc) {
 	return (lir_lvalue_t){
 		.local = local,
 		.proj = NULL,
@@ -144,7 +144,7 @@ lir_lvalue_t lir_lvalue(lir_rlocal_t local, loc_t loc) {
 	};
 }
 
-lir_lvalue_t lir_lvalue_sym(lir_rsym_t sym, loc_t loc) {
+lir_lvalue_t lir_lvalue_sym(rsym_t sym, loc_t loc) {
 	return (lir_lvalue_t){
 		.is_sym = true,
 		.symbol = sym,
@@ -188,7 +188,7 @@ void lir_lvalue_index_field(lir_lvalue_t *lvalue, loc_t loc, u16 field_idx) {
 	arrpush(lvalue->proj, desc);
 }
 
-void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index) {
+void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, rlocal_t index) {
 	lir_lvalue_proj_t desc = {
 		.kind = PROJ_INDEX,
 		.loc = loc,
@@ -200,7 +200,7 @@ void lir_lvalue_index(lir_lvalue_t *lvalue, loc_t loc, lir_rlocal_t index) {
 	arrpush(lvalue->proj, desc);
 }
 
-/* u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
+/* u32 lir_find_inst_ssa_block(lir_proc_t *proc, lir_rblock_t block, rlocal_t local) {
 	lir_block_t *b = &proc->blocks[block];
 	for (u32 i = 0, c = arrlenu(b->insts); i < c; i++) {
 		lir_inst_t *inst = &b->insts[i];
@@ -219,8 +219,8 @@ lir_inst_t lir_inst_pop(lir_proc_t *proc, lir_rblock_t block, u32 inst) {
 	return r;
 } */
 
-static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
-	lir_local_t *localp = &proc->locals[local];
+static void _print_local(lir_proc_t *proc, rlocal_t local) {
+	local_t *localp = &proc->locals[local];
 
 	if (localp->name != ISTR_NONE) {
 		printf("%s.", sv_from(localp->name));
@@ -231,17 +231,17 @@ static void _print_local(lir_proc_t *proc, lir_rlocal_t local) {
 }
 
 // : type
-static void _print_local_type(lir_proc_t *proc, lir_rlocal_t local) {
-	lir_local_t *localp = &proc->locals[local];
+static void _print_local_type(lir_proc_t *proc, rlocal_t local) {
+	local_t *localp = &proc->locals[local];
 	printf(": %s", type_dbg_str(localp->type));
 }
 
-static void _print_term_pattern(lir_proc_t *proc, lir_pattern_t *pattern) {
+static void _print_term_pattern(lir_proc_t *proc, pattern_t *pattern) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
 			printf("(");
 			for (u32 i = 0, c = arrlenu(pattern->d_tuple.elems); i < c; i++) {
-				lir_pattern_t *elem = &pattern->d_tuple.elems[i];
+				pattern_t *elem = &pattern->d_tuple.elems[i];
 				_print_term_pattern(proc, elem);
 				if (i + 1 < c) {
 					printf(", ");
@@ -257,7 +257,7 @@ static void _print_term_pattern(lir_proc_t *proc, lir_pattern_t *pattern) {
 				printf("..., ");
 			}
 			for (u32 i = 0, c = arrlenu(pattern->d_array.elems); i < c; i++) {
-				lir_pattern_t *elem = &pattern->d_array.elems[i];
+				pattern_t *elem = &pattern->d_array.elems[i];
 				_print_term_pattern(proc, elem);
 				if (i + 1 < c) {
 					printf(", ");
@@ -309,7 +309,7 @@ static void _print_blockref(lir_proc_t *proc, lir_rblock_t block) {
 
 static void _print_lvalue(lir_proc_t *proc, lir_lvalue_t lvalue) {
 	if (lvalue.is_sym) {
-		lir_sym_t *symbol = &symbols[lvalue.symbol];
+		sym_t *symbol = &symbols[lvalue.symbol];
 		printf("{%s}", sv_from(symbol->key));
 	} else {
 		_print_local(proc, lvalue.local);
@@ -515,14 +515,14 @@ static void _print_stmt(lir_proc_t *proc, lir_stmt_t *stmt) {
 	printf("\n");
 }
 
-void lir_print_proc(lir_sym_t *symbol) {
+void lir_print_proc(sym_t *symbol) {
 	assert(symbol->kind == SYMBOL_PROC);
 	lir_proc_t *proc = &symbol->d_proc;
 	printf("function %s(", sv_from(symbol->key));
 
 	// print args
 	for (u32 i = 0, c = proc->arguments; i < c; i++) {
-		lir_local_t *localp = &proc->locals[i];
+		local_t *localp = &proc->locals[i];
 
 		if (localp->kind == LOCAL_MUT) {
 			printf("'");
@@ -539,7 +539,7 @@ void lir_print_proc(lir_sym_t *symbol) {
 
 	// print locals
 	for (u32 i = proc->arguments, c = arrlenu(proc->locals); i < c; i++) {
-		lir_local_t *localp = &proc->locals[i];
+		local_t *localp = &proc->locals[i];
 
 		printf("  ");
 
@@ -593,7 +593,7 @@ void lir_print_proc(lir_sym_t *symbol) {
 				printf("\n");
 
 				for (u32 i = 0, c = arrlenu(block->term.d_goto_pattern.patterns); i < c; i++) {
-					lir_pattern_t *patternp = &block->term.d_goto_pattern.patterns[i];
+					pattern_t *patternp = &block->term.d_goto_pattern.patterns[i];
 					printf("    ");
 					_print_term_pattern(proc, patternp);
 					printf(" -> ");
@@ -613,7 +613,7 @@ void lir_print_proc(lir_sym_t *symbol) {
 	printf("}\n");
 }
 
-void lir_print_symbol(lir_sym_t *symbol) {
+void lir_print_symbol(sym_t *symbol) {
 	switch (symbol->kind) {
 		case SYMBOL_PROC: {
 			lir_print_proc(symbol);

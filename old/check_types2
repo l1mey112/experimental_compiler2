@@ -55,7 +55,7 @@ type_t ctype_block_preds(lir_proc_t *proc, lir_rblock_t block, type_t arg0_upval
 
 }
 
-static bool is_local_in_args(lir_proc_t *proc, lir_rblock_t block, lir_rlocal_t local) {
+static bool is_local_in_args(lir_proc_t *proc, lir_rblock_t block, rlocal_t local) {
 	lir_block_t *b = &proc->blocks[block];
 	for (u32 i = 0; i < arrlenu(b->args); i++) {
 		if (b->args[i] == local) {
@@ -100,9 +100,9 @@ void ctype_inst(lir_proc_t *proc, type_t upvalue, lir_inst_t *inst) {
 
 }
 
-void ctype_local_ssa(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
+void ctype_local_ssa(lir_proc_t *proc, type_t upvalue, rlocal_t local) {
 	
-	lir_local_t *l = &proc->locals[local];
+	local_t *l = &proc->locals[local];
 	assert(l->kind == LOCAL_SSA);
 
 	lir_rblock_t block = l->def; // SSA locals have this set
@@ -123,8 +123,8 @@ void ctype_local_ssa(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
 
 // for SSA locals, only a single def
 // for other locals, unify multiple defs
-void ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
-	lir_local_t *l = &proc->locals[local];
+void ctype_local(lir_proc_t *proc, type_t upvalue, rlocal_t local) {
+	local_t *l = &proc->locals[local];
 
 	if (l->kind != LOCAL_SSA) {
 		assert_not_reached();
@@ -173,12 +173,12 @@ void ctype_pattern(lir_proc_t *proc, lir_rblock_t block, type_t upvalue) {
 }
 
 
-/* type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
+/* type_t ctype_local(lir_proc_t *proc, type_t upvalue, rlocal_t local) {
 	// find where the local came from, what it is
 	// if it's an SSA local, find the instruction that defines it
 	// iterate recursively
 
-	lir_local_t *l = &proc->locals[local];
+	local_t *l = &proc->locals[local];
 
 	switch (l->kind) {
 		case LOCAL_IMM:
@@ -231,7 +231,7 @@ void ctype_pattern(lir_proc_t *proc, lir_rblock_t block, type_t upvalue) {
  */
 
 
-/* void ctype_block(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
+/* void ctype_block(lir_proc_t *proc, sym_t *sym, lir_rblock_t block) {
 	lir_block_t *b = &proc->blocks[block];
 
 	printf("block %u\n", block);
@@ -258,7 +258,7 @@ void ctype_pattern(lir_proc_t *proc, lir_rblock_t block, type_t upvalue) {
 
 		// TODO: proper lvalues
 		//       need to allow %0.* = 20
-		//lir_local_t *d_local;
+		//local_t *d_local;
 		//if (!i->dest.is_sym && (d_local = &proc->locals[i->dest.local])->kind == LOCAL_SSA) {
 		//	// user writing to a constant
 		//	printf("hello %u %u %u %u\n", d_local->ssa.def_block, block, d_local->ssa.def_inst, inst);
@@ -276,7 +276,7 @@ void ctype_pattern(lir_proc_t *proc, lir_rblock_t block, type_t upvalue) {
 	}
 } */
 
-type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local);
+type_t ctype_local(lir_proc_t *proc, type_t upvalue, rlocal_t local);
 
 void ctype_block_unify_edges(lir_proc_t *proc, lir_rblock_t block, type_t arg0_upvalue) {
 	// evaluate every single edge
@@ -330,8 +330,8 @@ struct ssa_location_t {
 	u32 inst; // INST_NONE for block arg
 };
 
-ssa_location_t cfind_ssa_def(lir_proc_t *proc, lir_rlocal_t local) {
-	lir_local_t *l = &proc->locals[local];
+ssa_location_t cfind_ssa_def(lir_proc_t *proc, rlocal_t local) {
+	local_t *l = &proc->locals[local];
 	assert(l->kind == LOCAL_SSA);
 
 	// search everywhere for the definition of this local
@@ -361,12 +361,12 @@ ssa_location_t cfind_ssa_def(lir_proc_t *proc, lir_rlocal_t local) {
 	assert_not_reached();
 }
 
-type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
+type_t ctype_local(lir_proc_t *proc, type_t upvalue, rlocal_t local) {
 	// find where the local came from, what it is
 	// if it's an SSA local, find the instruction that defines it
 	// iterate recursively
 
-	lir_local_t *l = &proc->locals[local];
+	local_t *l = &proc->locals[local];
 
 	switch (l->kind) {
 		case LOCAL_IMM:
@@ -423,7 +423,7 @@ type_t ctype_local(lir_proc_t *proc, type_t upvalue, lir_rlocal_t local) {
 	return l->type;
 }
 
-void ctype_block(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
+void ctype_block(lir_proc_t *proc, sym_t *sym, lir_rblock_t block) {
 	lir_block_t *b = &proc->blocks[block];
 
 	printf("block %u\n", block);
@@ -448,13 +448,13 @@ void ctype_block(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
 	assert_not_reached();
 }
 
-void ctype_block_walk_roots(lir_proc_t *proc, lir_sym_t *sym, lir_rblock_t block) {
+void ctype_block_walk_roots(lir_proc_t *proc, sym_t *sym, lir_rblock_t block) {
 	do {
 		ctype_block(proc, sym, block);
 	} while((block = proc->blocks[block].check.next_sequence) != BLOCK_NONE);
 }
 
-void ctype_proc(lir_sym_t *sym, lir_proc_t *proc) {
+void ctype_proc(sym_t *sym, lir_proc_t *proc) {
 	printf("typing\n");
 
 	assert(type_kind(sym->type) == TYPE_FUNCTION);

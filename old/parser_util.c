@@ -317,7 +317,6 @@ type_t ptype_expr(u8 prec) {
 		case TOK_IDENT: {
 			istr_t initial = p.token.lit;
 			pnext();
-            // TODO: USE TYPE SYMBOLS
 			if (p.token.kind == TOK_DOT) {
 				// TODO: integrate module system later
 				assert_not_reached();
@@ -558,7 +557,7 @@ static pattern_t *pattern_dup(pattern_t pattern) {
 }
 
 // the only place where user variables are created
-pattern_t ppattern(proc_t *proc) {
+pattern_t ppattern(lir_proc_t *proc) {
 	bool is_mut = false;
 	switch (p.token.kind) {
 		case TOK_UNDERSCORE: {
@@ -579,7 +578,7 @@ pattern_t ppattern(proc_t *proc) {
 			//
 			// construct block arg and assign to local
 
-			rlocal_t local = proc_local_new(proc, (local_t){
+			rlocal_t local = lir_local_new(proc, (local_t){
 				.kind = is_mut ? LOCAL_MUT : LOCAL_IMM,
 				.type = TYPE_INFER,
 				.loc = name_loc,
@@ -679,7 +678,7 @@ pattern_t ppattern(proc_t *proc) {
 					}
 					loc_t oloc = p.token.loc;
 					pnext();
-					pattern.d_array.match = pattern_dup(ppattern(proc));
+					pattern.d_array.match = pattern_alloc(ppattern(proc));
 					pattern.d_array.match_lhs = false;
 					if (p.token.kind != TOK_CSQ) {
 						// TODO: dbg str for patterns instead of printing `xs...`
@@ -698,7 +697,7 @@ pattern_t ppattern(proc_t *proc) {
 							err_with_pos(p.token.loc, "a `xs...` in array pattern must reside at the start");
 						}
 						pnext();
-						pattern.d_array.match = pattern_dup(elem);
+						pattern.d_array.match = pattern_alloc(elem);
 						pattern.d_array.match_lhs = true;
 					} else {
 						arrpush(elems, elem);
@@ -748,5 +747,91 @@ u32 pblk_locate(istr_t opt_label, loc_t onerror) {
 		err_with_pos(onerror, "label `%s` not found", sv_from(opt_label));
 	} else {
 		err_with_pos(onerror, "not inside a loop");
+	}
+}
+
+// construct a ! value using unreachable control flow
+rexpr_t pnoreturn_value(lir_proc_t *proc, loc_t loc, const char *debug_name) {
+	rexpr_t expr = {};
+	expr.block = lir_block_new(proc, debug_name);
+	expr.value = (lir_value_t){
+		.kind = VALUE_CTRL_NORETURN,
+		.loc = loc,
+	};
+	return expr;
+}
+
+rlocal_t pexpr_spill_local(lir_proc_t *proc, lir_rblock_t block, lir_value_t value) {
+	rlocal_t l = lir_local_new(proc, (local_t){
+		.kind = LOCAL_IMM,
+		.type = value.type,
+		.loc = value.loc,
+		.name = ISTR_NONE,
+	});
+
+	lir_assign_local(proc, block, l, value);
+
+	return l;
+}
+
+lir_value_t pexpr_spill(lir_proc_t *proc, lir_rblock_t block, lir_value_t value) {
+	rlocal_t l = pexpr_spill_local(proc, block, value);
+	return lir_local_value(l, value.loc);
+}
+
+// early use
+// if lvalue, construct value
+// else, return value
+lir_value_t pexpr_eu(lir_proc_t *proc, rexpr_t expr) {
+	if (expr.is_lvalue) {
+		return (lir_value_t){
+			.kind = VALUE_LVALUE,
+			.loc = expr.lvalue.loc,
+			.d_lvalue = expr.lvalue,
+		};
+	} else {
+		return expr.value;
+	}
+}
+
+// late use
+// construct early use, write to temporary
+lir_value_t pexpr_lu(lir_proc_t *proc, rexpr_t expr) {
+	lir_value_t value = pexpr_eu(proc, expr);
+
+	// TODO: this is a regression
+	//       don't spill if the value is immutable
+	if (value.kind == VALUE_LVALUE) {
+		value = pexpr_spill(proc, expr.block, value);
+	}
+	
+	return value;
+}
+
+lir_lvalue_t pexpr_lvalue(lir_proc_t *proc, rexpr_t expr) {
+	if (!expr.is_lvalue) {
+		err_with_pos(expr.value.loc, "expected lvalue");
+	}
+	return expr.lvalue;
+}
+
+// TODO: we need to be more fine grained than a lvalue
+//
+//       1.test = 20
+//
+//       will not be caught by the parser, we need to
+//       create some sort of "readonly" or "dirty"
+//       lvalues for reading ONLY
+//
+
+// construct an lvalue from an expr
+// if an lvalue, return lvalue
+// if not lvalue, construct temporary and return lvalue
+lir_lvalue_t pexpr_lvalue_from(lir_proc_t *proc, rexpr_t expr) {
+	if (expr.is_lvalue) {
+		return expr.lvalue;
+	} else {
+		rlocal_t l = pexpr_spill_local(proc, expr.block, expr.value);
+		return lir_local_lvalue(l, expr.value.loc);
 	}
 }

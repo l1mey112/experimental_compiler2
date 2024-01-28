@@ -76,11 +76,11 @@ int main(int argc, const char *argv[]) {
 			replp->data = (u8*)inp;
 			replp->len = strlen(inp);
 
-			lir_process_file(repl);
+			compiler_process_file(repl);
 
 			// queue can grow
 			for (; i < fs_files_queue_len; i++) {
-				lir_process_file(i);
+				compiler_process_file(i);
 			}
 		}
 		eprintf("exiting repl\n");
@@ -96,7 +96,7 @@ int main(int argc, const char *argv[]) {
 		for (rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
 			eprintf("parsing file '%s'\n", fs_files_queue[i].fp);
-			lir_process_file(i);
+			compiler_process_file(i);
 			if (old_sz != fs_files_queue_len) {
 				eprintf("  %u new files added\n", fs_files_queue_len - old_sz);
 			}
@@ -112,7 +112,7 @@ ret:
 	
 
 	if (!err && !setjmp(err_diag.unwind)) {
-		lir_check();
+		compiler_check();
 	}
 	
 	/* if (!err && !setjmp(err_diag.unwind)) {
