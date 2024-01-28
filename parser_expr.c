@@ -482,7 +482,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 			first = false;
 		}
 
-		expr = new_expr;		
+		expr = new_expr;
 		set |= expr_set;
 
 		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
@@ -498,6 +498,7 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 	// not EOF, something was present here but didn't return any value
 	// return () to either the brk param or just as a bare expression
 	if (!set) {
+		expr.is_lvalue = false;
 		expr.value = (lir_value_t){
 			.kind = VALUE_TUPLE_UNIT,
 			.type = TYPE_UNIT,
@@ -510,8 +511,6 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 			lir_assign_local(proc, expr.block, do_brk_local, expr.value);
 			expr.value = lir_local_value(do_brk_local, oloc);
 		}
-
-		expr.block = do_brk;
 	}
 
 	if (set && branchable) {
@@ -521,6 +520,11 @@ rexpr_t pdo(lir_proc_t *proc, lir_rblock_t block, istr_t opt_label, loc_t opt_lo
 			.d_goto = do_brk,
 		});
 
+		// write to the brk local, the termination will be spliced anyway
+		// _0 = expr
+		lir_assign_local(proc, expr.block, do_brk_local, pexpr_eu(proc, expr));
+
+		expr.is_lvalue = false;
 		expr.value = (lir_value_t){
 			.kind = VALUE_CTRL_TEMP,
 			.loc = oloc,
@@ -608,7 +612,8 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 
 	rexpr_t expr = pexpr(proc, loop_rep, 0, expr_cfg);
 
-	(void)expr; // TODO: like i said before, should mark unused?
+	// ignore value
+	lir_ignore(proc, expr.block, pexpr_eu(proc, expr));
 
 	// close the infinite loop
 	lir_block_term(proc, expr.block, (lir_term_t){
@@ -632,37 +637,19 @@ rexpr_t ploop(lir_proc_t *proc, lir_rblock_t block, u8 expr_cfg, istr_t opt_labe
 		assert_not_reached();
 	}
 
-	expr.block = loop_brk;
-	expr.value = (lir_value_t){
-		.kind = VALUE_CTRL_TEMP,
-		.loc = oloc,
-		.type = TYPE_INFER,
-		.d_ctrl_temp = {
-			.entry = loop_rep,
-			.local = loop_brk_local,
+	return (rexpr_t){
+		.block = loop_brk,
+		.value = (lir_value_t){
+			.kind = VALUE_CTRL_TEMP,
+			.loc = oloc,
+			.type = TYPE_INFER,
+			.d_ctrl_temp = {
+				.entry = loop_rep,
+				.local = loop_brk_local,
+			},
 		},
 	};
-
-	return expr;
 }
-
-/* void pverify_assign(lir_proc_t *proc, lir_lvalue_t dest) {
-	// %0 = 0
-	// %0 = 20
-	// ^^ not allowed, assign to constant
-
-	// %0 = 0:*i32
-	// %0.* = 20
-	// ^^^^ allowed, some indirection
-
-	if (dest.is_sym) {
-		return;
-	}
-
-	// %0 = ...
-	// %0.test = 20
-	// ^^^^^^^ with type information, this may be a auto-deref field
-} */
 
 // (                           a b                          )
 // ^>    cfg = PEXPR_ET_PAREN  ^^^> cfg = PEXPR_ET_PAREN   >^   break
@@ -795,9 +782,10 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 
 			pnext();
 			while (p.token.kind != TOK_CSQ) {
-				expr = pexpr(proc, expr.block, 0, PEXPR_ET_ARRAY);
+				rexpr_t nexpr = pexpr(proc, expr.block, 0, PEXPR_ET_ARRAY);
+				expr.block = nexpr.block;
 
-				arrpush(elems, pexpr_lu(proc, expr));
+				arrpush(elems, pexpr_lu(proc, nexpr));
 
 				if (p.token.kind == TOK_COMMA) {
 					pnext();
@@ -1198,21 +1186,23 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					//
 					continue; */
 
-					// _0 = p + 1
-					// p = _0
+					// _0 = p
+					// p = _0 + 1
 					// <- _0
 
 					lir_lvalue_t lvalue = pexpr_lvalue(proc, expr);
+
+					lir_value_t _0 = pexpr_spill(proc, expr.block, lir_value_lvalue(lvalue));
 
 					// loc_t:   p++ 
 					//         / ||
 					//    p = p + 1
 					lir_value_t p_plus_plus = {
-						.kind = VALUE_ADD,
+						.kind = token.kind == TOK_INC ? VALUE_ADD : VALUE_SUB,
 						.type = TYPE_INFER,
 						.loc = token.loc,
 						.d_infix = {
-							.lhs = lir_dup(lir_value_lvalue(lvalue)),
+							.lhs = lir_dup(_0),
 							.rhs = lir_dup((lir_value_t){
 								.kind = VALUE_INTEGER_LIT,
 								.type = TYPE_INFER,
@@ -1222,13 +1212,14 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 						},
 					};
 
-					lir_value_t _0 = pexpr_spill(proc, expr.block, p_plus_plus);
-
 					// p = _0
-					lir_assign(proc, expr.block, lvalue, _0);
+					lir_assign(proc, expr.block, lvalue, p_plus_plus);
 
 					// <- _0
-					expr.value = _0;
+					expr = (rexpr_t){
+						.block = expr.block,
+						.value = _0,
+					};
 					continue;
 				}
 				/* case TOK_OSQ: {
@@ -1285,6 +1276,14 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					// x = [1, 4, 5]
 					// let v = x[2];
 					// ```
+					//
+					// UPDATE: though rust raises a warning that "value is never read"
+					//         it actually READS from the assigned value to `x`.
+					//         this is a bug in the rust compiler, not the ordering,
+					//         the warning.
+					//
+					//         this means, that yes, we actually aren't that fucked.
+					//         it's fine really.
 					//
 
 					// INFO: currently slices AREN'T lvalues
@@ -1349,18 +1348,21 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 					continue;
 				} */
 				default: {
-					/* if (TOK_IS_INFIX(token.kind)) {
+					if (TOK_IS_INFIX(token.kind)) {
 						pnext();
 						
 						// cast
 						if (token.kind == TOK_COLON) {
 							type_t type = ptype();
-							expr.value = (lir_value_t){
-								.kind = VALUE_CAST,
-								.type = type,
-								.loc = token.loc,
-								.d_cast = {
-									.src = lir_dup(pexpr_eu(proc, expr)),
+							expr = (rexpr_t){
+								.block = expr.block,
+								.value = {
+									.kind = VALUE_CAST,
+									.type = type,
+									.loc = token.loc,
+									.d_cast = {
+										.src = lir_dup(pexpr_eu(proc, expr)),
+									},
 								},
 							};
 							continue;
@@ -1553,7 +1555,7 @@ rexpr_t pexpr(lir_proc_t *proc, lir_rblock_t block, u8 prec, u8 cfg) {
 							},
 						}), token.loc);
 						continue;
-					} */
+					}
 				}
 			}
 		}

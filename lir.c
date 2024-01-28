@@ -481,6 +481,10 @@ static void _print_value(lir_proc_t *proc, lir_value_t *value) {
 			printf("}");
 			break;
 		}
+		case VALUE_CTRL_NORETURN: {
+			printf("ctrl !");
+			break;
+		}
 		default: {
 			printf("\n\nkind: %u\n\n", value->kind);
 			assert_not_reached();
@@ -493,10 +497,11 @@ static void _print_stmt(lir_proc_t *proc, lir_stmt_t *stmt) {
 	switch (stmt->kind) {
 		case STMT_LVALUE: {
 			_print_lvalue(proc, stmt->dest);
+			printf(" = ");
 			break;
 		}
 		case STMT_DISCARD: {
-			printf("_");
+			printf("_ = ");
 			
 		}
 		case STMT_IGNORE: break;
@@ -504,8 +509,6 @@ static void _print_stmt(lir_proc_t *proc, lir_stmt_t *stmt) {
 			assert_not_reached();
 		}
 	}
-
-	printf(" = ");
 
 	_print_value(proc, &stmt->value);
 

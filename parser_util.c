@@ -798,10 +798,14 @@ lir_value_t pexpr_eu(lir_proc_t *proc, rexpr_t expr) {
 // construct early use, write to temporary
 lir_value_t pexpr_lu(lir_proc_t *proc, rexpr_t expr) {
 	lir_value_t value = pexpr_eu(proc, expr);
-	
+
 	// TODO: this is a regression
 	//       don't spill if the value is immutable
-	return pexpr_spill(proc, expr.block, value);
+	if (value.kind == VALUE_LVALUE) {
+		value = pexpr_spill(proc, expr.block, value);
+	}
+	
+	return value;
 }
 
 lir_lvalue_t pexpr_lvalue(lir_proc_t *proc, rexpr_t expr) {

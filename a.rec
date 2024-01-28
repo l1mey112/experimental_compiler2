@@ -90,10 +90,24 @@
 ; fact: i32 -> i32
 ; fact: n = if (n == 0) 1 else n * fact (n - 1)
 
-f: u8 -> u8
-f: a = loop brk a
+; f: u8 -> u8
+; f: a = loop brk a
 
 ; f: u8 -> u8
 ; f: a = :t do
 ;     a
 ;     a
+
+; main: i32 -> []i32
+; main: t = :t do
+;     let a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+;     [1, 2, 3]
+
+; dec_loop: i32 -> i32
+; dec_loop: 'x = loop do
+;     x--
+;     brk x
+
+
+t: i32 -> i32
+t: k = k
