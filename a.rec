@@ -108,7 +108,10 @@
 ;     x--
 ;     brk x
 
-f: () -> i32
-f: () = :t do
-	brk :t 20
-	40
+; f: () -> i32
+; f: () = :t do
+;     brk :t 20
+;     40
+
+a: i32 -> i32 -> i32
+a: f x = f x x x x x

@@ -351,9 +351,26 @@ rlocal_t proc_local_new(proc_t *proc, local_t local);
 
 struct proc_t {
 	local_t *locals; // variables
-	hir_expr_t *exprs;
-	lir_proc_t lir;
 	u16 arguments;   // first [0..arguments] are locals with types inserted
+
+	hir_expr_t hir;
+	lir_proc_t lir;
+};
+
+struct local_t {
+	type_t type;
+	enum : u8 {
+		LOCAL_MUT, // assigned multiple times
+		LOCAL_IMM, // assigned once in all flows of control
+	} kind;
+
+	// TODO: optimised out or removed flag so debuggers
+	//       like GDB can let the user know that
+
+	// TODO: we desperately need a NULL value for locations or
+	//       just revamp locations entirely which we should
+	loc_t loc;
+	istr_t name;
 };
 
 struct sym_t {
@@ -387,3 +404,5 @@ extern sym_t *symbols;
 
 rsym_t table_resolve(istr_t qualified_name);
 rsym_t table_register(sym_t desc);
+void table_dump(sym_t *sym);
+void table_dump_all(void);

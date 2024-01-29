@@ -90,4 +90,4 @@ void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
 pattern_t ppattern(proc_t *proc);
 u32 pblk_locate(istr_t opt_label, loc_t onerror);
 
-hir_expr_t pexpr(proc_t *proc, u8 prec, u8 cfg);
+hir_expr_t pexpr(proc_t *proc, u8 prec);

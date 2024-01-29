@@ -91,7 +91,6 @@ void pfn(void) {
 		},
 	};
 
-
 	// start parsing
 
 	if (!(p.token.kind == TOK_IDENT && p.token.lit == name)) {
@@ -142,7 +141,7 @@ void pfn(void) {
 		// with pattern, construct a basic block for it
 
 		ppush_scope();
-		hir_expr_t expr = pexpr(&proc, 0, 0);
+		hir_expr_t expr = pexpr(&proc, 0);
 		ppop_scope();
 		ppop_scope();
 
@@ -151,6 +150,8 @@ void pfn(void) {
 		arrpush(match.d_match.patterns, pattern);
 		arrpush(match.d_match.exprs, expr);
 	}
+
+	proc.hir = match;
 
 	table_register((sym_t){
 		.key = qualified_name,

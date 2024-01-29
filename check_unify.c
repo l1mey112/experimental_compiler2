@@ -16,31 +16,6 @@ type_t ctype_convert_numbers(type_t to, type_t from) {
 	bool t_ui = type_is_integer(to) && type_is_unsigned(to);
 	bool f_ui = type_is_integer(from) && type_is_unsigned(from);
 
-	bool t_lit = type_is_literal_number(to);
-	bool f_lit = type_is_literal_number(from);
-
-    // {integer literals} <- {integers}
-    // {float literals} <- {floats}
-
-	if (t_lit) {
-        if (f_lit && to == from) {
-            ret = to;
-            goto end;
-        }
-
-        if (to == TYPE_INT_LITERAL && type_is_integer(from)) {
-            ret = to;
-            goto end;
-        }
-
-        if (to == TYPE_FLOAT_LITERAL && type_is_float(from)) {
-            ret = to;
-            goto end;
-        }
-
-		return TYPE_INFER;
-	}
-
 	// signed type to signed type
 	if (t_si && f_si) {
 		if (to > from) {

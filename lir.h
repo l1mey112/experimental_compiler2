@@ -16,22 +16,6 @@ typedef struct lir_stmt_t lir_stmt_t;
 #define LOCAL_NONE ((rlocal_t)-1)
 #define INST_NONE ((u32)-1)
 
-struct local_t {
-	type_t type;
-	enum : u8 {
-		LOCAL_MUT, // assigned multiple times
-		LOCAL_IMM, // assigned once in all flows of control
-	} kind;
-
-	// TODO: optimised out or removed flag so debuggers
-	//       like GDB can let the user know that
-
-	// TODO: we desperately need a NULL value for locations or
-	//       just revamp locations entirely which we should
-	loc_t loc;
-	istr_t name;
-};
-
 #define PROJ_IDX_INVALID ((u16)-1)
 
 struct lir_lvalue_proj_t {

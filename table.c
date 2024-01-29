@@ -58,3 +58,34 @@ rlocal_t proc_local_new(proc_t *proc, local_t local) {
 	arrpush(proc->locals, local);
 	return idx;
 }
+
+// impl module dump and so on
+
+// TODO: need to unify them together
+//       1. they'll print the same function
+//       2. the same locals
+//       3. but instead subst for `lir` and `hir`
+//
+// TODO: print hir expr
+// TOOD: normal print pattern though, shared
+
+extern void hir_dump_function(sym_t *sym);
+
+void table_dump(sym_t *sym) {
+	switch (sym->kind) {
+		case SYMBOL_PROC: {
+			hir_dump_function(sym);
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+void table_dump_all(void) {
+	for (u32 i = 0, c = hmlenu(symbols); i < c; i++) {
+		sym_t *sym = &symbols[i];
+		table_dump(sym);
+	}
+}

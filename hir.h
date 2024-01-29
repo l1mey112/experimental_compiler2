@@ -33,8 +33,8 @@ struct hir_expr_t {
 		EXPR_BREAK, // always !.
 		EXPR_VOIDING, // evaluates expr, possible effects. discards return value, returning ()
 		EXPR_SIZEOF_TYPE, // is usize
-		EXPR_TUPLE_FIELD,
-        EXPR_FIELD,
+        EXPR_FIELD, // named field and tuple field
+		EXPR_LET,
 	} kind;
 	
 	type_t type;
@@ -46,10 +46,14 @@ struct hir_expr_t {
 		hir_expr_t *d_voiding;
 		hir_expr_t *d_deref;
 		type_t d_sizeof_type;
+		hir_expr_t *d_cast;
+		istr_t d_integer_lit;
+		bool d_bool_lit;
 		struct {
 			hir_expr_t *expr;
-			u16 field;
-		} d_tuple_field;
+			u16 field_idx; // (default -1) set for tuples, for fields after checking both are set 
+			istr_t field;  // set for fields
+		} d_field;
 		struct {
 			hir_expr_t *expr;
 			hir_expr_t *index;
@@ -76,7 +80,10 @@ struct hir_expr_t {
 		} d_postfix;
 		struct {
 			hir_expr_t *expr;
-			tok_t kind; // TODO: create enum kind
+			 enum : u8 {
+                EXPR_K_NOT,
+                EXPR_K_SUB,
+            } kind;
 		} d_prefix;
 		struct {
 			hir_expr_t *exprs; // all do blocks have at least one expr, unless they become a EXPR_TUPLE_UNIT
@@ -91,12 +98,6 @@ struct hir_expr_t {
 			hir_expr_t *rhs;
 			tok_t kind; // TODO: create enum kind
 		} d_infix;
-		hir_expr_t *d_cast;
-		struct {
-			istr_t lit;
-			bool negate;
-		} d_integer_lit;
-		bool d_bool_lit;
 		/* struct {
 			hir_rvar_t *args;
 			hir_expr_t *expr;
@@ -106,10 +107,10 @@ struct hir_expr_t {
 			pattern_t *patterns;
 			hir_expr_t *exprs;
 		} d_match;
-		/* struct {
+		struct {
 			pattern_t pattern;
 			hir_expr_t *expr;
-		} d_let_decl; */
+		} d_let;
 		struct {
 			hir_expr_t *f;
 			hir_expr_t *args; // f(...args)

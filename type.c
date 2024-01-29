@@ -202,14 +202,9 @@ static void _type_dbg_str(type_t type, bool inner) {
 	}
 }
 
-// literal numbers
-bool type_is_literal_number(type_t type) {
-	return type == TYPE_INT_LITERAL || type == TYPE_FLOAT_LITERAL;
-}
-
 // checks for literals, everything else doesn't
 bool type_is_number(type_t type) {
-	return type == TYPE_INT_LITERAL || type == TYPE_FLOAT_LITERAL || (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END) ||
+	return (type >= TYPE_SIGNED_INTEGERS_START && type <= TYPE_SIGNED_INTEGERS_END) ||
 		(type >= TYPE_UNSIGNED_INTEGERS_START && type <= TYPE_UNSIGNED_INTEGERS_END) ||
 		(type == TYPE_F32 || type == TYPE_F64);
 }
