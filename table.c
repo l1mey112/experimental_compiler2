@@ -89,6 +89,10 @@ void table_dump(sym_t *sym) {
 			_dump_global(sym);
 			break;
 		}
+		case SYMBOL_TYPE: {
+			printf(" = %s\n", type_dbg_str(sym->type));
+			break;
+		}
 		default: {
 			assert_not_reached();
 		}

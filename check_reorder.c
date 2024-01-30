@@ -289,6 +289,10 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 			visit_successors_hir(po, rsym, &sym->d_global.desc.hir);
 			break;
 		}
+		case SYMBOL_TYPE: {
+			eprintf("TODO: doing nothing on SYMBOL_TYPE\n");
+			break;
+		}
 		default: {
 			assert_not_reached();
 		}
@@ -309,6 +313,25 @@ void creorder_and_type(void) {
 	// we store the visited status on the actual `sym_t`, it's easier
 
 	rsym_t *po = NULL;
+
+	// main.Function
+	//      ^^^^^^^^
+	// TODO: raise on use
+
+	// iterate through entire type table
+	/* for (u32 i = 0; i < type_len; i++) {
+		tinfo_t *info = &types[i];
+
+		if (info->kind == TYPE_SYMBOL) {
+			sym_t *sym = &symbols[info->d_symbol];
+
+			// will raise placeholder errors inside the topological sort
+			// because we need to identify cyclic recursive types
+			if (sym->kind != SYMBOL_TYPE) {
+				err_with_pos(sym->loc, "expected type symbol");
+			}
+		}
+	} */
 
 	for (rsym_t rsym = 0; rsym < hmlenu(symbols); rsym++) {
 		sym_t *sym = &symbols[rsym];

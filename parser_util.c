@@ -315,15 +315,45 @@ type_t ptype_expr(u8 prec) {
 			break;
 		}
 		case TOK_IDENT: {
-			istr_t initial = p.token.lit;
-			pnext();
-            // TODO: USE TYPE SYMBOLS
-			if (p.token.kind == TOK_DOT) {
-				// TODO: integrate module system later
-				assert_not_reached();
+			istr_t lit = p.token.lit;
+			loc_t loc = p.token.loc;
+
+			// Type
+			// module.Type
+
+			rsym_t typesym;
+
+			int id;
+			if ((id = pimport_ident(lit)) != -1) {
+				pnext();
+				// TODO: duplicated node inside pident()
+				if (p.token.kind != TOK_DOT) {
+					print_err_with_pos(p.token.loc, "expected `.` after import name `%s`", sv_from(p.is[id].name));
+					print_hint_with_pos(loc, "import name `%s` used here", sv_from(p.is[id].name));
+					err_unwind();
+				}
+				pnext();
+				pcheck(TOK_IDENT);
+				istr_t lit = p.token.lit;
+				pnext();
+
+				istr_t qualified_name = fs_module_symbol_sv(p.is[id].mod, lit);
+
+				typesym = table_resolve(qualified_name);
 			} else {
-				assert_not_reached();
+				// TODO: perform search of local scope, incase of scoped defs
+
+				// main.Foo
+				istr_t qualified_name = fs_module_symbol_sv(p.mod, lit);
+
+				typesym = table_resolve(qualified_name);
+				pnext();
 			}
+			
+			type = type_new((tinfo_t){
+				.kind = TYPE_SYMBOL,
+				.d_symbol = typesym,
+			});
 			break;
 		}
 		case TOK_NOT: {

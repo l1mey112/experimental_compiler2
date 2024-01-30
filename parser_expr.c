@@ -109,6 +109,7 @@ hir_expr_t pident() {
 	int id;
 	if ((id = pimport_ident(lit)) != -1) {
 		pnext();
+		// TODO: duplicated node inside ptype()
 		if (p.token.kind != TOK_DOT) {
 			print_err_with_pos(p.token.loc, "expected `.` after import name `%s`", sv_from(p.is[id].name));
 			print_hint_with_pos(loc, "import name `%s` used here", sv_from(p.is[id].name));

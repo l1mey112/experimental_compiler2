@@ -167,6 +167,8 @@ enum ti_kind {
 	TYPE_PTR,
 	TYPE_SLICE,
 	TYPE_ARRAY,
+	TYPE_STRUCT,
+	TYPE_SYMBOL, // or ALIAS ??
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
 	// TYPE_ENUM,
@@ -175,15 +177,23 @@ enum ti_kind {
 	// TYPE_FIXEDARRAY,
 };
 
+typedef struct sym_t sym_t;
+typedef u32 rsym_t;
+
 typedef enum ti_kind ti_kind;
 typedef struct tinfo_t tinfo_t;
+typedef struct tinfo_sf_t tinfo_sf_t;
+
+struct tinfo_sf_t {
+	istr_t field;
+	type_t type;
+};
 
 struct tinfo_t {
 	ti_kind kind;
 
-	bool is_named; // module.lit for named types
-
 	union {
+		rsym_t d_symbol;
 		struct {
 			type_t *args;
 			type_t ret;
@@ -210,6 +220,9 @@ struct tinfo_t {
 			type_t ref;
 			bool is_mut;
 		} d_ptr;
+		struct {
+			tinfo_sf_t *fields;
+		} d_struct;
 	};
 };
 
@@ -262,6 +275,8 @@ extern u32 fs_files_queue_len;
 extern file_t fs_files_queue[512];
 extern u32 fs_mod_arena_len;
 extern mod_t fs_mod_arena[128];
+extern tinfo_t types[1024];
+extern u32 type_len;
 
 #define MOD_PTR(mod) (&fs_mod_arena[mod])
 #define FILE_PTR(file) (&fs_files_queue[file])
@@ -274,9 +289,6 @@ rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror)
 istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
-
-typedef struct sym_t sym_t;
-typedef u32 rsym_t;
 
 void compiler_process_file(rfile_t f);
 void compiler_check(void);

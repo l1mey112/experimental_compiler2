@@ -56,7 +56,9 @@
 	X(TOK_RETURN, "ret") \
 	X(TOK_VOID, "void") \
 	X(TOK_IF, "if") \
-	X(TOK_ELSE, "else")
+	X(TOK_ELSE, "else") \
+	X(TOK_STRUCT, "struct") \
+	X(TOK_TYPE, "type")
 
 //	X(TOK_IN, "in")
 
@@ -99,7 +101,9 @@
 	X(TOK_CSQ, "]") \
 	X(TOK_COLON, ":") \
 	X(TOK_QUESTION, "?") \
-	X(TOK_SINGLE_AND, "&")
+	X(TOK_SINGLE_AND, "&") \
+	X(TOK_OCBR, "{") \
+	X(TOK_CCBR, "}")
 
 // X(TOK_LSHIFT, "<<")
 // X(TOK_RSHIFT, ">>")

@@ -116,18 +116,27 @@
 ;     g
 ; 
 ; inc_double((x: i32, y: i32)) -> (i32, i32)
-
-test1 = test0
-test0 = test1
-
-; test = teeeeeeeeees
-; test0 = test1
+; 
 ; test1 = test0
-; obvious_cycle = 50 + obvious_cycle
-; intrusive: *i32 = &intrusive
+; test0 = test1
+; 
+; ; test = teeeeeeeeees
+; ; test0 = test1
+; ; test1 = test0
+; ; obvious_cycle = 50 + obvious_cycle
+; ; intrusive: *i32 = &intrusive
+; 
+; inc_double(t: (i32, i32)) -> (i32, i32) = (inc t.0, inc t.1)
+; 
+; ident(x: i32) -> i32 = x
+; 
+; inc(x: i32) -> i32 = ident x + 1
 
-inc_double(t: (i32, i32)) -> (i32, i32) = (inc t.0, inc t.1)
+F() = 0
 
-ident(x: i32) -> i32 = x
+struct Foo {
+    x: i32
+    y: F
+}
 
-inc(x: i32) -> i32 = ident x + 1
+take(a: Foo) = 0

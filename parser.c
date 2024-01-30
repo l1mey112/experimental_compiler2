@@ -174,6 +174,65 @@ void ptop_global(void) {
 	});
 }
 
+void pstruct(void) {
+	pnext();
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
+	// struct Foo {
+	//        ^^^
+
+	pnext();
+	pexpect(TOK_OCBR);
+	
+	// TODO: unexpected `...`, expected `{` to start struct body
+	//                                      ^^^^^^^^^^^^^^^^^^^^ `to` clause in unexpected
+
+	tinfo_sf_t *fields = NULL;
+
+	while (p.token.kind != TOK_CCBR) {
+		istr_t field = p.token.lit;
+		loc_t field_loc = p.token.loc;
+		
+		// a: i32
+		// ^
+		
+		pnext();
+		pexpect(TOK_COLON);
+		type_t field_type = ptype();
+
+		tinfo_sf_t sf = {
+			.field = field,
+			.type = field_type,
+		};
+
+		arrpush(fields, sf);
+	}
+	// }
+	// ^
+	pnext();
+
+	tinfo_t typeinfo = {
+		.kind = TYPE_STRUCT,
+		.d_struct = {
+			.fields = fields,
+		},
+	};
+
+	type_t type = type_new(typeinfo);
+	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+
+	table_register((sym_t){
+		.key = qualified_name,
+		.mod = p.mod,
+		.short_name = name,
+		.loc = name_loc,
+		.type = type,
+		.kind = SYMBOL_TYPE,
+	});
+}
+
 // functions, constants, globals, types, attributes, etc.
 void ptop_stmt(void) {
 	if (p.token.kind != TOK_IMPORT) {
@@ -203,6 +262,11 @@ void ptop_stmt(void) {
 
 			ptop_global();
 			break;	
+		}
+		// todo make this just a normal decl statement and not restricted to toplevel
+		case TOK_STRUCT: {
+			pstruct();
+			break;
 		}
 		default: {
 			punexpected("expected top-level statement");

@@ -1,7 +1,7 @@
 #include "all.h"
 
-static tinfo_t types[1024];
-static u32 type_len;
+tinfo_t types[1024];
+u32 type_len;
 
 static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 	ti_kind a_type = a->kind, b_type = b->kind;
@@ -9,6 +9,8 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 	if (a_type != b_type) {
 		return false;
 	}
+
+	// TODO: proper hash-cons
 
 	switch (a_type) {
 		case TYPE_FUNCTION: {
@@ -44,6 +46,22 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 		}
 		case TYPE_ARRAY: {
 			return a->d_array.elem == b->d_array.elem && a->d_array.length == b->d_array.length;
+		}
+		case TYPE_SYMBOL: {
+			return a->d_symbol == b->d_symbol;
+		}
+		case TYPE_STRUCT: {
+			if (arrlenu(a->d_struct.fields) != arrlenu(b->d_struct.fields)) {
+				return false;
+			}
+			for (u32 i = 0, c = arrlenu(a->d_struct.fields); i < c; i++) {
+				tinfo_sf_t *a_f = &a->d_struct.fields[i];
+				tinfo_sf_t *b_f = &b->d_struct.fields[i];
+				if (a_f->field != b_f->field || a_f->type != b_f->type) {
+					return false;
+				}
+			}
+			return true;
 		}
 		default: {
 			assert_not_reached();
@@ -130,6 +148,8 @@ static const char *ctinfo_str[] = {
 	#undef X
 };
 
+// TODO: proper printf streamer for string dbg output
+
 static void _type_dbg_str(type_t type, bool inner) {
 	#define COMMIT(expr) \
 		do { \
@@ -197,8 +217,26 @@ static void _type_dbg_str(type_t type, bool inner) {
 			_type_dbg_str(typeinfo->d_slice.elem, false);
 			break;
 		}
-		default:
+		case TYPE_STRUCT: {
+			COMMIT(sprintf((char *)p, "struct { "));
+			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
+				tinfo_sf_t *f = &typeinfo->d_struct.fields[i];
+				COMMIT(sprintf((char *)p, "%s: ", sv_from(f->field)));
+				_type_dbg_str(f->type, false);
+				if (i + 1 < c) {
+					COMMIT(sprintf((char *)p, ", "));
+				}
+			}
+			COMMIT(sprintf((char *)p, " }"));
+			break;
+		}
+		case TYPE_SYMBOL: {
+			COMMIT(sprintf((char *)p, "%s", sv_from(symbols[typeinfo->d_symbol].key)));
+			break;
+		}
+		default: {
 			assert_not_reached();
+		}
 	}
 }
 
