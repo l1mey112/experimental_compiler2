@@ -23,13 +23,13 @@ static void _print_local_type(proc_t *proc, rlocal_t local) {
 	printf(": %s", type_dbg_str(localp->type));
 }
 
-static void _print_term_pattern(proc_t *proc, pattern_t *pattern) {
+static void _print_pattern(proc_t *proc, pattern_t *pattern) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
 			printf("(");
 			for (u32 i = 0, c = arrlenu(pattern->d_tuple.elems); i < c; i++) {
 				pattern_t *elem = &pattern->d_tuple.elems[i];
-				_print_term_pattern(proc, elem);
+				_print_pattern(proc, elem);
 				if (i + 1 < c) {
 					printf(", ");
 				}
@@ -40,19 +40,19 @@ static void _print_term_pattern(proc_t *proc, pattern_t *pattern) {
 		case PATTERN_ARRAY: {
 			printf("[");
 			if (pattern->d_array.match && pattern->d_array.match_lhs) {
-				_print_term_pattern(proc, pattern->d_array.match);
+				_print_pattern(proc, pattern->d_array.match);
 				printf("..., ");
 			}
 			for (u32 i = 0, c = arrlenu(pattern->d_array.elems); i < c; i++) {
 				pattern_t *elem = &pattern->d_array.elems[i];
-				_print_term_pattern(proc, elem);
+				_print_pattern(proc, elem);
 				if (i + 1 < c) {
 					printf(", ");
 				}
 			}
 			if (pattern->d_array.match && !pattern->d_array.match_lhs) {
 				printf(", ...");
-				_print_term_pattern(proc, pattern->d_array.match);
+				_print_pattern(proc, pattern->d_array.match);
 			}
 			printf("]");
 			break;
@@ -159,7 +159,11 @@ static void _print_expr(proc_t *proc, hir_expr_t *expr) {
 			printf(":%u do\n", expr->d_do_block.blk_id);
 			_tabs++;
 			for (int i = 0, c = arrlen(expr->d_do_block.exprs); i < c; i++) {
+				_print_tabs();
 				_print_expr(proc, &expr->d_do_block.exprs[i]);
+				if (i != c - 1) {
+					printf("\n"); // expr automatically prints newline
+				}
 			}
 			_tabs--;
 			break;
@@ -191,6 +195,15 @@ static void _print_expr(proc_t *proc, hir_expr_t *expr) {
 		case EXPR_BREAK: {
 			printf("brk :%u ", expr->d_break.blk_id);
 			_print_expr(proc, expr->d_break.expr);
+			break;
+		}
+		case EXPR_CONTINUE: {
+			printf("rep :%u", expr->d_continue.blk_id);
+			break;
+		}
+		case EXPR_RETURN: {
+			printf("ret ");
+			_print_expr(proc, expr->d_return);
 			break;
 		}
 		case EXPR_CAST: {
@@ -249,10 +262,12 @@ static void _print_expr(proc_t *proc, hir_expr_t *expr) {
 			_tabs++;
 			for (u32 i = 0, c = arrlenu(expr->d_match.exprs); i < c; i++) {
 				_print_tabs();
-				_print_term_pattern(proc, &expr->d_match.patterns[i]);
+				_print_pattern(proc, &expr->d_match.patterns[i]);
 				printf(" -> ");
 				_print_expr(proc, &expr->d_match.exprs[i]);
-				printf("\n");
+				if (i != c - 1) {
+					printf("\n"); // expr automatically prints newline
+				}
 			}
 			_tabs--;
 			break;
@@ -299,6 +314,13 @@ static void _print_expr(proc_t *proc, hir_expr_t *expr) {
 			printf("]");
 			break;
 		}
+		case EXPR_LET: {
+			printf("let ");
+			_print_pattern(proc, &expr->d_let.pattern);
+			printf(" = ");
+			_print_expr(proc, expr->d_let.expr);
+			break;
+		}
 		default: {
 			printf("\nunknown expr kind %d\n", expr->kind);
 			print_hint_with_pos(expr->loc, "LOC HERE");
@@ -329,9 +351,10 @@ void hir_dump_function(sym_t *sym) {
 		}
 	}
 
-	printf(") -> %s lir = ", type_dbg_str(type_get(sym->type)->d_fn.ret));
+	printf(") -> %s hir = ", type_dbg_str(type_get(sym->type)->d_fn.ret));
 
 	_print_expr(proc, &proc->hir);
+	printf("\n");
 
 	alloc_reset(_);
 }

@@ -260,7 +260,7 @@ bool plet(proc_t *proc, hir_expr_t *expr_out) {
 
 // returns true if a value was set
 // regardless the block field may or may not be written to
-bool pstmt(proc_t *proc, lir_rblock_t block, hir_expr_t *expr_out) {
+bool pstmt(proc_t *proc, hir_expr_t *expr_out) {
 	bool set = false;
 
 	switch (p.token.kind) {
@@ -288,10 +288,101 @@ bool pstmt(proc_t *proc, lir_rblock_t block, hir_expr_t *expr_out) {
 	return set;
 }
 
+// naive indentation rules, but works for now
+// do
+//     ...
+//     ...
+hir_expr_t pdo(proc_t *proc, istr_t opt_label, loc_t opt_loc) {
+	loc_t oloc = p.token.loc;
+	pnext();
+	//
+	// TODO: handle the case where the next line token is dedented less than the actual do
+	//       would need some lexer stuff (store the start of the line in parser)
+	if (p.token.kind == TOK_EOF || p.token.loc.line_nr == oloc.line_nr) {
+		err_with_pos(oloc, "expected newline after `do`");
+	}
+
+	// TODO: implement `:do` syntax
+
+	u8 blk_id = p.blks_len++;
+	p.blks[blk_id] = (pblk_t){
+		.label = opt_label,
+		.loc = opt_loc,
+		.always_brk = false,
+	};
+
+	hir_expr_t *exprs = NULL;
+
+	bool first = true;
+
+	u32 bcol = p.token.loc.col;
+	ppush_scope();
+	while (p.token.kind != TOK_EOF) {
+		u32 cln = p.token.loc.line_nr;
+
+		hir_expr_t expr;
+		bool set = pstmt(proc, &expr);
+		if (set) {
+			arrpush(exprs, expr);
+		}
+
+		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
+			break;
+		}
+	}
+	ppop_scope();
+	p.blks_len--;
+
+	if (exprs == NULL) {
+		return (hir_expr_t){
+			.kind = EXPR_TUPLE_UNIT,
+			.loc = oloc,
+			.type = TYPE_UNIT,
+		};
+	}
+
+	hir_expr_t block = {
+		.kind = EXPR_DO_BLOCK,
+		.loc = oloc,
+		.type = TYPE_INFER,
+		.d_do_block = {
+			.exprs = exprs,
+			.blk_id = blk_id,
+		},
+	};
+
+	return block;
+}
+
+// loop expr
+hir_expr_t ploop(proc_t *proc, istr_t opt_label, loc_t opt_loc) {
+	loc_t oloc = p.token.loc;
+	pnext();
+
+	u8 blk_id = p.blks_len++;
+	p.blks[blk_id] = (pblk_t){
+		.label = opt_label,
+		.loc = opt_loc,
+		.always_brk = true,
+	};
+	hir_expr_t *expr = hir_dup(pexpr(proc, 0));
+	p.blks_len--;
+
+	hir_expr_t loop = {
+		.kind = EXPR_LOOP,
+		.loc = oloc,
+		.type = TYPE_INFER,
+		.d_loop = {
+			.blk_id = blk_id,
+			.expr = expr,
+		},
+	};
+
+	return loop;
+}
+
 // fallable
 static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
-	token_t token = p.token;
-
 	struct {
 		istr_t name;
 		loc_t name_loc;
@@ -301,7 +392,9 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 
 	hir_expr_t expr;
 
-	retry: switch (token.kind) {
+	retry: {}
+	token_t token = p.token;
+	switch (token.kind) {
 		case TOK_VOID: {
 			pnext();
 			// void expr
@@ -411,16 +504,16 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 			}
 			goto retry;
 		}
-		/* case TOK_DO: {
-			expr = pdo(s, label.name, label.name_loc); // TODO?: no chaining
+		case TOK_DO: {
+			expr = pdo(proc, label.name, label.name_loc);
 			label.name = ISTR_NONE;
 			break;
 		}
 		case TOK_LOOP: {
-			expr = ploop(s, cfg, previous_exprs, label.name, label.name_loc);
+			expr = ploop(proc, label.name, label.name_loc);
 			label.name = ISTR_NONE;
 			break;
-		} */
+		}
 		case TOK_BREAK: {
 			istr_t label = ISTR_NONE;
 			loc_t onerror = token.loc;
@@ -445,17 +538,49 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 			};
 			break;
 		}
+		case TOK_CONTINUE: {
+			istr_t label = ISTR_NONE;
+			loc_t onerror = token.loc;
+			pnext();
+			// parse label
+			if (p.token.kind == TOK_COLON) {
+				pnext();
+				pcheck(TOK_IDENT);
+				label = p.token.lit;
+				onerror = p.token.loc;
+				pnext();
+			}
+			u8 blk_id = pblk_locate(label, onerror);
+			expr = (hir_expr_t){
+				.kind = EXPR_CONTINUE,
+				.loc = token.loc,
+				.type = TYPE_BOTTOM,
+				.d_continue = {
+					.blk_id = blk_id,
+				},
+			};
+			break;
+		}
+		case TOK_RETURN: {
+			pnext();
+			expr = (hir_expr_t){
+				.kind = EXPR_RETURN,
+				.loc = token.loc,
+				.type = TYPE_BOTTOM,
+				.d_return = hir_dup(pexpr(proc, 0)),
+			};
+			break;
+		}
 		case TOK_IDENT: {
 			expr = pident();
 			break;
 		}
 		case TOK_OPAR: {
-			loc_t oloc = token.loc;
 			pnext();
 			if (p.token.kind == TOK_CPAR) {
 				expr = (hir_expr_t){
 					.kind = EXPR_TUPLE_UNIT,
-					.loc = oloc,
+					.loc = token.loc,
 					.type = TYPE_UNIT,
 				};
 				pnext();
@@ -486,7 +611,7 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 			if (elems != NULL) {
 				expr = (hir_expr_t){
 					.kind = EXPR_TUPLE,
-					.loc = oloc,
+					.loc = token.loc,
 					.type = TYPE_INFER,
 					.d_tuple = elems,
 				};
@@ -494,7 +619,6 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 			break;
 		}
 		case TOK_OSQ: {
-			loc_t oloc = token.loc;
 			hir_expr_t *exprs = NULL;
 
 			// [ 1, 2, 3, 4, 5 ]
@@ -518,7 +642,7 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 
 			expr = (hir_expr_t){
 				.kind = EXPR_ARRAY,
-				.loc = oloc,
+				.loc = token.loc,
 				.type = TYPE_INFER,
 				.d_array = exprs,
 			};
@@ -556,6 +680,7 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 							.d_prefix.expr = hir_dup(rhs),
 							.d_prefix.kind = k,
 						};
+						break;
 					}
 					case TOK_SINGLE_AND: {
 						bool is_mut = false;
@@ -574,6 +699,7 @@ static bool pexpr_fallable_unit(proc_t *proc, hir_expr_t *out_expr) {
 							.d_addr_of.ref = hir_dup(rhs),
 							.d_addr_of.is_mut = is_mut,
 						};
+						break;
 					}
 					default: {
 						assert_not_reached();
@@ -610,8 +736,8 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 		u8 nprec = ptok_prec_ambiguities();
 		nprec = nprec == 0 ? PREC_CALL : nprec;
 
-		if (prec >= nprec) {
-			break;
+		if (prec >= nprec || token.loc.line_nr != line_nr) {
+			goto exit;
 		}
 
 		switch (token.kind) {
@@ -635,9 +761,8 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 				};
 				continue;
 			}
-			/* case TOK_OSQ: {
+			case TOK_OSQ: {
 				// x[0..1] and x[0]
-				loc_t oloc = p.token.loc;
 				pnext();
 
 				hir_expr_t *expr0;
@@ -647,12 +772,12 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 					pnext();
 				} else {
 					// x[0]
-					expr0 = hir_dup(pexpr(s, 0, PEXPR_ET_INDEX_LO, previous_exprs));
+					expr0 = hir_dup(pexpr(proc, 0));
 					if (p.token.kind == TOK_CSQ) {
 						pnext();
 						expr = (hir_expr_t){
 							.kind = EXPR_INDEX,
-							.loc = oloc,
+							.loc = token.loc,
 							.type = TYPE_INFER,
 							.d_index = {
 								.expr = hir_dup(expr),
@@ -661,16 +786,17 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 						};
 						continue;
 					}
+					pexpect(TOK_DOUBLE_DOTS);
 				}
-				// x[0..]
-				//      ^
-				// x[0..1]
-				//      ^
+				//
+				// x[?..]
+				// x[?..expr]
+				//
 				if (p.token.kind == TOK_CSQ) {
 					pnext();
 					expr = (hir_expr_t){
 						.kind = EXPR_SLICE,
-						.loc = oloc,
+						.loc = token.loc,
 						.type = TYPE_INFER,
 						.d_slice = {
 							.expr = hir_dup(expr),
@@ -679,12 +805,12 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 						},
 					};
 				} else {
-					hir_expr_t expr1 = pexpr(s, 0, PEXPR_ET_INDEX_HI, previous_exprs);
+					hir_expr_t expr1 = pexpr(proc, 0);
 					pexpect(TOK_CSQ);
 
 					expr = (hir_expr_t){
 						.kind = EXPR_SLICE,
-						.loc = oloc,
+						.loc = token.loc,
 						.type = TYPE_INFER,
 						.d_slice = {
 							.expr = hir_dup(expr),
@@ -694,7 +820,7 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 					};
 				}
 				continue;
-			} */
+			}
 			default: {
 				if (TOK_IS_INFIX(token.kind)) {
 					pnext();
@@ -839,7 +965,7 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 					}
 
 					if (exprs == NULL) {
-						break;
+						goto exit;
 					}
 
 					expr = (hir_expr_t){
@@ -854,6 +980,7 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 			}
 		}
 	}
+exit:
 
 	*out_expr = expr;
 	return true;
@@ -864,7 +991,7 @@ static bool pexpr_fallable(proc_t *proc, u8 prec, hir_expr_t *out_expr) {
 hir_expr_t pexpr(proc_t *proc, u8 prec) {
 	hir_expr_t expr;
 
-	if (!pexpr_fallable(proc, 0, &expr)) {
+	if (!pexpr_fallable(proc, prec, &expr)) {
 		punexpected("expected expression");
 	}
 

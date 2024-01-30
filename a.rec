@@ -1,117 +1,116 @@
-; add: i32 -> i32 -> i32
-; add: a b = a + b
-; add: a 0 = a
-; add: 0 b = b
-; add: 0 0 = 0
-; 
-; addsome: i32 -> i32
-; addsome: 'xs = xs += 20
-; 
-; addr: i32 -> i32
-; addr: x = (&x).*
-; 
-; select: bool -> i32 -> i32 -> i32
-; select: cond a b = if (cond) a else b
-; 
-; selectn: bool -> i32 -> ()
-; selectn: cond a = if (cond) a
-; 
-; eeepy: i32 -> (i32, i32)
-; eeepy: x = (x, undefined)
-; 
-; main: () -> ()
-; main: () = :t do
-;     brk :t 50 + 50
-; 
-; condbrk0: bool -> i32
-; condbrk0: cond = :t do
-;     brk :t if (cond) 50 + 50 else 25
-; 
-; c: bool -> i32
-; c: cond = if (cond) 50 + 50 else 25
-; 
-; idx_ret: i32 -> i32
-; idx_ret: x = [1, 2, 3, 4, if (x) 20 else 25][x]
-; 
-; slice_some: i32 -> i32 -> []i32 -> []i32
-; slice_some: lo hi xs = do
-;     let a = xs[lo..]
-;     let b = xs[..hi]
-;     let c = xs[lo..hi]
-;     let d = xs[..]
-; 
-;     ()
-; 
-; idx_ret0: i32 -> i32
-; idx_ret0: x = [1, if (x) 2 else 2, 3][x]
-; 
-; call: i32 -> i32 -> i32      ; (assume these types work)
-; call: 'f 'x = do
-;     let l
-;     l = (if (c) f else 1) x x x x
-; 
-; ssa_bug: i32 -> i32
-; ssa_bug: 'x = x + (x += 1)
-; 
-; repeat: () -> ()
-; repeat: () = :t do
-;     rep :t
-; 
-; fact: i32 -> i32
-; fact: n = if (n == 0) 1 else n * fact (n - 1)
-; 
-; fact_iter: i32 -> i32
-; fact_iter: 'i = do
-;     let 'f = 1
-;     loop do
-;         if (i < 1) brk f
-;         f = f * i
-;         i--
-; 
-; test: () -> ()
-; test: () = loop ret ()
-; 
-; fact_full: i32 -> i32
-; fact_full: n = do
-;     if (n == 0) do
-;         ret 1
-;     else do
-;         ret n * fact_full (n - 1)
-; 
-; inc_double: (i32, i32) -> (i32, i32)
-; inc_double: (x, y) = (inc x, inc y)
-; 
-; ident: i32 -> i32
-; ident: x = x
-; 
-; inc: i32 -> i32
-; inc: x = ident x + 1
+add: i32 -> i32 -> i32
+add: a b = a + b
+add: a 0 = a
+add: 0 b = b
+add: 0 0 = 0
 
-; fact: i32 -> i32
-; fact: n = if (n == 0) 1 else n * fact (n - 1)
+addsome: i32 -> i32
+addsome: 'xs = xs += 20
 
-; f: u8 -> u8
-; f: a = loop brk a
+addr: i32 -> i32
+addr: x = (&x).*
 
-; f: u8 -> u8
-; f: a = :t do
-;     a
-;     a
+select: bool -> i32 -> i32 -> i32
+select: cond a b = if (cond) a else b
 
-; main: i32 -> []i32
-; main: t = :t do
-;     let a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-;     [1, 2, 3]
+selectn: bool -> i32 -> ()
+selectn: cond a = if (cond) a
 
-; dec_loop: i32 -> i32
-; dec_loop: 'x = loop do
-;     x--
-;     brk x
+eeepy: i32 -> (i32, i32)
+eeepy: x = (x, x)
 
-; f: () -> i32
-; f: () = :t do
-;     brk :t 20
-;     40
+main: () -> ()
+main: () = :t do
+    brk :t 50 + 50
 
-a: i32 -> i32 -> i32
-a: f x = f x x x x x
+condbrk0: bool -> i32
+condbrk0: cond = :t do
+    brk :t if (cond) 50 + 50 else 25
+
+c: bool -> i32
+c: cond = if (cond) 50 + 50 else 25
+
+idx_ret: i32 -> i32
+idx_ret: x = [1, 2, 3, 4, if (x) 20 else 25][x]
+
+slice_some: i32 -> i32 -> []i32 -> []i32
+slice_some: lo hi xs = do
+    let a = xs[lo..]
+    let b = xs[..hi]
+    let c = xs[lo..hi]
+    let d = xs[..]
+
+    ()
+
+idx_ret0: i32 -> i32
+idx_ret0: x = [1, if (x) 2 else 2, 3][x]
+
+call: i32 -> i32 -> i32
+call: 'f 'x = do
+    let l
+    l = (if (c) f else 1) x x x x
+
+ssa_bug: i32 -> i32
+ssa_bug: 'x = x + (x += 1)
+
+repeat: () -> ()
+repeat: () = :t do
+    rep :t
+
+fact: i32 -> i32
+fact: n = if (n == 0) 1 else n * fact (n - 1)
+
+fact_iter: i32 -> i32
+fact_iter: 'i = do
+    let 'f = 1
+    loop do
+        if (i < 1) brk f
+        f = f * i
+        i--
+
+test: () -> ()
+test: () = loop ret ()
+
+fact_full: i32 -> i32
+fact_full: n = do
+    if (n == 0) do
+        ret 1
+    else do
+        ret n * fact_full (n - 1)
+
+inc_double: (i32, i32) -> (i32, i32)
+inc_double: (x, y) = (inc x, inc y)
+
+ident: i32 -> i32
+ident: x = x
+
+inc: i32 -> i32
+inc: x = ident x + 1
+
+fear: u8 -> u8
+fear: a = loop brk a
+
+fer: u8 -> u8
+fer: a = :t do
+    a
+    a
+
+arre: i32 -> []i32
+arre: t = :t do
+    let a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    [1, 2, 3]
+
+dec_loop: i32 -> i32
+dec_loop: 'x = loop do
+    x--
+    brk x
+
+far: () -> i32
+far: () = :t do
+    brk :t 20
+    40
+
+aar: i32 -> i32 -> i32
+aar: f x = :k do
+    let g = 20
+    g

@@ -1,4 +1,5 @@
 #include "all.h"
+#include <assert.h>
 //
 // global symbol (hash) table
 //
@@ -40,7 +41,7 @@ rsym_t table_register(sym_t desc) {
 	if (sym != -1 && !symbols[sym].is_placeholder) {
 		// TODO: better error message, probably module local/context
 		//       no need to print the whole qualified name
-		err_with_pos(desc.loc, "symbol `%s` already defined", desc.key);
+		err_with_pos(desc.loc, "symbol `%s` already defined", sv_from(desc.key));
 	}
 
 	hmputs(symbols, desc);
@@ -72,6 +73,8 @@ rlocal_t proc_local_new(proc_t *proc, local_t local) {
 extern void hir_dump_function(sym_t *sym);
 
 void table_dump(sym_t *sym) {
+	assert(!sym->is_placeholder);
+
 	switch (sym->kind) {
 		case SYMBOL_PROC: {
 			hir_dump_function(sym);
@@ -86,6 +89,11 @@ void table_dump(sym_t *sym) {
 void table_dump_all(void) {
 	for (u32 i = 0, c = hmlenu(symbols); i < c; i++) {
 		sym_t *sym = &symbols[i];
+
+		if (sym->is_placeholder) {
+			continue;
+		}
+		
 		table_dump(sym);
 	}
 }
