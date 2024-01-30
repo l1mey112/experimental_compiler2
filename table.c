@@ -117,10 +117,6 @@ void table_dump_all(void) {
 		}
 		
 		table_dump(sym);
-
-		if (i + 1 < c) {
-			printf("\n");
-		}
 	}
 }
 
@@ -149,8 +145,8 @@ static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
 			printf("(");
-			for (u32 i = 0, c = arrlenu(pattern->d_tuple.elems); i < c; i++) {
-				pattern_t *elem = &pattern->d_tuple.elems[i];
+			for (u32 i = 0, c = arrlenu(pattern->d_tuple); i < c; i++) {
+				pattern_t *elem = &pattern->d_tuple[i];
 				_print_pattern(desc, elem);
 				if (i + 1 < c) {
 					printf(", ");

@@ -131,12 +131,19 @@
 ; ident(x: i32) -> i32 = x
 ; 
 ; inc(x: i32) -> i32 = ident x + 1
-
-F() = 0
+; 
+; F() = 0
+; 
+; struct Foo {
+;     x: i32
+;     y: F
+; }
+; 
+; take(a: Foo) = 0
 
 struct Foo {
-    x: i32
-    y: F
+    r: Foo
 }
 
-take(a: Foo) = 0
+test1 = test0
+test0 = test1

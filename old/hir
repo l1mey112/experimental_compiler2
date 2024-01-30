@@ -57,9 +57,9 @@ void _hir_dump_pattern(mod_t *modp,hir_scope_t *s, hir_pattern_t pattern) {
 		}
 		case PATTERN_TUPLE: {
 			printf("(");
-			for (u32 i = 0; i < arrlen(pattern.d_tuple.elems); i++) {
-				_hir_dump_pattern(modp, s, pattern.d_tuple.elems[i]);
-				if (i != arrlen(pattern.d_tuple.elems) - 1) {
+			for (u32 i = 0; i < arrlen(pattern.d_tuple); i++) {
+				_hir_dump_pattern(modp, s, pattern.d_tuple[i]);
+				if (i != arrlen(pattern.d_tuple) - 1) {
 					printf(", ");
 				}
 			}
@@ -192,8 +192,8 @@ void _hir_dump_expr(mod_t *modp, hir_scope_t *s, hir_node_t node) {
 		}
 		case NODE_TUPLE: {
 			printf("(");
-			for (int i = 0, c = arrlen(node.d_tuple.elems); i < c; i++) {
-				_hir_dump_expr(modp, s, node.d_tuple.elems[i]);
+			for (int i = 0, c = arrlen(node.d_tuple); i < c; i++) {
+				_hir_dump_expr(modp, s, node.d_tuple[i]);
 				if (i != c - 1) {
 					printf(", ");
 				}

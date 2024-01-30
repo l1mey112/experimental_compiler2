@@ -197,8 +197,8 @@ static hir_node_t *hir_sym_find_use(hir_node_t *expr, istr_t name) {
 			return NULL;
 		}
 		case NODE_TUPLE: {
-			for (u32 i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
-				hir_node_t *exprp = &expr->d_tuple.elems[i];
+			for (u32 i = 0, c = arrlen(expr->d_tuple); i < c; i++) {
+				hir_node_t *exprp = &expr->d_tuple[i];
 				if ((r = hir_sym_find_use(exprp, name))) {
 					return r;
 				}
@@ -633,7 +633,7 @@ hir_pattern_t ppattern(hir_scope_t *s, hir_node_t *previous_exprs, bool allow_in
 				pattern = (hir_pattern_t){
 					.kind = PATTERN_TUPLE,
 					.loc = oloc,
-					.d_tuple.elems = elems,
+					.d_tuple = elems,
 				};
 			}
 			return pattern;
@@ -1495,7 +1495,7 @@ void pproc(hir_node_t *out_expr, hir_scope_t *s0, hir_node_t *previous_exprs) {
 		.kind = NODE_TUPLE,
 		.type = TYPE_INFER,
 		.loc = name_loc,
-		.d_tuple.elems = NULL,
+		.d_tuple = NULL,
 	};
 
 	// add: x y = x + y
@@ -1521,7 +1521,7 @@ void pproc(hir_node_t *out_expr, hir_scope_t *s0, hir_node_t *previous_exprs) {
 			.d_var = var,
 		};
 
-		arrpush(tuple_expr.d_tuple.elems, get_var);
+		arrpush(tuple_expr.d_tuple, get_var);
 	}
 
 	hir_node_t match = {

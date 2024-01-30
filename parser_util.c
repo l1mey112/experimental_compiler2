@@ -408,7 +408,7 @@ type_t ptype_expr(u8 prec) {
 
 			type = type_new((tinfo_t){
 				.kind = TYPE_TUPLE,
-				.d_tuple.elems = elems,
+				.d_tuple = elems,
 			});
 			break;
 		}
@@ -678,7 +678,7 @@ pattern_t ppattern(ir_desc_t *desc) {
 				pattern = (pattern_t){
 					.kind = PATTERN_TUPLE,
 					.loc = oloc,
-					.d_tuple.elems = elems,
+					.d_tuple = elems,
 				};
 			}
 			return pattern;

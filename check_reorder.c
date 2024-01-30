@@ -126,7 +126,8 @@ static void visit_po(rsym_t **po, rsym_t rsym);
 
 // all sym that have referents will go through here
 static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc_t onerror) {
-	sym_t *succ = &symbols[rsym];
+	sym_t *sym = &symbols[rsym];
+	sym_t *succ = &symbols[rsucc];
 
 	// all placeholders are referents
 	if (succ->is_placeholder) {
@@ -134,14 +135,13 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 	}
 
 	if (succ->sort_colour == SYM_SORT_GREY) {
-		// cycle self -> ... -> self
-
 		// cycle self -> self
 		if (rsucc == rsym) {
-			err_with_pos(onerror, "cyclic dependency on `%s`", sv_from(succ->short_name));
+			err_with_pos(onerror, "self cyclic dependency `%s`", sv_from(succ->short_name));
 		}
 
-		assert_not_reached();
+		// cycle self -> ... -> self
+		err_with_pos(onerror, "cyclic dependency in `%s` on `%s`", sv_from(sym->key), sv_from(succ->key));
 	}
 
 	// dfs walk
@@ -154,9 +154,7 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_SYM: {
-			if (expr->d_sym == rsym) {
-				visit_definite_successor(po, rsym, expr->d_sym, expr->loc);
-			}
+			visit_definite_successor(po, rsym, expr->d_sym, expr->loc);
 			break;
 		}
 		//
@@ -271,6 +269,41 @@ static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 			assert_not_reached();
 		}
 	}
+}
+
+static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type) {
+	if (type < _TYPE_CONCRETE_MAX) {
+		return;
+	}
+
+	tinfo_t *info = type_get(type);
+
+	// TODO: needs loc
+
+	/* switch (info->kind) {
+		case TYPE_TUPLE: {
+			for (u32 i = 0, c = arrlenu(info->d_tuple); i < c; i++) {
+				visit_successors_type(po, rsym, info->d_tuple[i]);
+			}
+			break;
+		}
+		case TYPE_ARRAY:
+		case TYPE_STRUCT:
+		
+		case TYPE_SYMBOL: {
+			visit_definite_successor(po, rsym, info->d_symbol, info->loc);
+			break;
+		}
+
+		case TYPE_PTR: break;
+		case TYPE_CLOSURE: break;
+		case TYPE_CLOSURE_UNION: break;
+		case TYPE_SLICE: break;
+		case TYPE_FUNCTION: break;
+		default: {
+			assert_not_reached();
+		}
+	} */
 }
 
 // dfs walk
