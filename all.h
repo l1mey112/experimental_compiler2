@@ -346,15 +346,26 @@ struct pattern_t {
 #include "lir.h"
 
 typedef struct proc_t proc_t;
+typedef struct global_t global_t;
+typedef struct ir_desc_t ir_desc_t;
 
-rlocal_t proc_local_new(proc_t *proc, local_t local);
+rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 
-struct proc_t {
+struct ir_desc_t {
 	local_t *locals; // variables
-	u16 arguments;   // first [0..arguments] are locals with types inserted
-
 	hir_expr_t hir;
 	lir_proc_t lir;
+};
+
+struct proc_t {
+	ir_desc_t desc;
+	u16 arguments;   // first [0..arguments] are locals with types inserted
+};
+
+struct global_t {
+	ir_desc_t desc;
+	bool is_mut;
+	// TODO: consteval etc
 };
 
 struct local_t {
@@ -389,13 +400,14 @@ struct sym_t {
 	type_t type;
 
 	enum : u8 {
-		SYMBOL_GLOBAL,
 		SYMBOL_PROC,
+		SYMBOL_GLOBAL,
 		SYMBOL_TYPE,
 	} kind;
 
 	union {
 		proc_t d_proc;
+		global_t d_global;
 	};
 };
 

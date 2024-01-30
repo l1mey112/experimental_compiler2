@@ -335,7 +335,7 @@ type_t ptype_expr(u8 prec) {
 			// tuples and functions
 			//
 			// TODO: #() -> i32 is a function pointer, not closure
-			bool is_hash = false; // is fn ptr
+			//bool is_hash = false; // is fn ptr
 			
 			type_t *elems = NULL;
 			type_t single = (type_t)-1;
@@ -558,8 +558,7 @@ static pattern_t *pattern_dup(pattern_t pattern) {
 }
 
 // the only place where user variables are created
-pattern_t ppattern(proc_t *proc) {
-	bool is_mut = false;
+pattern_t ppattern(ir_desc_t *desc) {
 	switch (p.token.kind) {
 		case TOK_UNDERSCORE: {
 			pnext();
@@ -567,19 +566,21 @@ pattern_t ppattern(proc_t *proc) {
 				.kind = PATTERN_UNDERSCORE,
 			};
 		}
-		case TOK_TACK: {
-			is_mut = true;
-			pnext();
-			// fallthrough
-		}
 		case TOK_IDENT: {
+			bool is_mut = false;
+
 			istr_t name = p.token.lit;
 			loc_t name_loc = p.token.loc;
 			pnext();
-			//
-			// construct block arg and assign to local
 
-			rlocal_t local = proc_local_new(proc, (local_t){
+			// v' as mut now
+
+			if (p.token.kind == TOK_TACK) {
+				is_mut = true;
+				pnext();
+			}
+
+			rlocal_t local = ir_local_new(desc, (local_t){
 				.kind = is_mut ? LOCAL_MUT : LOCAL_IMM,
 				.type = TYPE_INFER,
 				.loc = name_loc,
@@ -624,12 +625,12 @@ pattern_t ppattern(proc_t *proc) {
 			pattern_t pattern;
 			while (p.token.kind != TOK_CPAR) {
 				if (first) {
-					pattern = ppattern(proc);
+					pattern = ppattern(desc);
 				} else {
 					if (elems == NULL) {
 						arrpush(elems, pattern);
 					}
-					pattern = ppattern(proc);
+					pattern = ppattern(desc);
 					arrpush(elems, pattern);					
 				}
 
@@ -679,14 +680,14 @@ pattern_t ppattern(proc_t *proc) {
 					}
 					loc_t oloc = p.token.loc;
 					pnext();
-					pattern.d_array.match = pattern_dup(ppattern(proc));
+					pattern.d_array.match = pattern_dup(ppattern(desc));
 					pattern.d_array.match_lhs = false;
 					if (p.token.kind != TOK_CSQ) {
 						// TODO: dbg str for patterns instead of printing `xs...`
 						err_with_pos(oloc, "a `...xs` in array pattern must reside at the end");
 					}
 				} else {
-					pattern_t elem = ppattern(proc);
+					pattern_t elem = ppattern(desc);
 
 					// [xs..., x]
 					if (p.token.kind == TOK_TRIPLE_DOTS) {

@@ -87,7 +87,7 @@ void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);
 void ppop_scope(void);
 void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
-pattern_t ppattern(proc_t *proc);
+pattern_t ppattern(ir_desc_t *desc);
 u32 pblk_locate(istr_t opt_label, loc_t onerror);
 
-hir_expr_t pexpr(proc_t *proc, u8 prec);
+hir_expr_t pexpr(ir_desc_t *desc, u8 prec);

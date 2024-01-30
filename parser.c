@@ -1,166 +1,176 @@
 #include "all.h"
 #include "hir.h"
+#include <stdbool.h>
 #include "parser.h"
 
 pctx_t p;
 
-void pfn(void) {
-	//assert(parent == NULL);
+type_t pfn_arg(ir_desc_t *desc) {
+	bool is_mut = false;
+	
+	if (p.token.kind == TOK_TACK) {
+		is_mut = true;
+		pnext();
+		// fallthrough
+	}
 
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
-	/* if (parent != NULL) {
-		// reference to var, insert into scope/vars
-	} */
-
+	// TODO: possibly insert error if not `f(`, error on `f (`
+	
 	pnext();
+	// (v: i32)
+	//   ^
+	// force type for args
 	pexpect(TOK_COLON);
+	type_t arg_type = ptype();
 
-	loc_t type_loc = p.token.loc;
-	type_t proc_type = ptype();
-	if (type_kind(proc_type) != TYPE_FUNCTION) {
-		err_with_pos(type_loc, "type mismatch: expected function type, got `%s`", type_dbg_str(proc_type));
-	}
-	tinfo_t *proc_typeinfo = type_get(proc_type);
-
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
-
-	u32 proc_len = arrlenu(proc_typeinfo->d_fn.args);
-
-	// could keep? could not? it'll get resolved anyway this is just faster.
-	(void)pscope_register((pscope_entry_t){
-		.kind = PS_SYMBOL,
+	rlocal_t local = ir_local_new(desc, (local_t){
+		.kind = is_mut ? LOCAL_MUT : LOCAL_IMM,
+		.type = arg_type,
 		.loc = name_loc,
 		.name = name,
-		.d_symbol = {
-			.qualified_name = qualified_name,
-		},
 	});
 
+	(void)pscope_register((pscope_entry_t){
+		.name = name,
+		.loc = name_loc,
+		.kind = PS_LOCAL,
+		.d_local = local,
+	});
+
+	return arg_type;
+}
+
+// TODO: in pident and ( after it, make that illegal
+//       can't define a function inside an expression
+
+// c() = 0
+void pfn2(void) {
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
+	pnext();
+	pexpect(TOK_OPAR);
+
+	// c(...) = 0
+	//   ^^^
+	
 	proc_t proc = {};
-	proc.arguments = proc_len; // arg length
 
-	// add: i32 -> i32 -> i32
-	// add: a b = a + b
-	// add: 0 0 = 0
+	// TODO: creating a function type that is incomplete, will possibly cause incorrect interning
+	//       create the type afterwards and fill in later from args
 	//
-	// desugar:
-	//
-	// add: i32 -> i32 -> i32
-	// add: _0 _1 = match (_0, _1)
-	//     a b -> a + b
-	//     0 0 -> 0
-	//
-	// proper desugar into match arms
+	//       after setting return value, perform type_renew() or type_reintern()
 
-	hir_expr_t *args = NULL;
-	for (u32 i = 0; i < proc_len; i++) {
-		rlocal_t v = proc_local_new(&proc, (local_t){
-			.kind = LOCAL_IMM,
-			.type = proc_typeinfo->d_fn.args[i],
-			.name = ISTR_NONE,
-			.loc = LOC_NONE,
-		});
-		hir_expr_t expr = {
-			.kind = EXPR_LOCAL,
-			.d_local = v,
-			.type = TYPE_INFER,
-			.loc = LOC_NONE,
-		};
-		arrpush(args, expr);
+	type_t *arg_types = NULL;
+
+	ppush_scope();
+	while (p.token.kind != TOK_CPAR) {
+		type_t type = pfn_arg(&proc.desc);
+		arrpush(arg_types, type);
+
+		if (p.token.kind == TOK_COMMA) {
+			pnext();
+		} else if (p.token.kind != TOK_CPAR) {
+			punexpected("expected `,` or `)`");
+		}
+
+		proc.arguments++;
+	}
+	pnext();
+
+	// ) -> ...
+	//   ^^
+
+	type_t ret_type = TYPE_INFER;
+	if (p.token.kind == TOK_ARROW) {
+		pnext();
+		ret_type = ptype();
 	}
 
-	// construct a tuple so it can unpack
-
-	hir_expr_t tuple = {
-		.kind = VALUE_TUPLE,
-		.type = TYPE_INFER,
-		.d_tuple = args,
-	};
-
-	hir_expr_t match = {
-		.kind = EXPR_MATCH,
-		.type = TYPE_INFER,
-		.loc = LOC_NONE,
-		.d_match = {
-			.expr = hir_dup(tuple),
-			.patterns = NULL,
-			.exprs = NULL,
+	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+	tinfo_t typeinfo = {
+		.kind = TYPE_FUNCTION,
+		.d_fn = {
+			.args = arg_types,
+			.ret = ret_type,
 		},
 	};
 
-	// start parsing
+	// add(a: i32, b: i32) = a + b
+	//                     ^
 
-	if (!(p.token.kind == TOK_IDENT && p.token.lit == name)) {
-		err_with_pos(name_loc, "expected function `%s` implementation after type", sv_from(name));
-	}
+	pnext();
 
-	u32 pat = 0;
-	while (p.token.kind == TOK_IDENT && p.token.lit == name) {
-		pnext();
-		pexpect(TOK_COLON);
+	ppush_scope();
+	hir_expr_t expr = pexpr(&proc.desc, 0);
+	ppop_scope();
+	ppop_scope();
 
-		// add: ...
-		//      ^^^ (patterns)
-
-		ppush_scope();
-		pattern_t *patterns = NULL;
-
-		while (true) {
-			u32 locals_olen = arrlenu(proc.locals);
-			pattern_t pattern = ppattern(&proc);
-			u32 locals_rlen = arrlenu(proc.locals);
-
-			arrpush(patterns, pattern);
-			if (p.token.kind == TOK_ASSIGN) {
-				break;
-			}
-		}
-
-		u32 plen = arrlenu(patterns);
-		if (proc_len == 0) {
-			proc_len = plen;
-		} else if (plen != proc_len) {
-			err_with_pos(name_loc, "function pattern matching with different number of arguments", sv_from(name));
-		}
-
-		pattern_t pattern = {
-			.kind = PATTERN_TUPLE,
-			.loc = patterns[0].loc,
-			.d_tuple = {
-				.elems = patterns,
-			},
-		};
-
-		// add: ... =
-		//          ^
-		pnext();
-
-		// with pattern, construct a basic block for it
-
-		ppush_scope();
-		hir_expr_t expr = pexpr(&proc, 0);
-		ppop_scope();
-		ppop_scope();
-
-		pat++;
-
-		arrpush(match.d_match.patterns, pattern);
-		arrpush(match.d_match.exprs, expr);
-	}
-
-	proc.hir = match;
+	proc.desc.hir = expr;
 
 	table_register((sym_t){
 		.key = qualified_name,
 		.mod = p.mod,
 		.short_name = name,
 		.loc = name_loc,
-		.type = proc_type,
+		.type = type_new(typeinfo),
 		.kind = SYMBOL_PROC,
 		.d_proc = proc,
+	});
+}
+
+void ptop_global(void) {
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
+	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+
+	bool is_mut = false;
+
+	// v': T =
+	// ^
+
+	pnext();
+	if (p.token.kind == TOK_TACK) {
+		is_mut = true;
+		pnext();
+	}
+
+	// v: T =
+	//  ^
+
+	type_t type = TYPE_INFER;
+
+	if (p.token.kind == TOK_COLON) {
+		pnext();
+		type = ptype();
+	}
+
+	// v = 
+	//   ^
+
+	pexpect(TOK_ASSIGN);
+
+	ir_desc_t desc;
+	desc.hir = pexpr(&desc, 0);
+
+	table_register((sym_t){
+		.key = qualified_name,
+		.mod = p.mod,
+		.short_name = name,
+		.loc = name_loc,
+		.type = type,
+		.kind = SYMBOL_GLOBAL,
+		.d_global = {
+			.is_mut = is_mut,
+			.desc = desc,
+		},
 	});
 }
 
@@ -179,23 +189,20 @@ void ptop_stmt(void) {
 			break;
 		}
 		case TOK_PUB: {
+			// TODO: `pub pub pub pub` works...
 			is_pub = true;
 			pnext();
 			goto retry;
 		}
-		case TOK_TACK: {
-			assert_not_reached();
-		}
 		case TOK_IDENT: {
-			if (p.peek.kind == TOK_COLON) {
+			if (p.peek.kind == TOK_OPAR) {
 				// fn
-				pfn();
+				pfn2();
 				break;
-			} else if (p.peek.kind == TOK_ASSIGN) {
-				// v = 20
-				assert_not_reached();
 			}
-			// fallthrough
+
+			ptop_global();
+			break;	
 		}
 		default: {
 			punexpected("expected top-level statement");
