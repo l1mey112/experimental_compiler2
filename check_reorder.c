@@ -1,5 +1,6 @@
 #include "all.h"
 #include "check.h"
+#include "hir.h"
 
 // TODO: fix algorithm to a coloured one, then reverse the list
 //       this one is quite broken
@@ -121,31 +122,216 @@ static void visit(rsym_t rsym) {
 	arrpush(creorder_sorted, rsym);
 } */
 
+static void visit_po(rsym_t **po, rsym_t rsym);
+
+// all sym that have referents will go through here
+static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc_t onerror) {
+	sym_t *succ = &symbols[rsym];
+
+	// all placeholders are referents
+	if (succ->is_placeholder) {
+		err_with_pos(onerror, "unknown ident `%s`", sv_from(succ->short_name));
+	}
+
+	if (succ->sort_colour == SYM_SORT_GREY) {
+		// cycle self -> ... -> self
+
+		// cycle self -> self
+		if (rsucc == rsym) {
+			err_with_pos(onerror, "cyclic dependency on `%s`", sv_from(succ->short_name));
+		}
+
+		assert_not_reached();
+	}
+
+	// dfs walk
+	if (succ->sort_colour == SYM_SORT_WHITE) {
+		visit_po(po, rsucc);
+		return;
+	}
+}
+
+static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
+	switch (expr->kind) {
+		case EXPR_SYM: {
+			if (expr->d_sym == rsym) {
+				visit_definite_successor(po, rsym, expr->d_sym, expr->loc);
+			}
+			break;
+		}
+		//
+		case EXPR_ARRAY: {
+			for (u32 i = 0, c = arrlenu(expr->d_array); i < c; i++) {
+				visit_successors_hir(po, rsym, &expr->d_array[i]);
+			}
+			break;
+		}
+		case EXPR_TUPLE: {
+			for (u32 i = 0, c = arrlenu(expr->d_tuple); i < c; i++) {
+				visit_successors_hir(po, rsym, &expr->d_tuple[i]);
+			}
+			break;
+		}
+		case EXPR_DO_BLOCK: {
+			for (u32 i = 0, c = arrlenu(expr->d_do_block.exprs); i < c; i++) {
+				visit_successors_hir(po, rsym, &expr->d_do_block.exprs[i]);
+			}
+			break;
+		}
+		case EXPR_LOOP: {
+			visit_successors_hir(po, rsym, expr->d_loop.expr);
+			break;
+		}
+		case EXPR_IF: {
+			visit_successors_hir(po, rsym, expr->d_if.cond);
+			visit_successors_hir(po, rsym, expr->d_if.then);
+			visit_successors_hir(po, rsym, expr->d_if.els);
+			break;
+		}
+		case EXPR_ASSIGN: {
+			visit_successors_hir(po, rsym, expr->d_assign.lhs);
+			visit_successors_hir(po, rsym, expr->d_assign.rhs);
+			break;
+		}
+		case EXPR_INFIX: {
+			visit_successors_hir(po, rsym, expr->d_infix.lhs);
+			visit_successors_hir(po, rsym, expr->d_infix.rhs);
+			break;
+		}
+		case EXPR_POSTFIX: {
+			visit_successors_hir(po, rsym, expr->d_postfix.expr);
+			break;
+		}
+		case EXPR_PREFIX: {
+			visit_successors_hir(po, rsym, expr->d_prefix.expr);
+			break;
+		}
+		case EXPR_DEREF: {
+			visit_successors_hir(po, rsym, expr->d_deref->d_deref);
+			break;
+		}
+		case EXPR_INDEX: {
+			visit_successors_hir(po, rsym, expr->d_index.expr);
+			visit_successors_hir(po, rsym, expr->d_index.index);
+			break;
+		}
+		case EXPR_SLICE: {
+			visit_successors_hir(po, rsym, expr->d_slice.expr);
+			if (expr->d_slice.lo) {
+				visit_successors_hir(po, rsym, expr->d_slice.lo);
+			}
+			if (expr->d_slice.hi) {
+				visit_successors_hir(po, rsym, expr->d_slice.hi);
+			}
+			break;
+		}
+		case EXPR_CAST: {
+			visit_successors_hir(po, rsym, expr->d_cast);
+			break;
+		}
+		case EXPR_CALL: {
+			visit_successors_hir(po, rsym, expr->d_call.f);
+			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++) {
+				visit_successors_hir(po, rsym, &expr->d_call.args[i]);
+			}
+			break;
+		}
+		case EXPR_BREAK: {
+			visit_successors_hir(po, rsym, expr->d_break.expr);
+			break;
+		}
+		case EXPR_RETURN: {
+			visit_successors_hir(po, rsym, expr->d_return);
+			break;
+		}
+		case EXPR_VOIDING: {
+			visit_successors_hir(po, rsym, expr->d_voiding);
+			break;
+		}
+		case EXPR_LET: {
+			visit_successors_hir(po, rsym, expr->d_let.expr);
+			break;
+		}
+		//
+		case EXPR_ADDR_OF: {
+			// TODO: needs more analysis to convert into proper symbol lvalue
+			assert_not_reached();
+			break;
+		}
+		//
+		case EXPR_LOCAL:
+		case EXPR_CONTINUE:
+		case EXPR_FIELD:
+		case EXPR_INTEGER_LIT:
+		case EXPR_BOOL_LIT:
+		case EXPR_TUPLE_UNIT: {
+			break; // empty
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+// dfs walk
+static void visit_po(rsym_t **po, rsym_t rsym) {
+	sym_t *sym = &symbols[rsym];
+
+	sym->sort_colour = SYM_SORT_GREY;
+
+	// walk the HIR (tree) for dependencies/successors
+	switch (sym->kind) {
+		case SYMBOL_PROC: {
+			visit_successors_hir(po, rsym, &sym->d_proc.desc.hir);
+			break;
+		}
+		case SYMBOL_GLOBAL: {
+			visit_successors_hir(po, rsym, &sym->d_global.desc.hir);
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+
+	arrpush(*po, rsym);
+	sym->sort_colour = SYM_SORT_BLACK; // full sorted
+}
+
 // 1. sanity checks on the table (placeholders)
 // 2. identifies cyclic dependencies
 // 3. returns a list of symbols in the order they should be processed
 void creorder_and_type(void) {
 	// raising an error on referencing a placeholder symbol (doesn't exist)
-	// it must be raised on the actual lvalue. so when visiting definitions,
+	// it must be raised on the actual symbol. so when visiting definitions,
 	// ignore placeholders. they'll be errors soon when we visit the dependents
 
 	// we store the visited status on the actual `sym_t`, it's easier
 
-	/* for (rsym_t i = 0; i < hmlenu(symbols); i++) {
-		sym_t *sym = &symbols[i];
+	rsym_t *po = NULL;
 
+	for (rsym_t rsym = 0; rsym < hmlenu(symbols); rsym++) {
+		sym_t *sym = &symbols[rsym];
+
+		// will be an error soon
 		if (sym->is_placeholder) {
 			continue;
 		}
 
-		if (sym->is_visited) {
-			continue;
+		// will access all roots
+		if (sym->sort_colour == SYM_SORT_WHITE) {
+			visit_po(&po, rsym);
 		}
-
-		visit(i);
 	}
 
-	for (rsym_t i = 0; i < arrlenu(creorder_sorted); i++) {
+	// RPO
+	for (u32 i = arrlenu(po); i-- > 0;) {
+		rsym_t rsym = po[i];
+		sym_t *sym = &symbols[rsym];
+		printf("%u: %s\n", i, sv_from(sym->key));
+	}
+
+	/* for (rsym_t i = 0; i < arrlenu(creorder_sorted); i++) {
 		sym_t *sym = &symbols[creorder_sorted[i]];
 
 		switch (sym->kind) {

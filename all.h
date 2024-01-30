@@ -394,7 +394,14 @@ struct sym_t {
 	// if true, this is a placeholder symbol
 	// nothing else is stored here, it's just an entry with a key
 	bool is_placeholder;
-	bool is_visited; // for topological sort
+	
+	// TODO: also mark dead symbols that are apart of different roots
+	
+	enum : u8 {
+		SYM_SORT_WHITE,
+		SYM_SORT_GREY,
+		SYM_SORT_BLACK,
+	} sort_colour;
 
 	// if SYMBOL_TYPE, this is the type
 	type_t type;

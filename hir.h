@@ -34,7 +34,7 @@ struct hir_expr_t {
 		EXPR_CONTINUE, // always !.
 		EXPR_RETURN, // always !.
 		EXPR_VOIDING, // evaluates expr, possible effects. discards return value, returning ()
-		EXPR_SIZEOF_TYPE, // is usize
+		//EXPR_SIZEOF_TYPE, // is usize
         EXPR_FIELD, // named field and tuple field
 		EXPR_LET,
 	} kind;
@@ -117,12 +117,8 @@ struct hir_expr_t {
 			hir_expr_t *f;
 			hir_expr_t *args; // f(...args)
 		} d_call;
-		struct {
-			hir_expr_t *elems;
-		} d_tuple;
-		struct {
-			hir_expr_t *elems;
-		} d_array;
+		hir_expr_t *d_tuple;
+		hir_expr_t *d_array;
 		struct {
 			hir_expr_t *expr;
 			u8 blk_id;

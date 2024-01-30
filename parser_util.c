@@ -438,6 +438,7 @@ type_t ptype_expr(u8 prec) {
 	return type;
 }
 
+// TODO: *'i32 change to *i32' instead ??
 type_t ptype(void) {
 	return ptype_expr(0);
 }

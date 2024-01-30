@@ -112,9 +112,9 @@ ret:
 	
 	table_dump_all();
 
-	/* if (!err && !setjmp(err_diag.unwind)) {
+	if (!err && !setjmp(err_diag.unwind)) {
 		compiler_check();
-	} */
+	}
 	
 	/* if (!err && !setjmp(err_diag.unwind)) {
 		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {

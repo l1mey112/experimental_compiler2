@@ -113,6 +113,10 @@ void table_dump_all(void) {
 		}
 		
 		table_dump(sym);
+
+		if (i + 1 < c) {
+			printf("\n");
+		}
 	}
 }
 
@@ -275,8 +279,8 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 		}
 		case EXPR_TUPLE: {
 			printf("(");
-			for (int i = 0, c = arrlen(expr->d_tuple.elems); i < c; i++) {
-				_print_expr(desc, &expr->d_tuple.elems[i]);
+			for (int i = 0, c = arrlen(expr->d_tuple); i < c; i++) {
+				_print_expr(desc, &expr->d_tuple[i]);
 				if (i != c - 1) {
 					printf(", ");
 				}
@@ -327,8 +331,8 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 		} */
 		case EXPR_ARRAY: {
 			printf("[");
-			for (int i = 0, c = arrlen(expr->d_array.elems); i < c; i++) {
-				_print_expr(desc, &expr->d_array.elems[i]);
+			for (int i = 0, c = arrlen(expr->d_array); i < c; i++) {
+				_print_expr(desc, &expr->d_array[i]);
 				if (i != c - 1) {
 					printf(", ");
 				}
@@ -391,10 +395,10 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			_print_expr(desc, expr->d_addr_of.ref);
 			break;
 		}
-		case EXPR_SIZEOF_TYPE: {
+		/* case EXPR_SIZEOF_TYPE: {
 			printf("sizeof(%s)", type_dbg_str(expr->d_sizeof_type));
 			break;
-		}
+		} */
 		case EXPR_INDEX: {
 			_print_expr(desc, expr->d_index.expr);
 			printf("[");
