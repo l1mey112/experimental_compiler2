@@ -60,24 +60,13 @@ rlocal_t ir_local_new(ir_desc_t *desc, local_t local) {
 	return idx;
 }
 
-// impl module dump and so on
-
-// TODO: need to unify them together
-//       1. they'll print the same function
-//       2. the same locals
-//       3. but instead subst for `lir` and `hir`
-//
-// TODO: print hir expr
-// TOOD: normal print pattern though, shared
-
-
 static void _dump_function(sym_t *sym);
 static void _dump_global(sym_t *sym);
+static void _dump_type(sym_t *sym);
 
 void table_dump(sym_t *sym) {
 	assert(!sym->is_placeholder);
 
-	printf("%s", sv_from(sym->key));
 	void *_ = alloc_scratch(0);
 
 	switch (sym->kind) {
@@ -90,7 +79,7 @@ void table_dump(sym_t *sym) {
 			break;
 		}
 		case SYMBOL_TYPE: {
-			printf(" = %s\n", type_dbg_str(sym->type));
+			_dump_type(sym);
 			break;
 		}
 		default: {
@@ -118,6 +107,32 @@ void table_dump_all(void) {
 		
 		table_dump(sym);
 	}
+}
+
+static void _dump_type(sym_t *sym) {
+	tsymbol_t *typeinfo = &sym->d_type;
+
+	switch (typeinfo->kind) {
+		case TYPESYMBOL_STRUCT: {
+			if (arrlenu(typeinfo->d_struct.fields) == 0) {
+				printf("struct %s {}", sv_from(sym->key));
+				break;
+			}
+			
+			printf("struct %s {\n", sv_from(sym->key));
+			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
+				tsymbol_sf_t *f = &typeinfo->d_struct.fields[i];
+				printf("  %s: %s\n", sv_from(f->field), type_dbg_str(f->type));
+			}
+			printf("}\n");
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
+	
+	//printf(" = %s\n", type_dbg_str(sym->type));
 }
 
 static void _print_local(ir_desc_t *desc, rlocal_t local) {
@@ -438,7 +453,7 @@ static void _dump_function(sym_t *sym) {
 	proc_t *proc = &sym->d_proc;
 	ir_desc_t *desc = &proc->desc;
 
-	printf("(");
+	printf("%s(", sv_from(sym->key));
 
 	// print args
 	for (u32 i = 0, c = proc->arguments; i < c; i++) {
@@ -455,7 +470,7 @@ static void _dump_function(sym_t *sym) {
 		}
 	}
 
-	printf(") -> %s hir = ", type_dbg_str(type_get(sym->type)->d_fn.ret));
+	printf(") -> %s hir = ", type_dbg_str(type_get(proc->type)->d_fn.ret));
 
 	_print_expr(desc, &desc->hir);
 	printf("\n");
@@ -464,6 +479,8 @@ static void _dump_function(sym_t *sym) {
 static void _dump_global(sym_t *sym) {
 	global_t *global = &sym->d_global;
 	ir_desc_t *desc = &global->desc;
+
+	printf("%s", sv_from(sym->key));
 
 	if (global->is_mut) {
 		printf("'");

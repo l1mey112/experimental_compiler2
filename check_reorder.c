@@ -271,30 +271,30 @@ static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 	}
 }
 
-static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type) {
+// TODO: visit successors for type hints
+//       or just walk the type table for placeholders? (we need loc though so doesn't matter)
+static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type, loc_t onerror) {
 	if (type < _TYPE_CONCRETE_MAX) {
 		return;
 	}
 
 	tinfo_t *info = type_get(type);
 
-	// TODO: needs loc
-
-	/* switch (info->kind) {
+	switch (info->kind) {
 		case TYPE_TUPLE: {
 			for (u32 i = 0, c = arrlenu(info->d_tuple); i < c; i++) {
-				visit_successors_type(po, rsym, info->d_tuple[i]);
+				visit_successors_type(po, rsym, info->d_tuple[i], onerror);
 			}
 			break;
 		}
-		case TYPE_ARRAY:
-		case TYPE_STRUCT:
-		
-		case TYPE_SYMBOL: {
-			visit_definite_successor(po, rsym, info->d_symbol, info->loc);
+		case TYPE_ARRAY: {
+			visit_successors_type(po, rsym, info->d_array.elem, onerror);
 			break;
 		}
-
+		case TYPE_SYMBOL: {
+			visit_definite_successor(po, rsym, info->d_symbol, onerror);
+			break;
+		}
 		case TYPE_PTR: break;
 		case TYPE_CLOSURE: break;
 		case TYPE_CLOSURE_UNION: break;
@@ -303,7 +303,21 @@ static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type) {
 		default: {
 			assert_not_reached();
 		}
-	} */
+	}
+}
+
+static void visit_successors_typeinfo(rsym_t **po, rsym_t rsym, tsymbol_t *typeinfo) {
+	switch (typeinfo->kind) {
+		case TYPESYMBOL_STRUCT: {
+			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
+				visit_successors_type(po, rsym, typeinfo->d_struct.fields[i].type, typeinfo->d_struct.fields[i].type_loc);
+			}
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
+	}
 }
 
 // dfs walk
@@ -311,6 +325,9 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 	sym_t *sym = &symbols[rsym];
 
 	sym->sort_colour = SYM_SORT_GREY;
+
+	// typesymbols are self referencial types, we only need to check for
+	// cycles in the symbol table
 
 	// walk the HIR (tree) for dependencies/successors
 	switch (sym->kind) {
@@ -323,7 +340,7 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 			break;
 		}
 		case SYMBOL_TYPE: {
-			eprintf("TODO: doing nothing on SYMBOL_TYPE\n");
+			visit_successors_typeinfo(po, rsym, &sym->d_type);
 			break;
 		}
 		default: {

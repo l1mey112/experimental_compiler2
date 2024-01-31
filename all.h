@@ -146,6 +146,23 @@ enum tok_t {
     #undef X
 };
 
+typedef enum tok_t tok_t;
+
+// TODO(zakazaka): u32 start u32 end is better (compute later)
+struct loc_t {
+	u32 line_nr;
+	u32 col;
+	u32 pos;
+	u16 len;
+	rfile_t file;
+};
+
+struct token_t {
+	tok_t kind;
+	loc_t loc;
+	istr_t lit;
+};
+
 // []i32   -> TYPE_SLICE
 // [10]i32 -> TYPE_ARRAY
 
@@ -167,7 +184,6 @@ enum ti_kind {
 	TYPE_PTR,
 	TYPE_SLICE,
 	TYPE_ARRAY,
-	TYPE_STRUCT,
 	TYPE_SYMBOL, // or ALIAS ??
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
@@ -180,13 +196,37 @@ enum ti_kind {
 typedef struct sym_t sym_t;
 typedef u32 rsym_t;
 
+enum tsymbol_kind {
+	TYPESYMBOL_STRUCT,
+};
+
 typedef enum ti_kind ti_kind;
 typedef struct tinfo_t tinfo_t;
-typedef struct tinfo_sf_t tinfo_sf_t;
+typedef struct tsymbol_sf_t tsymbol_sf_t;
 
-struct tinfo_sf_t {
+typedef struct tsymbol_t tsymbol_t;
+typedef enum tsymbol_kind tsymbol_kind;
+
+// named types are typesymbols.
+// named struct types aren't interned, they're just a list of fields
+
+struct tsymbol_sf_t {
 	istr_t field;
 	type_t type;
+	loc_t field_loc;
+	loc_t type_loc;
+};
+
+struct tsymbol_t {
+	tsymbol_kind kind;
+
+	loc_t name_loc;
+
+	union {
+		struct {
+			tsymbol_sf_t *fields;
+		} d_struct;
+	};
 };
 
 struct tinfo_t {
@@ -218,27 +258,7 @@ struct tinfo_t {
 			type_t ref;
 			bool is_mut;
 		} d_ptr;
-		struct {
-			tinfo_sf_t *fields;
-		} d_struct;
 	};
-};
-
-typedef enum tok_t tok_t;
-
-// TODO(zakazaka): u32 start u32 end is better (compute later)
-struct loc_t {
-	u32 line_nr;
-	u32 col;
-	u32 pos;
-	u16 len;
-	rfile_t file;
-};
-
-struct token_t {
-	tok_t kind;
-	loc_t loc;
-	istr_t lit;
 };
 
 // TODO: define helper function for invalid loc_t
@@ -367,11 +387,13 @@ struct ir_desc_t {
 
 struct proc_t {
 	ir_desc_t desc;
+	type_t type;
 	u16 arguments;   // first [0..arguments] are locals with types inserted
 };
 
 struct global_t {
 	ir_desc_t desc;
+	type_t type;
 	bool is_mut;
 	// TODO: consteval etc
 };
@@ -411,9 +433,6 @@ struct sym_t {
 		SYM_SORT_BLACK,
 	} sort_colour;
 
-	// if SYMBOL_TYPE, this is the type
-	type_t type;
-
 	enum : u8 {
 		SYMBOL_PROC,
 		SYMBOL_GLOBAL,
@@ -423,6 +442,7 @@ struct sym_t {
 	union {
 		proc_t d_proc;
 		global_t d_global;
+		tsymbol_t d_type;
 	};
 };
 

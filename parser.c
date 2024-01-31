@@ -112,13 +112,13 @@ void pfn2(void) {
 	ppop_scope();
 
 	proc.desc.hir = expr;
+	proc.type = type_new(typeinfo);
 
 	table_register((sym_t){
 		.key = qualified_name,
 		.mod = p.mod,
 		.short_name = name,
 		.loc = name_loc,
-		.type = type_new(typeinfo),
 		.kind = SYMBOL_PROC,
 		.d_proc = proc,
 	});
@@ -165,11 +165,11 @@ void ptop_global(void) {
 		.mod = p.mod,
 		.short_name = name,
 		.loc = name_loc,
-		.type = type,
 		.kind = SYMBOL_GLOBAL,
 		.d_global = {
-			.is_mut = is_mut,
 			.desc = desc,
+			.type = type,
+			.is_mut = is_mut,
 		},
 	});
 }
@@ -189,7 +189,7 @@ void pstruct(void) {
 	// TODO: unexpected `...`, expected `{` to start struct body
 	//                                      ^^^^^^^^^^^^^^^^^^^^ `to` clause in unexpected
 
-	tinfo_sf_t *fields = NULL;
+	tsymbol_sf_t *fields = NULL;
 
 	while (p.token.kind != TOK_CCBR) {
 		istr_t field = p.token.lit;
@@ -200,11 +200,14 @@ void pstruct(void) {
 		
 		pnext();
 		pexpect(TOK_COLON);
-		type_t field_type = ptype();
+		loc_t type_loc = p.token.loc;
+		type_t type = ptype();
 
-		tinfo_sf_t sf = {
+		tsymbol_sf_t sf = {
 			.field = field,
-			.type = field_type,
+			.type = type,
+			.field_loc = field_loc,
+			.type_loc = type_loc,
 		};
 
 		arrpush(fields, sf);
@@ -213,14 +216,13 @@ void pstruct(void) {
 	// ^
 	pnext();
 
-	tinfo_t typeinfo = {
-		.kind = TYPE_STRUCT,
+	tsymbol_t typeinfo = {
+		.kind = TYPESYMBOL_STRUCT,
 		.d_struct = {
 			.fields = fields,
 		},
 	};
 
-	type_t type = type_new(typeinfo);
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
 
 	table_register((sym_t){
@@ -228,8 +230,8 @@ void pstruct(void) {
 		.mod = p.mod,
 		.short_name = name,
 		.loc = name_loc,
-		.type = type,
 		.kind = SYMBOL_TYPE,
+		.d_type = typeinfo,
 	});
 }
 
