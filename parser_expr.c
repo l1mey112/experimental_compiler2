@@ -172,8 +172,7 @@ hir_expr_t pident() {
 		.name = lit,
 	});
 
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, lit);
-	rsym_t symbol = table_resolve(qualified_name);
+	rsym_t symbol = table_resolve(p.mod, lit);
 
 	return (hir_expr_t){
 		.kind = EXPR_SYM,
@@ -200,8 +199,10 @@ bool plet(ir_desc_t *desc, hir_expr_t *expr_out) {
 	// let v: i32 = ...
 	if (pattern.kind == PATTERN_LOCAL && p.token.kind == TOK_COLON) {
 		pnext();
+		loc_t type_loc = p.token.loc;
 		type_t type = ptype();
 		desc->locals[pattern.d_local].type = type;
+		desc->locals[pattern.d_local].type_loc = type_loc;
 	}
 
 	// legal syntax
@@ -828,12 +829,16 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 
 					// cast
 					if (token.kind == TOK_COLON) {
+						loc_t type_loc = p.token.loc;
 						type_t type = ptype();
 						expr = (hir_expr_t){
 							.kind = EXPR_CAST,
 							.type = type,
 							.loc = token.loc,
-							.d_cast = hir_dup(expr),
+							.d_cast = {
+								.expr = hir_dup(expr),
+								.type_loc = type_loc,
+							},
 						};
 						continue;
 					}
@@ -886,6 +891,7 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 										.field = field,
 									},
 								};
+								pnext();
 								break;
 							}
 							default: {

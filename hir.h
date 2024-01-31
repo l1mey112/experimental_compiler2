@@ -48,7 +48,10 @@ struct hir_expr_t {
 		hir_expr_t *d_voiding;
 		hir_expr_t *d_deref;
 		type_t d_sizeof_type;
-		hir_expr_t *d_cast;
+		struct {
+			hir_expr_t *expr;
+			loc_t type_loc; // type is stored inside `type`
+		} d_cast;
 		istr_t d_integer_lit;
 		bool d_bool_lit;
 		struct {

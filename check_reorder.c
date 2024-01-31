@@ -2,146 +2,50 @@
 #include "check.h"
 #include "hir.h"
 
-// TODO: fix algorithm to a coloured one, then reverse the list
-//       this one is quite broken
-//       https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis/#color-dfs-and-edge-classification
-
-/* rsym_t *creorder_sorted;
-
-static void visit(rsym_t rsym);
-
-static void visit_dependent(rsym_t parent, rsym_t rsym) {
-	sym_t *sym = &symbols[rsym];
-	
-	if (sym->is_placeholder) {
-		// error user
-		assert_not_reached();
-		return;
-	}
-
-	// it's impossible to self recurse into incomplete functions	
-	if (sym->kind == SYMBOL_PROC && parent == rsym) {
-		return;
-	}
-	
-	if (sym->is_visited) {
-		// cycle error
-		assert_not_reached();
-		return;
-	}
-
-	visit(rsym);
-}
-
-static void visit(rsym_t rsym) {
-	sym_t *sym = &symbols[rsym];
-
-	// contains
-	for (u32 i = 0; i < arrlenu(creorder_sorted); i++) {
-		if (creorder_sorted[i] == rsym) {
-			return;
-		}
-	}
-
-	// these can be removed really
-	assert(sym->is_placeholder == false);
-	assert(sym->is_visited == false);
-	sym->is_visited = true;
-
-	// it would be nice if we had closures so we could run a function
-	// on each dependent
-
-	// type, function, global
-	//
-	// types
-	// 1. dependent on other types
-	//
-	// functions
-	// 1. dependent on types in the function signature (annotated type)
-	// 2. dependent on globals
-	//
-	// globals
-	// 1. dependent on their annotated type
-	// 2. dependent on other globals
-	//
-	//
-	// function dependencies
-	//
-	// in short, functions can't depend on other functions under any
-	// circumstance. it just can't happen.
-	//
-	// let x
-    // let y = \t -> x t
-    // let x = \t -> y t
-	//
-	// above is a nice attempt at a cyclic dependency but it's not allowed
-	// since `x` is being used before it is defined inside the closure
-	// instanciation of `y`. this is a compile time error.
-	//
-	// we could try this at the top level, but closures are not allowed
-	// in constant expressions and functions must be completely typed.
-	//
-	// functions can't depend on eachother
-	//
-
-	switch (sym->kind) {
-		case SYMBOL_PROC: {
-			// we don't have user defined types yet, just search lvalues
-
-			// blocks[] -> insts[] -> { dest: lvalue } & { d_lvalue: lvalue }
-
-			lir_proc_t *proc = &sym->d_proc;
-
-			for (lir_rblock_t block = 0, c = arrlenu(proc->blocks); block < c; block++) {
-				lir_block_t *b = &proc->blocks[block];
-
-				for (u32 inst = 0, c = arrlenu(b->insts); inst < c; inst++) {
-					lir_inst_t *i = &b->insts[inst];
-
-					if (i->kind == INST_LVALUE && i->d_lvalue.is_sym) {
-						visit_dependent(rsym, i->d_lvalue.symbol);
-					}
-
-					if (i->lvalue_dest && i->dest.lvalue.is_sym) {
-						visit_dependent(rsym, i->dest.lvalue.symbol);
-					}
-				}
-			}
-			
-			break;
-		}
-		case SYMBOL_TYPE:
-		case SYMBOL_GLOBAL:
-		default: {
-			printf("kind: %u %u - %zu\n", sym->kind, rsym, hmlenu(symbols));
-			assert_not_reached();
-		}
-	}
-
-	sym->is_visited = false;
-	arrpush(creorder_sorted, rsym);
-} */
-
 static void visit_po(rsym_t **po, rsym_t rsym);
+static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror);
 
 // all sym that have referents will go through here
-static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc_t onerror) {
+static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc_t onerror, bool indirect) {
 	sym_t *sym = &symbols[rsym];
 	sym_t *succ = &symbols[rsucc];
 
-	// all placeholders are referents
-	if (succ->is_placeholder) {
-		err_with_pos(onerror, "unknown ident `%s`", sv_from(succ->short_name));
-	}
-
 	if (succ->sort_colour == SYM_SORT_GREY) {
-		// cycle self -> self
-		if (rsucc == rsym) {
-			err_with_pos(onerror, "self cyclic dependency `%s`", sv_from(succ->short_name));
+		// global = &global      (not allowed, need annotation)
+		// func() = func         (not allowed, need annotation)
+		
+		// assumes sym.kind == succ.kind
+		switch (sym->kind) {
+			case SYMBOL_PROC: {
+				if (type_get(succ->d_proc.type)->d_fn.ret == TYPE_INFER) {
+					if (rsucc == rsym) {
+						// cycle self -> self
+						err_with_pos(succ->loc, "self recursive function `%s` needs return type annotation", sv_from(succ->short_name));
+					} else {
+						// cycle self -> ... -> self
+						err_with_pos(onerror, "mutually recursive function `%s` needs return type annotation", sv_from(succ->short_name));
+					}
+				}
+				break;
+			}
+			case SYMBOL_GLOBAL: {
+				if (indirect && rsucc == rsym && succ->d_global.type == TYPE_INFER) {
+					// cycle self -> self
+					err_with_pos(onerror, "ref to `%s` needs type annotation", sv_from(succ->short_name));
+				}
+				// fallthrough
+			}
+			default: {
+				// TODO: better errors		
+				if (rsucc == rsym) {
+					// cycle self -> self
+					err_with_pos(onerror, "self cyclic dependency `%s`", sv_from(succ->short_name));
+				} else {
+					// cycle self -> ... -> self
+					err_with_pos(onerror, "cyclic dependency in `%s` on `%s`", sv_from(sym->key), sv_from(succ->key));
+				}
+			}
 		}
-
-		// cycle self -> ... -> self
-		err_with_pos(onerror, "cyclic dependency in `%s` on `%s`", sv_from(sym->key), sv_from(succ->key));
 	}
 
 	// dfs walk
@@ -151,115 +55,141 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 	}
 }
 
-static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
+// run first before `visit_definite_successor()`
+static void visit_sanity_value_sym(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
+	// sanity, can't be type
+	sym_t *sym = &symbols[expr->d_sym];
+
+	if (sym->is_placeholder) {
+		err_with_pos(expr->loc, "unknown ident `%s`", sv_from(sym->short_name));
+	}
+
+	if (sym->kind == SYMBOL_TYPE) {
+		err_with_pos(expr->loc, "expected value, got type `%s`", sv_from(sym->short_name));
+	}
+
+	// check `test = &test` without `: T`
+}
+
+// &expr -> direct = true
+static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr, bool direct) {
 	switch (expr->kind) {
 		case EXPR_SYM: {
-			visit_definite_successor(po, rsym, expr->d_sym, expr->loc);
+			visit_sanity_value_sym(po, rsym, expr);
+			visit_definite_successor(po, rsym, expr->d_sym, expr->loc, !direct);
 			break;
 		}
 		//
 		case EXPR_ARRAY: {
 			for (u32 i = 0, c = arrlenu(expr->d_array); i < c; i++) {
-				visit_successors_hir(po, rsym, &expr->d_array[i]);
+				visit_successors_hir_impl(po, rsym, &expr->d_array[i], true);
 			}
 			break;
 		}
 		case EXPR_TUPLE: {
 			for (u32 i = 0, c = arrlenu(expr->d_tuple); i < c; i++) {
-				visit_successors_hir(po, rsym, &expr->d_tuple[i]);
+				visit_successors_hir_impl(po, rsym, &expr->d_tuple[i], true);
 			}
 			break;
 		}
 		case EXPR_DO_BLOCK: {
 			for (u32 i = 0, c = arrlenu(expr->d_do_block.exprs); i < c; i++) {
-				visit_successors_hir(po, rsym, &expr->d_do_block.exprs[i]);
+				visit_successors_hir_impl(po, rsym, &expr->d_do_block.exprs[i], true);
 			}
 			break;
 		}
 		case EXPR_LOOP: {
-			visit_successors_hir(po, rsym, expr->d_loop.expr);
+			visit_successors_hir_impl(po, rsym, expr->d_loop.expr, true);
 			break;
 		}
 		case EXPR_IF: {
-			visit_successors_hir(po, rsym, expr->d_if.cond);
-			visit_successors_hir(po, rsym, expr->d_if.then);
-			visit_successors_hir(po, rsym, expr->d_if.els);
+			visit_successors_hir_impl(po, rsym, expr->d_if.cond, true);
+			visit_successors_hir_impl(po, rsym, expr->d_if.then, true);
+			visit_successors_hir_impl(po, rsym, expr->d_if.els, true);
 			break;
 		}
 		case EXPR_ASSIGN: {
-			visit_successors_hir(po, rsym, expr->d_assign.lhs);
-			visit_successors_hir(po, rsym, expr->d_assign.rhs);
+			visit_successors_hir_impl(po, rsym, expr->d_assign.lhs, true);
+			visit_successors_hir_impl(po, rsym, expr->d_assign.rhs, true);
 			break;
 		}
 		case EXPR_INFIX: {
-			visit_successors_hir(po, rsym, expr->d_infix.lhs);
-			visit_successors_hir(po, rsym, expr->d_infix.rhs);
+			visit_successors_hir_impl(po, rsym, expr->d_infix.lhs, true);
+			visit_successors_hir_impl(po, rsym, expr->d_infix.rhs, true);
 			break;
 		}
 		case EXPR_POSTFIX: {
-			visit_successors_hir(po, rsym, expr->d_postfix.expr);
+			visit_successors_hir_impl(po, rsym, expr->d_postfix.expr, true);
 			break;
 		}
 		case EXPR_PREFIX: {
-			visit_successors_hir(po, rsym, expr->d_prefix.expr);
+			visit_successors_hir_impl(po, rsym, expr->d_prefix.expr, true);
 			break;
 		}
 		case EXPR_DEREF: {
-			visit_successors_hir(po, rsym, expr->d_deref->d_deref);
-			break;
-		}
-		case EXPR_INDEX: {
-			visit_successors_hir(po, rsym, expr->d_index.expr);
-			visit_successors_hir(po, rsym, expr->d_index.index);
-			break;
-		}
-		case EXPR_SLICE: {
-			visit_successors_hir(po, rsym, expr->d_slice.expr);
-			if (expr->d_slice.lo) {
-				visit_successors_hir(po, rsym, expr->d_slice.lo);
-			}
-			if (expr->d_slice.hi) {
-				visit_successors_hir(po, rsym, expr->d_slice.hi);
-			}
+			visit_successors_hir_impl(po, rsym, expr->d_deref->d_deref, true);
 			break;
 		}
 		case EXPR_CAST: {
-			visit_successors_hir(po, rsym, expr->d_cast);
+			visit_successors_hir_impl(po, rsym, expr->d_cast.expr, false);
+			visit_sanity_type(po, expr->type, expr->d_cast.type_loc);
 			break;
 		}
 		case EXPR_CALL: {
-			visit_successors_hir(po, rsym, expr->d_call.f);
+			visit_successors_hir_impl(po, rsym, expr->d_call.f, true);
 			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++) {
-				visit_successors_hir(po, rsym, &expr->d_call.args[i]);
+				visit_successors_hir_impl(po, rsym, &expr->d_call.args[i], true);
 			}
 			break;
 		}
 		case EXPR_BREAK: {
-			visit_successors_hir(po, rsym, expr->d_break.expr);
+			visit_successors_hir_impl(po, rsym, expr->d_break.expr, true);
 			break;
 		}
 		case EXPR_RETURN: {
-			visit_successors_hir(po, rsym, expr->d_return);
+			visit_successors_hir_impl(po, rsym, expr->d_return, true);
 			break;
 		}
 		case EXPR_VOIDING: {
-			visit_successors_hir(po, rsym, expr->d_voiding);
+			visit_successors_hir_impl(po, rsym, expr->d_voiding, true);
 			break;
 		}
 		case EXPR_LET: {
-			visit_successors_hir(po, rsym, expr->d_let.expr);
+			visit_successors_hir_impl(po, rsym, expr->d_let.expr, true);
 			break;
 		}
 		//
+		case EXPR_INDEX: {
+			// &v[0]
+			visit_successors_hir_impl(po, rsym, expr->d_index.expr, direct);
+			visit_successors_hir_impl(po, rsym, expr->d_index.index, true);
+			break;
+		}
+		case EXPR_SLICE: {
+			// &v[0..1]
+			visit_successors_hir_impl(po, rsym, expr->d_slice.expr, direct);
+			if (expr->d_slice.lo) {
+				visit_successors_hir_impl(po, rsym, expr->d_slice.lo, true);
+			}
+			if (expr->d_slice.hi) {
+				visit_successors_hir_impl(po, rsym, expr->d_slice.hi, true);
+			}
+			break;
+		}
+		case EXPR_FIELD: {
+			visit_successors_hir_impl(po, rsym, expr->d_field.expr, direct);
+			break;
+		}
 		case EXPR_ADDR_OF: {
-			// TODO: needs more analysis to convert into proper symbol lvalue
-			assert_not_reached();
+			// test = test         (not allowed)
+			// test = &test        (allowed)
+			// test = &test[test]  (not allowed)
+			visit_successors_hir_impl(po, rsym, expr->d_addr_of.ref, false);
 			break;
 		}
 		//
 		case EXPR_LOCAL:
 		case EXPR_CONTINUE:
-		case EXPR_FIELD:
 		case EXPR_INTEGER_LIT:
 		case EXPR_BOOL_LIT:
 		case EXPR_TUPLE_UNIT: {
@@ -271,8 +201,10 @@ static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 	}
 }
 
-// TODO: visit successors for type hints
-//       or just walk the type table for placeholders? (we need loc though so doesn't matter)
+static void visit_successors_hir(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
+	visit_successors_hir_impl(po, rsym, expr, true);
+}
+
 static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type, loc_t onerror) {
 	if (type < _TYPE_CONCRETE_MAX) {
 		return;
@@ -292,14 +224,61 @@ static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type, loc_t o
 			break;
 		}
 		case TYPE_SYMBOL: {
-			visit_definite_successor(po, rsym, info->d_symbol, onerror);
+			visit_definite_successor(po, rsym, info->d_symbol, onerror, false);
 			break;
 		}
 		case TYPE_PTR: break;
-		case TYPE_CLOSURE: break;
-		case TYPE_CLOSURE_UNION: break;
 		case TYPE_SLICE: break;
 		case TYPE_FUNCTION: break;
+		default: {
+			assert_not_reached();
+		}
+	}
+}
+
+static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror) {
+	if (type < _TYPE_CONCRETE_MAX) {
+		return;
+	}
+
+	tinfo_t *info = type_get(type);
+
+	switch (info->kind) {
+		case TYPE_TUPLE: {
+			for (u32 i = 0, c = arrlenu(info->d_tuple); i < c; i++) {
+				visit_sanity_type(po,info->d_tuple[i], onerror);
+			}
+			break;
+		}
+		case TYPE_ARRAY: {
+			visit_sanity_type(po, info->d_array.elem, onerror);
+			break;
+		}
+		case TYPE_PTR: {
+			visit_sanity_type(po, info->d_ptr.ref, onerror);
+			break;
+		}
+		case TYPE_SLICE: {
+			visit_sanity_type(po, info->d_slice.elem, onerror);
+			break;
+		}
+		case TYPE_FUNCTION: {
+			visit_sanity_type(po, info->d_fn.ret, onerror);
+			for (u32 i = 0, c = arrlenu(info->d_fn.args); i < c; i++) {
+				visit_sanity_type(po, info->d_fn.args[i], onerror);
+			}
+			break;
+		}
+		case TYPE_SYMBOL: {
+			sym_t *sym = &symbols[info->d_symbol];
+			if (sym->is_placeholder) {
+				err_with_pos(onerror, "unknown type `%s`", sv_from(sym->short_name));
+			}
+			if (sym->kind != SYMBOL_TYPE) {
+				err_with_pos(onerror, "expected type, got `%s`", sv_from(sym->short_name));
+			}
+			break;
+		}
 		default: {
 			assert_not_reached();
 		}
@@ -310,12 +289,24 @@ static void visit_successors_typeinfo(rsym_t **po, rsym_t rsym, tsymbol_t *typei
 	switch (typeinfo->kind) {
 		case TYPESYMBOL_STRUCT: {
 			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
-				visit_successors_type(po, rsym, typeinfo->d_struct.fields[i].type, typeinfo->d_struct.fields[i].type_loc);
+				type_t type = typeinfo->d_struct.fields[i].type;
+				loc_t onerror = typeinfo->d_struct.fields[i].type_loc;
+				visit_successors_type(po, rsym, type, onerror);
+				visit_sanity_type(po, type, onerror);
 			}
 			break;
 		}
 		default: {
 			assert_not_reached();
+		}
+	}
+}
+
+static void visit_desc_locals(rsym_t **po, local_t *locals) {
+	for (u32 i = 0, c = arrlenu(locals); i < c; i++) {
+		local_t *local = &locals[i];
+		if (local->type != TYPE_INFER) {
+			visit_sanity_type(po, local->type, local->type_loc);
 		}
 	}
 }
@@ -332,11 +323,26 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 	// walk the HIR (tree) for dependencies/successors
 	switch (sym->kind) {
 		case SYMBOL_PROC: {
-			visit_successors_hir(po, rsym, &sym->d_proc.desc.hir);
+			proc_t *proc = &sym->d_proc;
+			
+			visit_successors_hir(po, rsym, &proc->desc.hir);
+			tinfo_t *typeinfo = type_get(proc->type);
+			assert(typeinfo->kind == TYPE_FUNCTION);
+			
+			if (typeinfo->d_fn.ret != TYPE_INFER) {
+				visit_sanity_type(po, typeinfo->d_fn.ret, proc->ret_type_loc);
+			}
+			visit_desc_locals(po, proc->desc.locals);
 			break;
 		}
 		case SYMBOL_GLOBAL: {
+			global_t *global = &sym->d_global;
+			
 			visit_successors_hir(po, rsym, &sym->d_global.desc.hir);
+			visit_desc_locals(po, global->desc.locals);
+			if (global->type != TYPE_INFER) {
+				visit_sanity_type(po, global->type, global->type_loc);
+			}
 			break;
 		}
 		case SYMBOL_TYPE: {
@@ -352,70 +358,72 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 	sym->sort_colour = SYM_SORT_BLACK; // full sorted
 }
 
-// 1. sanity checks on the table (placeholders)
-// 2. identifies cyclic dependencies
-// 3. returns a list of symbols in the order they should be processed
-void creorder_and_type(void) {
-	// raising an error on referencing a placeholder symbol (doesn't exist)
-	// it must be raised on the actual symbol. so when visiting definitions,
-	// ignore placeholders. they'll be errors soon when we visit the dependents
-
-	// we store the visited status on the actual `sym_t`, it's easier
-
+// reorder pass.
+//
+// the reorder pass orders symbols topologically so that further passes
+// can iterate over symbols dependency free. this is a requirement for
+// type checking and most other passes.
+//
+// currently, symbols are three different things:
+//  1. functions
+//  2. globals
+//  3. user defined types (typesymbols)
+//
+// NOTE: typesymbols are self referencial types. they are also unique,
+//       bound to a name, and don't make sense to be interned.
+//
+// the reorder pass does a lot more than just reorder. it also identifies
+// cycles and self dependencies. it also checks that all symbols are valid.
+//
+// sanity checks:
+//  1. does this symbol exist? (non placeholder)
+//  2. is this type cyclic without indirection?
+//  3. is this global cyclic/self dependent without &indirection?
+//  4. is this function self recursive without return type annotation?
+//  5. is this symbol used in the right context? (e.g. typesymbol in a type)
+//
+rsym_t *creorder_po_and_sanity(void) {
+	// use the algorithm under `3-color DFS and edge classification` from Eli's website:
+	// https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis
+	//
+	// we store the tri-colour on the symbol itself, makes things easier that way.
+	// create a postorder ordering, then reversed (RPO) is our final ordering.
+	//
+	// when visiting definitions, ignore placeholders. they'll be errors soon
+	// on reaching actual uses of the symbol. (dependednts)
+	//
 	rsym_t *po = NULL;
 
-	// main.Function
-	//      ^^^^^^^^
-	// TODO: raise on use
+	// 5. symbol being used in the right context.
+	//
+	//    there are multiple ways to solve this, currently we don't use this
+	//    method but im putting it here for reference.
+	//
+	//    when you `table_resolve()` pass the current context it is being used
+	//    in and it's location. resolving more symbols that don't match this
+	//    current context is an intant error, and registering a symbol that
+	//    doesn't match this current context is an error.
+	//
+	//    since it's quite rare that you'll have multiple unresolved references
+	//    to a placeholder symbol, it should be fine really.
+	//
+	//    currently, we just try to search for every single use of a symbol
+	//    recursively like there is no way around it.
 
-	// iterate through entire type table
-	/* for (u32 i = 0; i < type_len; i++) {
-		tinfo_t *info = &types[i];
-
-		if (info->kind == TYPE_SYMBOL) {
-			sym_t *sym = &symbols[info->d_symbol];
-
-			// will raise placeholder errors inside the topological sort
-			// because we need to identify cyclic recursive types
-			if (sym->kind != SYMBOL_TYPE) {
-				err_with_pos(sym->loc, "expected type symbol");
-			}
-		}
-	} */
-
+	// iterate over all symbols, white symbols are roots
 	for (rsym_t rsym = 0; rsym < hmlenu(symbols); rsym++) {
 		sym_t *sym = &symbols[rsym];
 
-		// will be an error soon
+		// ignore
 		if (sym->is_placeholder) {
 			continue;
 		}
 
-		// will access all roots
+		// root
 		if (sym->sort_colour == SYM_SORT_WHITE) {
 			visit_po(&po, rsym);
 		}
 	}
 
-	// RPO
-	for (u32 i = arrlenu(po); i-- > 0;) {
-		rsym_t rsym = po[i];
-		sym_t *sym = &symbols[rsym];
-		printf("%u: %s\n", i, sv_from(sym->key));
-	}
-
-	/* for (rsym_t i = 0; i < arrlenu(creorder_sorted); i++) {
-		sym_t *sym = &symbols[creorder_sorted[i]];
-
-		switch (sym->kind) {
-			case SYMBOL_PROC: {
-				ctype_proc(sym, &sym->d_proc);
-				break;
-			}
-			case SYMBOL_GLOBAL:
-			case SYMBOL_TYPE: {
-				assert_not_reached();
-			}
-		}
-	} */
+	return po;
 }

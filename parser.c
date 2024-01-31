@@ -87,8 +87,10 @@ void pfn2(void) {
 	//   ^^
 
 	type_t ret_type = TYPE_INFER;
+	loc_t ret_type_loc = {};
 	if (p.token.kind == TOK_ARROW) {
 		pnext();
+		ret_type_loc = p.token.loc;
 		ret_type = ptype();
 	}
 
@@ -113,6 +115,7 @@ void pfn2(void) {
 
 	proc.desc.hir = expr;
 	proc.type = type_new(typeinfo);
+	proc.ret_type_loc = ret_type_loc;
 
 	table_register((sym_t){
 		.key = qualified_name,
@@ -146,9 +149,11 @@ void ptop_global(void) {
 	//  ^
 
 	type_t type = TYPE_INFER;
+	loc_t type_loc = {};
 
 	if (p.token.kind == TOK_COLON) {
 		pnext();
+		type_loc = p.token.loc;
 		type = ptype();
 	}
 
@@ -157,7 +162,7 @@ void ptop_global(void) {
 
 	pexpect(TOK_ASSIGN);
 
-	ir_desc_t desc;
+	ir_desc_t desc = {};
 	desc.hir = pexpr(&desc, 0);
 
 	table_register((sym_t){
@@ -170,6 +175,7 @@ void ptop_global(void) {
 			.desc = desc,
 			.type = type,
 			.is_mut = is_mut,
+			.type_loc = type_loc,
 		},
 	});
 }

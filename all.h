@@ -388,18 +388,19 @@ struct ir_desc_t {
 struct proc_t {
 	ir_desc_t desc;
 	type_t type;
+	loc_t ret_type_loc; // used in sym analysis
 	u16 arguments;   // first [0..arguments] are locals with types inserted
 };
 
 struct global_t {
 	ir_desc_t desc;
 	type_t type;
+	loc_t type_loc; // used in sym analysis
 	bool is_mut;
 	// TODO: consteval etc
 };
 
 struct local_t {
-	type_t type;
 	enum : u8 {
 		LOCAL_MUT, // assigned multiple times
 		LOCAL_IMM, // assigned once in all flows of control
@@ -412,6 +413,9 @@ struct local_t {
 	//       just revamp locations entirely which we should
 	loc_t loc;
 	istr_t name;
+
+	type_t type;
+	loc_t type_loc; // used in sym analysis
 };
 
 struct sym_t {
@@ -423,6 +427,8 @@ struct sym_t {
 
 	// if true, this is a placeholder symbol
 	// nothing else is stored here, it's just an entry with a key
+	//
+	// TODO: remove this and put inside `kind` ??
 	bool is_placeholder;
 	
 	// TODO: also mark dead symbols that are apart of different roots
@@ -449,7 +455,7 @@ struct sym_t {
 // search by qualified name
 extern sym_t *symbols;
 
-rsym_t table_resolve(istr_t qualified_name);
+rsym_t table_resolve(rmod_t mod, istr_t short_name);
 rsym_t table_register(sym_t desc);
 void table_dump(sym_t *sym);
 void table_dump_all(void);

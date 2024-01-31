@@ -18,7 +18,8 @@
 
 sym_t *symbols;
 
-rsym_t table_resolve(istr_t qualified_name) {
+rsym_t table_resolve(rmod_t mod, istr_t short_name) {
+	istr_t qualified_name = fs_module_symbol_sv(mod, short_name);
 	ptrdiff_t sym = hmgeti(symbols, qualified_name);
 	
 	if (sym != -1) {
@@ -27,6 +28,7 @@ rsym_t table_resolve(istr_t qualified_name) {
 
 	sym_t desc = {
 		.key = qualified_name,
+		.short_name = short_name,
 		.is_placeholder = true,
 	};
 
@@ -115,7 +117,7 @@ static void _dump_type(sym_t *sym) {
 	switch (typeinfo->kind) {
 		case TYPESYMBOL_STRUCT: {
 			if (arrlenu(typeinfo->d_struct.fields) == 0) {
-				printf("struct %s {}", sv_from(sym->key));
+				printf("struct %s {}\n", sv_from(sym->key));
 				break;
 			}
 			
@@ -327,8 +329,8 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_CAST: {
-			_print_expr(desc, expr->d_cast);
-			printf(":%s", type_dbg_str(expr->type));
+			_print_expr(desc, expr->d_cast.expr);
+			printf(": %s", type_dbg_str(expr->type));
 			break;
 		}
 		case EXPR_IF: {

@@ -337,16 +337,12 @@ type_t ptype_expr(u8 prec) {
 				istr_t lit = p.token.lit;
 				pnext();
 
-				istr_t qualified_name = fs_module_symbol_sv(p.is[id].mod, lit);
-
-				typesym = table_resolve(qualified_name);
+				typesym = table_resolve(p.is[id].mod, lit);
 			} else {
 				// TODO: perform search of local scope, incase of scoped defs
 
 				// main.Foo
-				istr_t qualified_name = fs_module_symbol_sv(p.mod, lit);
-
-				typesym = table_resolve(qualified_name);
+				typesym = table_resolve(p.mod, lit);
 				pnext();
 			}
 			

@@ -140,10 +140,76 @@
 ; }
 ; 
 ; take(a: Foo) = 0
-
-struct Foo {
-    r: Foo
-}
-
+; 
+; struct Test0 {
+;     a: Test1
+; }
+; 
+; struct Test1 {
+;     a: Test0
+; }
+; 
 ; test1 = test0
 ; test0 = test1
+; 
+; ; use func(): T instead of func() -> T ????
+; 
+; struct T {
+;     b: Eeer
+; }
+; 
+; func() -> NotReal = 0
+; 
+; func() = do
+;     let t: NotReal =  20: Fard
+; 
+; not_existing: NonExisting = 0
+; 
+; F() = 0
+; 
+; struct Foo {
+;     x: i32
+;     y: F
+; }
+; 
+; global: funcer = 0
+; 
+; funcer() -> global = 0
+; 
+; struct T {}
+; 
+; glob = T
+; 
+; selfrec = &selfrec[selfrec]
+; selfrec = &selfrec[&selfrec]
+; 
+; struct Foo {
+;     x: i32
+;     y: *Foo
+; }
+
+; selfcall() -> () = selfcall
+
+; fact(t: i32) -> i32 =
+;     if (t == 0) 1 else t * fact (t - 1)
+
+; fact(t: i32) -> i32 =
+;     if (t == 0) 1 else t * fact (t - 1)
+
+; mutrec0() = mutrec1
+; mutrec1() -> () = mutrec2
+; mutrec2() = mutrec0
+
+; struct Test0 {
+;     a: Test1
+; }
+; 
+; struct Test1 {
+;     a: Test2
+; }
+; 
+; struct Test2 {
+;     a: *Test0
+; }
+
+test = &test
