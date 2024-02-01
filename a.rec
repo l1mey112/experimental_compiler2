@@ -187,19 +187,16 @@
 ;     x: i32
 ;     y: *Foo
 ; }
-
+; 
 ; selfcall() -> () = selfcall
-
+; 
 ; fact(t: i32) -> i32 =
 ;     if (t == 0) 1 else t * fact (t - 1)
-
-; fact(t: i32) -> i32 =
-;     if (t == 0) 1 else t * fact (t - 1)
-
+; 
 ; mutrec0() = mutrec1
 ; mutrec1() -> () = mutrec2
 ; mutrec2() = mutrec0
-
+; 
 ; struct Test0 {
 ;     a: Test1
 ; }
@@ -211,5 +208,15 @@
 ; struct Test2 {
 ;     a: *Test0
 ; }
+; 
+; test = &test
+; 
+; 
+; factacc0(n: i32, acc: i32) -> i32 =
+;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
+; 
+; factacc(n: i32) = factacc0 n 1
 
-test = &test
+global = :t do
+    brk :t 2
+    5

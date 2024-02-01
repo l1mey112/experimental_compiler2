@@ -13,9 +13,9 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 	if (succ->sort_colour == SYM_SORT_GREY) {
 		// global = &global      (not allowed, need annotation)
 		// func() = func         (not allowed, need annotation)
-		
+
 		// assumes sym.kind == succ.kind
-		switch (sym->kind) {
+		switch (succ->kind) {
 			case SYMBOL_PROC: {
 				if (type_get(succ->d_proc.type)->d_fn.ret == TYPE_INFER) {
 					if (rsucc == rsym) {
@@ -29,9 +29,12 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 				break;
 			}
 			case SYMBOL_GLOBAL: {
-				if (indirect && rsucc == rsym && succ->d_global.type == TYPE_INFER) {
-					// cycle self -> self
-					err_with_pos(onerror, "ref to `%s` needs type annotation", sv_from(succ->short_name));
+				if (indirect) {
+					if (rsucc == rsym && succ->d_global.type == TYPE_INFER) {
+						err_with_pos(onerror, "ref to `%s` needs type annotation", sv_from(succ->short_name));
+					} else {
+						break;
+					}
 				}
 				// fallthrough
 			}

@@ -1,7 +1,8 @@
 #include "all.h"
 #include "check.h"
+#include "hir.h"
 
-type_t ctype_convert_numbers(type_t to, type_t from) {
+type_t ctype_promote_numbers(type_t to, type_t from) {
 	assert(type_is_number(to));
 	assert(type_is_number(from));
 	
@@ -59,7 +60,7 @@ type_t ctype_convert_numbers(type_t to, type_t from) {
     // no float conversions? sure.
 
 	// a u32 can go into an f32
-	/* if (to == TYPE_F32 && (f_ui && from <= TYPE_U32)) {
+	if (to == TYPE_F32 && (f_ui && from <= TYPE_U32)) {
 		ret = to;
 		goto end;
 	}
@@ -80,7 +81,7 @@ type_t ctype_convert_numbers(type_t to, type_t from) {
 	if (to == TYPE_F64 && (f_si && from <= TYPE_ISIZE)) {
 		ret = to;
 		goto end;
-	} */
+	}
 	
 	return TYPE_INFER;
 end:
@@ -130,11 +131,46 @@ type_t ctype_unify_innards(type_t lhs_t, type_t rhs_t) {
 // lhs_t <- rhs_t
 // ~~doesn't apply implicit casts like cunify does~~
 // INFO: don't insert casts yet really, figure it out
-type_t ctype_unify(type_t lhs_t, type_t rhs_t, loc_t onerror) {
+type_t ctype_unify_type(type_t lhs_t, type_t rhs_t, loc_t onerror) {
 	type_t t;
 	if ((t = ctype_unify_innards(lhs_t, rhs_t)) != TYPE_INFER) {
 		return t;
 	}
 
 	err_with_pos(onerror, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs_t), type_dbg_str(rhs_t));
+}
+
+void ctype_cast(type_t to, hir_expr_t *node, loc_t loc) {
+	hir_expr_t *dup = hir_dup(*node);
+
+	*node = (hir_expr_t) {
+		.kind = EXPR_CAST,
+		.loc = loc,
+		.type = to,
+		.d_cast = dup,
+	};
+}
+
+type_t ctype_unify(type_t lhs_t, hir_expr_t *rhs) {
+	type_t rhs_t = rhs->type;
+
+	type_t t;
+	if ((t = ctype_unify_innards(lhs_t, rhs_t)) != TYPE_INFER) {
+		return t;
+	}
+
+	// promote integers
+	if (type_is_number(lhs_t) && type_is_number(rhs_t)) {
+		type_t lhs_c = ctype_promote_numbers(lhs_t, rhs_t);
+
+		if (lhs_c != TYPE_INFER) {
+			if (lhs_c != rhs_t) {
+				ctype_cast(lhs_c, rhs, rhs->loc);
+			}
+
+			return lhs_c;
+		}
+	}
+
+	err_with_pos(rhs->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(lhs_t), type_dbg_str(rhs_t));
 }
