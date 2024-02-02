@@ -223,7 +223,7 @@
 ;     29
 ;     29
 
-factacc0(n: i32, acc: i32) -> i32 =
-    if (n <= 1) acc else factacc0 (n - 1) (n * acc)
-
 factacc(n: i32) = factacc0 n 1
+
+factacc0(n: i32, acc: i32): i32 =
+    if (n <= 1) acc else factacc0 (n - 1) (n * acc)

@@ -116,6 +116,8 @@ ret:
 		compiler_check();
 	}
 	
+	table_dump_all();
+	
 	/* if (!err && !setjmp(err_diag.unwind)) {
 		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
 			hir_check_module(i);

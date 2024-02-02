@@ -88,7 +88,7 @@ void pfn2(void) {
 
 	type_t ret_type = TYPE_INFER;
 	loc_t ret_type_loc = {};
-	if (p.token.kind == TOK_ARROW) {
+	if (p.token.kind == TOK_COLON) {
 		pnext();
 		ret_type_loc = p.token.loc;
 		ret_type = ptype();
@@ -100,7 +100,7 @@ void pfn2(void) {
 	// add(a: i32, b: i32) = a + b
 	//                     ^
 
-	pnext();
+	pexpect(TOK_ASSIGN);
 
 	p.blks[p.blks_len++] = (pblk_t){
 		.kind = BLK_FN,
