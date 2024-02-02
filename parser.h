@@ -8,6 +8,11 @@ typedef struct pscope_entry_t pscope_entry_t;
 typedef struct pblk_t pblk_t;
 
 struct pblk_t {
+	enum {
+		BLK_LABEL,
+		BLK_FN,
+	} kind;
+	
 	istr_t label;
 	loc_t loc; // TODO: i don't even think we'll need this?
 	bool always_brk; // if false, a `brk` without a label doesn't resolve to this
@@ -88,6 +93,7 @@ void ppush_scope(void);
 void ppop_scope(void);
 void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
 pattern_t ppattern(ir_desc_t *desc);
-u32 pblk_locate(istr_t opt_label, loc_t onerror);
+u32 pblk_locate_label(istr_t opt_label, loc_t onerror);
+u32 pblk_locate_fn(loc_t onerror);
 
 hir_expr_t pexpr(ir_desc_t *desc, u8 prec);

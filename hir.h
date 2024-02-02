@@ -129,7 +129,10 @@ struct hir_expr_t {
 		struct {
 			u8 blk_id;
 		} d_continue;
-		hir_expr_t *d_return;
+		struct {
+			hir_expr_t *expr;
+			u8 blk_id; // functions are blocks on their own
+		} d_return;
 		struct {
 			hir_expr_t *cond;
 			hir_expr_t *then;

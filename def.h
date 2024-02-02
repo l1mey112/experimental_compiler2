@@ -25,7 +25,9 @@
 	X(TYPE_UNIT, "()") \
 	X(TYPE_BOTTOM, "!")
 
-// TODO: not yet
+// NOTE: there is no undefined in the language anymore,
+//       there isn't a need for it when you have proper
+//       definite assignment analysis.
 // X(TYPE_UNDEFINED, "undefined")
 
 #define TOK_X_KEYWORDS_LIST \

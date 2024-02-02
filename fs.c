@@ -1,6 +1,7 @@
-#include "all.h"
-
 #define __USE_GNU
+#define _GNU_SOURCE
+
+#include "all.h"
 
 #include <dirent.h>
 #include <errno.h>

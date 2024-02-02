@@ -217,16 +217,16 @@ bool plet(ir_desc_t *desc, hir_expr_t *expr_out) {
 	//     let _ = ...
 	//     let ident = ...
 	//
+
+	// it isn't the checkers job to assert exhaustiveness, the pattern
+	// match is compiled down into a single match pattern which further
+	// passes will check for exhaustiveness.
 	//
-	// let (x, y) = expr       (desugared to a goto_pattern with single branch)
+	//     let v: []i32 = ...
 	//
-	// entry:
-	//     ...
-	//     goto_pattern expr
-	//       (x, y) -> let.next
-	//
-	// let.next:
-	//     ... use x and y
+	//     if (v.len == 2) {
+	//         let [a, b] = v      (fully exhaustive after analysis)
+	//     }
 	//
 
 	// no let rec here
@@ -308,6 +308,7 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 
 	u8 blk_id = p.blks_len++;
 	p.blks[blk_id] = (pblk_t){
+		.kind = BLK_LABEL,
 		.label = opt_label,
 		.loc = opt_loc,
 		.always_brk = false,
@@ -363,6 +364,7 @@ hir_expr_t ploop(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 
 	u8 blk_id = p.blks_len++;
 	p.blks[blk_id] = (pblk_t){
+		.kind = BLK_LABEL,
 		.label = opt_label,
 		.loc = opt_loc,
 		.always_brk = true,
@@ -409,15 +411,6 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 			};
 			break;
 		}
-		/* case TOK_UNDEFINED: {
-			pnext();
-			expr = (hir_expr_t){
-				.kind = EXPR_UNDEFINED,
-				.type = TYPE_UNDEFINED,
-				.loc = token.loc,
-			};
-			break;
-		} */
 		case TOK_TRUE:
 		case TOK_FALSE: {
 			pnext();
@@ -528,7 +521,7 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 				onerror = p.token.loc;
 				pnext();
 			}
-			u8 blk_id = pblk_locate(label, onerror);
+			u8 blk_id = pblk_locate_label(label, onerror);
 			expr = (hir_expr_t){
 				.kind = EXPR_BREAK,
 				.loc = token.loc,
@@ -552,7 +545,7 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 				onerror = p.token.loc;
 				pnext();
 			}
-			u8 blk_id = pblk_locate(label, onerror);
+			u8 blk_id = pblk_locate_label(label, onerror);
 			expr = (hir_expr_t){
 				.kind = EXPR_CONTINUE,
 				.loc = token.loc,
@@ -564,12 +557,16 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 			break;
 		}
 		case TOK_RETURN: {
+			u32 blk_id =  pblk_locate_fn(p.token.loc);
 			pnext();
 			expr = (hir_expr_t){
 				.kind = EXPR_RETURN,
 				.loc = token.loc,
 				.type = TYPE_BOTTOM,
-				.d_return = hir_dup(pexpr(desc, 0)),
+				.d_return = {
+					.expr = hir_dup(pexpr(desc, 0)),
+					.blk_id = blk_id,
+				},
 			};
 			break;
 		}

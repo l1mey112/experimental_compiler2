@@ -325,7 +325,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 		}
 		case EXPR_RETURN: {
 			printf("ret ");
-			_print_expr(desc, expr->d_return);
+			_print_expr(desc, expr->d_return.expr);
 			break;
 		}
 		case EXPR_CAST: {
@@ -342,10 +342,6 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			_print_expr(desc, expr->d_if.els);
 			break;
 		}
-		/* case EXPR_UNDEFINED: {
-			printf("undefined");
-			break;
-		} */
 		case EXPR_ARRAY: {
 			printf("[");
 			for (int i = 0, c = arrlen(expr->d_array); i < c; i++) {
@@ -472,7 +468,7 @@ static void _dump_function(sym_t *sym) {
 		}
 	}
 
-	printf(") -> %s hir = ", type_dbg_str(type_get(proc->type)->d_fn.ret));
+	printf(") -> %s hir = ", type_dbg_str(proc->ret_type));
 
 	_print_expr(desc, &desc->hir);
 	printf("\n");

@@ -95,26 +95,28 @@ void pfn2(void) {
 	}
 
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
-	tinfo_t typeinfo = {
-		.kind = TYPE_FUNCTION,
-		.d_fn = {
-			.args = arg_types,
-			.ret = ret_type,
-		},
-	};
+	// construct type late
 
 	// add(a: i32, b: i32) = a + b
 	//                     ^
 
 	pnext();
 
+	p.blks[p.blks_len++] = (pblk_t){
+		.kind = BLK_FN,
+		.loc = name_loc,
+	};
+
 	ppush_scope();
 	hir_expr_t expr = pexpr(&proc.desc, 0);
 	ppop_scope();
 	ppop_scope();
 
+	p.blks_len--;
+
 	proc.desc.hir = expr;
-	proc.type = type_new(typeinfo);
+	proc.type = TYPE_INFER;
+	proc.ret_type = ret_type;
 	proc.ret_type_loc = ret_type_loc;
 
 	table_register((sym_t){

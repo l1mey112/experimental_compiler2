@@ -1,10 +1,20 @@
 #include "check.h"
 #include "all.h"
 #include "hir.h"
+#include <assert.h>
 
 cctx_t c;
 
 type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr);
+
+// TODO: in the future, use a zero cost invariant/assert marker
+//
+//     cdo(desc: *ir_desc_t, upvalue: type_t, expr: *hir_expr_t): ()
+//         invariant expr.kind == EXPR_DO_BLOCK
+//     = {
+//         ...
+//     }
+//
 
 // sets expr->type
 void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
@@ -73,6 +83,76 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	//}
 
 	expr->type = blk->brk_type;
+}
+
+// sets expr->type
+void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+	cblk_t *blk = &c.blocks[c.blocks_len++];
+
+	*blk = (cblk_t){
+		.brk_type = TYPE_INFER,
+		.upvalue = upvalue,
+	};
+
+	(void)cexpr(desc, TYPE_INFER, expr->d_loop.expr);
+	c.blocks_len--;
+
+	// if a loop block has no breaks, it loops forever
+	if (blk->brk_type == TYPE_INFER) {
+		blk->brk_type = TYPE_BOTTOM;
+	}
+
+	expr->type = blk->brk_type;
+}
+
+void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+	hir_expr_t *lhs = expr->d_infix.lhs;
+	hir_expr_t *rhs = expr->d_infix.rhs;
+	tok_t kind = expr->d_infix.kind;
+
+	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
+	bool is_cmp_op = kind == TOK_EQ || kind == TOK_NE || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE;
+	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
+	bool is_ptr_arith = false;
+
+	type_t lhs_t = cexpr(desc, upvalue, lhs);
+	type_t rhs_t = cexpr(desc, lhs_t, rhs);
+
+	ti_kind lhs_kind = type_kind(lhs_t);
+
+	// TODO: will need to add in *opaque pointers, no arith on these
+	// TODO: introduce proper bounded ptr types for such too
+	// TODO: better errors and proper semantics, look at real compilers
+
+	if (lhs_kind == TYPE_PTR && (kind == TOK_ADD || kind == TOK_SUB)) {
+		is_ptr_arith = true;
+	} else if (lhs_kind == TYPE_PTR) {
+		err_with_pos(expr->loc, "invalid operation `%s` on pointer type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+	}
+
+	// TODO: ! && _ -> !
+	// TODO: ! || _ -> !
+
+	if (is_bool_op) {
+		(void)ctype_unify(TYPE_BOOL, lhs);
+		(void)ctype_unify(TYPE_BOOL, rhs);
+
+		expr->type = TYPE_BOOL;
+	} else {
+		type_t type = ctype_unify(lhs_t, rhs);
+
+		if (is_cmp_op) {
+			expr->type = TYPE_BOOL;
+		} else {
+			if (!type_is_number(lhs_t)) {
+				err_with_pos(expr->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+			}
+			if (!type_is_number(rhs_t)) {
+				err_with_pos(expr->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
+			}
+			expr->type = type;
+		}
+	}
 }
 
 type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
@@ -188,18 +268,31 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			cdo(desc, upvalue, expr);
 			break;
 		}
-		/* case EXPR_LOOP: {
-			cloop(desc, expr, upvalue);
+		case EXPR_LOOP: {
+			cloop(desc, upvalue, expr);
 			break;
-		} */
+		}
 		case EXPR_IF: {
+			// TODO: if (!) ... else ... = !
+			// TODO: a then: ! unify els: T -> ! when in reality the !
+			//       should be stamped out. ctype unify should ignore !
+			// TODO: formalise unification semantics, possibly introduce
+			//       a seperate function for propagating !
 
-		}
-		case EXPR_ASSIGN: {
+			(void)cexpr(desc, TYPE_BOOL, expr->d_if.cond);
+			(void)ctype_unify(TYPE_BOOL, expr->d_if.cond);
 
+			type_t then_type = cexpr(desc, upvalue, expr->d_if.then);
+			type_t else_type = cexpr(desc, upvalue, expr->d_if.els);
+			expr->type = ctype_unify(then_type, expr->d_if.els);
+			break;
 		}
+		/* case EXPR_ASSIGN: {
+			
+		} */
 		case EXPR_INFIX: {
-
+			cinfix(desc, upvalue, expr);
+			break;
 		}
 		case EXPR_POSTFIX: {
 
@@ -220,45 +313,148 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 
 		}
 		case EXPR_LOCAL: {
+			// TODO: nullary `f` doesn't take an () argument
+			//       to get the addr of function, you must do `&f`
+			
+			local_t *local = &desc->locals[expr->d_local];
 
+			if (local->type == TYPE_INFER) {
+				err_with_pos(expr->loc, "can't infer type");
+			}
+
+			expr->type = local->type;
+			break;
 		}
 		case EXPR_SYM: {
+			// TODO: comment about local above
+			//       will need distinction about using as an lvalue or not
+			
+			sym_t *symbol = &symbols[expr->d_sym];
+			type_t type;
 
+			// the check reorder pass should assert that all symbols
+			// pass a sanity check and all uses make sense.
+			
+			switch (symbol->kind) {
+				case SYMBOL_PROC: {
+					type = symbol->d_proc.type;
+					break;
+				}
+				case SYMBOL_GLOBAL: {
+					type = symbol->d_global.type;
+					break;
+				}
+				default: {
+					// SYMBOL_TYPE is unreachable
+					assert_not_reached();
+				}
+			}
+
+			assert(type != TYPE_INFER);
+
+			expr->type = type;
+			break;
 		}
 		case EXPR_CAST: {
+			type_t type = cexpr(desc, expr->type, expr->d_cast.expr);
 
+			// remove cast, it's already the right type
+			if (type == expr->type) {
+				*expr = *expr->d_cast.expr;
+			}
+
+			// TODO: check if this cast is even possible.
+			//       good places to start is just reading source code of major compilers.
+			
+			// expr->type is cast type already
+			break;	
 		}
 		case EXPR_CALL: {
-			assert_not_reached();
+			// we don't use a curried form internally to not waste analysis checking
+			// for partial application. most function calls are complete calls anyway.
+			//
+			// `f x g` will compile into a merged call, you'll need to separate them.
+			//
+			//     f(x: T): T -> ()          (TODO: update fn type syntax, functions can be 0 arity now)
+			//
+			//     f(x, g) -> f(x)(g)
+			//
+
+			// TODO: separate calls
+
+			type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f);
+			if (type_kind(f_type) != TYPE_FUNCTION) {
+				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
+			}
+
+			// iterate one by one over the args
+			// for every arg, if it exhausts the current arguments of a function type
+			// set that return value to the list of argument types, and so on.
+
+			tinfo_t *fn_info = type_get(f_type);
+			
+			type_t *args = fn_info->d_fn.args;
+			u32 cursor = 0;
+			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++, cursor++) {
+				if (cursor >= arrlenu(args)) {
+					// extract the return value, using the type as a function itself
+					assert_not_reached();
+				}
+
+				hir_expr_t *arg_expr = &expr->d_call.args[i];
+				type_t arg_upvalue = args[cursor];
+
+				(void)cexpr(desc, arg_upvalue, arg_expr);
+				(void)ctype_unify(arg_upvalue, arg_expr);
+			}
+
+			u32 papp = arrlenu(expr->d_call.args) - cursor;
+			assert(papp == 0); // TODO: partial apply
+
+			expr->type = fn_info->d_fn.ret;
+			break;
 		}
 		case EXPR_BREAK: {
 			cblk_t *blk = &c.blocks[expr->d_break.blk_id]; // 1:1 correspondence
 
 			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_break.expr);
 
-			// ! encompasses all types
-
-			if (blk->brk_type )
-			
-			/* if (blk->brk_type == TYPE_INFER || blk->brk_type == TYPE_BOTTOM) {
+			// no ! precedence
+			if (blk->brk_type == TYPE_INFER || blk->brk_type == TYPE_BOTTOM) {
 				blk->brk_type = brk_type;
-				blk->brk_loc = expr->loc;
-			} else if (brk_type != TYPE_BOTTOM && blk->brk_type != brk_type) {
-				print_err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(blk->brk_type), type_dbg_str(brk_type));
-				print_hint_with_pos(blk->brk_loc, "type `%s` deduced here", type_dbg_str(blk->brk_type));
-				err_unwind();
-			} */
+				blk->brk_loc = expr->loc;				
+			} else {
+				// ignore the return value, don't want ! precedence
+				(void)ctype_unify(blk->brk_type, expr->d_break.expr);
 
+				// print_err_with_pos(expr->loc, "type mismatch: expected `%s`, got `%s`", type_dbg_str(blk->brk_type), type_dbg_str(brk_type));
+				// print_hint_with_pos(blk->brk_loc, "type `%s` deduced here", type_dbg_str(blk->brk_type));
+				// err_unwind();
+			}
+
+			expr->type = TYPE_BOTTOM;
 			break;
 		}
 		case EXPR_CONTINUE: {
-
+			// no need to pass or inspect anything
+			expr->type = TYPE_BOTTOM;
+			break;
 		}
-		case EXPR_RETURN: {
+		// TODO: need for inference as well, still need brk_type
+		/* case EXPR_RETURN: {
+			cblk_t *blk = &c.blocks[expr->d_return.blk_id]; // 1:1 correspondence
+			
+			(void)cexpr(desc, blk->upvalue, expr->d_return.expr);
+			(void)ctype_unify(blk->upvalue, expr->d_return.expr);
 
-		}
+			expr->type = TYPE_BOTTOM;
+			break;
+		} */
 		case EXPR_VOIDING: {
-
+			// TODO: _ = discard
+			(void)cexpr(desc, TYPE_UNIT, expr->d_voiding);
+			expr->type = TYPE_UNIT;
+			break;
 		}
 		case EXPR_FIELD: {
 
@@ -276,14 +472,23 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 }
 
 void cproc(proc_t *proc) {
-	/* c = (cctx_t){};
+	c = (cctx_t){};
 
-	tinfo_t *typeinfo = type_get(proc->type);
-	assert(typeinfo->kind == TYPE_FUNCTION);
+	cblk_t *blk = &c.blocks[c.blocks_len++];
 
-	type_t ret = cexpr(&proc->desc, typeinfo->d_fn.ret, &proc->desc.hir);
+	*blk = (cblk_t){
+		.upvalue = proc->ret_type,
+		.brk_type = TYPE_INFER,
+	};
 
-	printf("type %s\n", type_dbg_str(ret)); */
+	type_t ret = cexpr(&proc->desc, proc->ret_type, &proc->desc.hir);
+
+	c.blocks_len--;
+
+	// TODO: unification properly
+	if (proc.)
+
+	printf("type %s\n", type_dbg_str(ret));
 
 	assert_not_reached();
 }

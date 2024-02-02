@@ -382,12 +382,13 @@ rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 struct ir_desc_t {
 	local_t *locals; // variables
 	hir_expr_t hir;
-	lir_proc_t lir;
+	// lir_proc_t lir;
 };
 
 struct proc_t {
 	ir_desc_t desc;
-	type_t type;
+	type_t type; // type available/constructed after checking
+	type_t ret_type; // annotation
 	loc_t ret_type_loc; // used in sym analysis
 	u16 arguments;   // first [0..arguments] are locals with types inserted
 };

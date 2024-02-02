@@ -17,7 +17,7 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 		// assumes sym.kind == succ.kind
 		switch (succ->kind) {
 			case SYMBOL_PROC: {
-				if (type_get(succ->d_proc.type)->d_fn.ret == TYPE_INFER) {
+				if (succ->d_proc.ret_type == TYPE_INFER) {
 					if (rsucc == rsym) {
 						// cycle self -> self
 						err_with_pos(succ->loc, "self recursive function `%s` needs return type annotation", sv_from(succ->short_name));
@@ -150,7 +150,7 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 			break;
 		}
 		case EXPR_RETURN: {
-			visit_successors_hir_impl(po, rsym, expr->d_return, true);
+			visit_successors_hir_impl(po, rsym, expr->d_return.expr, true);
 			break;
 		}
 		case EXPR_VOIDING: {
@@ -329,11 +329,8 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 			proc_t *proc = &sym->d_proc;
 			
 			visit_successors_hir(po, rsym, &proc->desc.hir);
-			tinfo_t *typeinfo = type_get(proc->type);
-			assert(typeinfo->kind == TYPE_FUNCTION);
-			
-			if (typeinfo->d_fn.ret != TYPE_INFER) {
-				visit_sanity_type(po, typeinfo->d_fn.ret, proc->ret_type_loc);
+			if (proc->ret_type != TYPE_INFER) {
+				visit_sanity_type(po, proc->ret_type, proc->ret_type_loc);
 			}
 			visit_desc_locals(po, proc->desc.locals);
 			break;

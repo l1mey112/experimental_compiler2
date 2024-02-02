@@ -760,9 +760,14 @@ pattern_t ppattern(ir_desc_t *desc) {
 }
 
 // if `opt_label != ISTR_NONE` then `onerror` points to label otherwise the `brk` expr
-u32 pblk_locate(istr_t opt_label, loc_t onerror) {
+u32 pblk_locate_label(istr_t opt_label, loc_t onerror) {
 	for (u32 i = p.blks_len; i-- > 0;) {
 		pblk_t *blk = &p.blks[i];
+
+		if (blk->kind != BLK_LABEL) {
+			continue;
+		}
+		
 		if (!blk->always_brk && opt_label == ISTR_NONE) {
 			continue;
 		}
@@ -777,4 +782,18 @@ u32 pblk_locate(istr_t opt_label, loc_t onerror) {
 	} else {
 		err_with_pos(onerror, "not inside a loop");
 	}
+}
+
+u32 pblk_locate_fn(loc_t onerror) {
+	for (u32 i = p.blks_len; i-- > 0;) {
+		pblk_t *blk = &p.blks[i];
+
+		if (blk->kind != BLK_FN) {
+			continue;
+		}
+		
+		return i;
+	}
+
+	err_with_pos(onerror, "not inside function");
 }

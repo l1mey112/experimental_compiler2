@@ -106,20 +106,6 @@ type_t ctype_unify_innards(type_t lhs_t, type_t rhs_t) {
 		return rhs_t;
 	}
 
-	// before undefined coercing, make sure to cuse() to ensure this is a safe unification
-
-	// TODO: no undefined yet
-
-	// undefined coerces to everything
-	/* if (rhs_kind == TYPE_UNDEFINED) {
-		return lhs_t;
-	}
-
-	// undefined coerces to everything
-	if (lhs_kind == TYPE_UNDEFINED) {
-		return rhs_t;
-	} */
-
 	// functions
 	if (lhs_kind == TYPE_FUNCTION && rhs_kind == TYPE_FUNCTION) {
 		assert_not_reached();
