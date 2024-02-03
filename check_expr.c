@@ -26,7 +26,7 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	for (u32 i = 0, c = stmts_len; i < c; i++) {
 		hir_expr_t *stmt = &expr->d_do_block.exprs[i];
 		// nonsensical to pass upvalue
-		type_t type = cexpr(desc, TYPE_INFER, stmt);
+		type_t type = cexpr(desc, TYPE_INFER, stmt, BM_RVALUE);
 		if (type == TYPE_BOTTOM && i + 1 < c) {
 			err_with_pos(expr->d_do_block.exprs[i + 1].loc, "unreachable code");
 		}
@@ -88,7 +88,7 @@ void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		.upvalue = upvalue,
 	};
 
-	(void)cexpr(desc, TYPE_INFER, expr->d_loop.expr);
+	(void)cexpr(desc, TYPE_INFER, expr->d_loop.expr, BM_RVALUE);
 	c.blocks_len--;
 
 	// if a loop block has no breaks, it loops forever
@@ -109,8 +109,8 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
 	bool is_ptr_arith = false;
 
-	type_t lhs_t = cexpr(desc, upvalue, lhs);
-	type_t rhs_t = cexpr(desc, lhs_t, rhs);
+	type_t lhs_t = cexpr(desc, upvalue, lhs, BM_RVALUE);
+	type_t rhs_t = cexpr(desc, lhs_t, rhs, BM_RVALUE);
 
 	ti_kind lhs_kind = type_kind(lhs_t);
 
@@ -149,7 +149,33 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	}
 }
 
-type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+void cufcs_lvalue(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
+	// f x
+	// f = x
+	// do nothing, a call isn't applicable here
+	if (cfg & BM_LVALUE || cfg & BM_CALL) {
+		return;
+	}
+
+	// k = f     (call f)
+
+	// convert to call and recheck
+	if (type_kind(expr->type) == TYPE_FUNCTION) {
+		hir_expr_t call = (hir_expr_t){
+			.kind = EXPR_CALL,
+			.loc = expr->loc,
+			.type = TYPE_INFER,
+			.d_call = {
+				.f = hir_dup(*expr),
+				.args = NULL,
+			},
+		};
+		*expr = call;
+		cexpr(desc, TYPE_INFER, expr, BM_RECALL);
+	}
+}
+
+type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 	switch (expr->kind) {
 		case EXPR_INTEGER_LIT: {
 			if (upvalue != TYPE_INFER && type_is_integer(upvalue)) {
@@ -187,7 +213,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 				}
 			}
 
-			type_t elem_type = cexpr(desc, elem_upvale, &expr->d_array[0]);
+			type_t elem_type = cexpr(desc, elem_upvale, &expr->d_array[0], BM_RVALUE);
 			// []elem_type
 
 			u32 len = arrlenu(expr->d_array);
@@ -195,7 +221,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			for (u32 i = 1; i < len; i++) {
 				hir_expr_t *elem = &expr->d_array[i];
 
-				type_t type = cexpr(desc, elem_type, elem);
+				type_t type = cexpr(desc, elem_type, elem, BM_RVALUE);
 				ctype_unify(type, elem);
 			}
 
@@ -242,7 +268,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 					upvalue = upvales[i];
 				}
 				hir_expr_t *inner = &expr->d_tuple[i];
-				type_t type = cexpr(desc, upvalue, inner);
+				type_t type = cexpr(desc, upvalue, inner, BM_RVALUE);
 				ctype_unify(type, inner);
 				arrpush(types, type);
 			}
@@ -273,11 +299,11 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			// TODO: formalise unification semantics, possibly introduce
 			//       a seperate function for propagating !
 
-			(void)cexpr(desc, TYPE_BOOL, expr->d_if.cond);
+			(void)cexpr(desc, TYPE_BOOL, expr->d_if.cond, BM_RVALUE);
 			(void)ctype_unify(TYPE_BOOL, expr->d_if.cond);
 
-			type_t then_type = cexpr(desc, upvalue, expr->d_if.then);
-			type_t else_type = cexpr(desc, upvalue, expr->d_if.els);
+			type_t then_type = cexpr(desc, upvalue, expr->d_if.then, BM_RVALUE);
+			type_t else_type = cexpr(desc, upvalue, expr->d_if.els, BM_RVALUE);
 			expr->type = ctype_unify(then_type, expr->d_if.els);
 			break;
 		}
@@ -317,6 +343,8 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			}
 
 			expr->type = local->type;
+
+			cufcs_lvalue(desc, expr, cfg); // promote and recheck if rvalue
 			break;
 		}
 		case EXPR_SYM: {
@@ -344,14 +372,15 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 				}
 			}
 
-			printf("sym: %s\n", sv_from(symbol->key));
 			assert(type != TYPE_INFER);
 
 			expr->type = type;
+
+			cufcs_lvalue(desc, expr, cfg); // promote and recheck if rvalue
 			break;
 		}
 		case EXPR_CAST: {
-			type_t type = cexpr(desc, expr->type, expr->d_cast.expr);
+			type_t type = cexpr(desc, expr->type, expr->d_cast.expr, BM_RVALUE);
 
 			// remove cast, it's already the right type
 			if (type == expr->type) {
@@ -377,9 +406,14 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 
 			// TODO: separate calls
 
-			type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f);
-			if (type_kind(f_type) != TYPE_FUNCTION) {
-				err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
+			type_t f_type;
+			if (!(cfg & BM_RECALL)) {
+				f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, BM_RVALUE | BM_CALL);
+				if (type_kind(f_type) != TYPE_FUNCTION) {
+					err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
+				}
+			} else {
+				f_type = expr->d_call.f->type;
 			}
 
 			// iterate one by one over the args
@@ -399,7 +433,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 				hir_expr_t *arg_expr = &expr->d_call.args[i];
 				type_t arg_upvalue = args[cursor];
 
-				(void)cexpr(desc, arg_upvalue, arg_expr);
+				(void)cexpr(desc, arg_upvalue, arg_expr, BM_RVALUE);
 				(void)ctype_unify(arg_upvalue, arg_expr);
 			}
 
@@ -412,7 +446,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		case EXPR_BREAK: {
 			cblk_t *blk = &c.blocks[expr->d_break.blk_id]; // 1:1 correspondence
 
-			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_break.expr);
+			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_break.expr, BM_RVALUE);
 
 			// no ! precedence
 			if (blk->brk_type == TYPE_INFER || blk->brk_type == TYPE_BOTTOM) {
@@ -439,7 +473,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		case EXPR_RETURN: {
 			cblk_t *blk = &c.blocks[expr->d_return.blk_id]; // 1:1 correspondence
 
-			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_return.expr);
+			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_return.expr, BM_RVALUE);
 
 			// if `blk->upvalue` is set, that is the type of the entire function
 			if (blk->upvalue != TYPE_INFER) {
@@ -460,7 +494,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		}
 		case EXPR_VOIDING: {
 			// TODO: _ = discard
-			(void)cexpr(desc, TYPE_UNIT, expr->d_voiding);
+			(void)cexpr(desc, TYPE_UNIT, expr->d_voiding, BM_RVALUE);
 			expr->type = TYPE_UNIT;
 			break;
 		}

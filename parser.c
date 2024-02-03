@@ -114,8 +114,20 @@ void pfn2(void) {
 
 	p.blks_len--;
 
+	// create function type if return is annotated
+	type_t type = TYPE_INFER;
+	if (ret_type != TYPE_INFER) {
+		type = type_new((tinfo_t){
+			.kind = TYPE_FUNCTION,
+			.d_fn = {
+				.args = arg_types,
+				.ret = ret_type,
+			},
+		});
+	}
+
 	proc.desc.hir = expr;
-	proc.type = TYPE_INFER;
+	proc.type = type;
 	proc.ret_type = ret_type;
 	proc.ret_type_loc = ret_type_loc;
 

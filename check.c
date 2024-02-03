@@ -13,35 +13,23 @@ void cproc(proc_t *proc) {
 		.brk_type = TYPE_INFER,
 	};
 
+	bool ret_annotated = proc->ret_type != TYPE_INFER;
+
 	// we'll need this regardless
 	type_t *args_types = NULL;
 
-	for (u32 i = 0; i < proc->arguments; i++) {
-		local_t *arg = &proc->desc.locals[i];
-		arrpush(args_types, arg->type);
-	}
-
-	bool ret_annotated = proc->ret_type != TYPE_INFER;
-
-	// a proc doesn't contain it's `type` filled in yet, only argument locals
-	// and possibly a seperate return type annotation. you'll need to create
-	// and assign it here.
-	//
 	// mutually recursive or just recursive procs without a type annotation
-	// aren't allowed at all, so this guards against that completely.
+	// aren't allowed at all. functions without a type annotation don't
+	// have `type` set and must be inferred
 
-	// for mutually recursive or self calls
-	if (ret_annotated) {
-		proc->type = type_new((tinfo_t){
-			.kind = TYPE_FUNCTION,
-			.d_fn = {
-				.args = args_types,
-				.ret = proc->ret_type,
-			},
-		});
+	if (!ret_annotated) {
+		for (u32 i = 0; i < proc->arguments; i++) {
+			local_t *arg = &proc->desc.locals[i];
+			arrpush(args_types, arg->type);
+		}
 	}
 
-	type_t expr_type = cexpr(&proc->desc, proc->ret_type, &proc->desc.hir);
+	type_t expr_type = cexpr(&proc->desc, proc->ret_type, &proc->desc.hir, BM_RVALUE);
 
 	c.blocks_len--;
 
@@ -81,12 +69,15 @@ void cproc(proc_t *proc) {
 void cglobal(global_t *global) {
 	c = (cctx_t){};
 
-	type_t ret = cexpr(&global->desc, global->type, &global->desc.hir);
+	type_t ret = cexpr(&global->desc, global->type, &global->desc.hir, BM_RVALUE);
+
+	if (global->type == TYPE_INFER) {
+		global->type = ret;
+	} else {
+		ctype_unify(global->type, &global->desc.hir);
+	}
 
 	printf("type %s\n", type_dbg_str(ret));
-	assert_not_reached();
-	// cdesc(&proc->desc);
-	// assert_not_reached();	
 }
 
 void ccheck_all_symbols(rsym_t *po) {

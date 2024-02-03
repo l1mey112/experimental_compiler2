@@ -169,9 +169,12 @@ static void _type_dbg_str(type_t type, bool inner) {
 			break;
 		}
 		case TYPE_FUNCTION: {
-			if (!inner) {
+			// TODO: `inner` has no use
+			/* if (!inner) {
 				COMMIT(sprintf((char *)p, "("));
-			}
+			} */
+			
+			COMMIT(sprintf((char *)p, "("));
 			for (u32 i = 0, c = arrlenu(typeinfo->d_fn.args); i < c; i++) {
 				type_t arg = typeinfo->d_fn.args[i];
 				_type_dbg_str(arg, false);
@@ -179,11 +182,11 @@ static void _type_dbg_str(type_t type, bool inner) {
 					COMMIT(sprintf((char *)p, ", "));
 				}
 			}
-			COMMIT(sprintf((char *)p, " -> "));
+			COMMIT(sprintf((char *)p, "): "));
 			_type_dbg_str(typeinfo->d_fn.ret, false);
-			if (!inner) {
+			/* if (!inner) {
 				COMMIT(sprintf((char *)p, ")"));
-			}
+			} */
 			break;
 		}
 		case TYPE_PTR: {

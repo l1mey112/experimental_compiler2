@@ -222,8 +222,24 @@
 ;     29
 ;     29
 ;     29
+; 
+; factacc(n: i32) = factacc0 n 1
+; 
+; factacc0(n: i32, acc: i32): i32 =
+;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
+; 
 
-factacc(n: i32) = factacc0 n 1
+f() = ()
 
-factacc0(n: i32, acc: i32): i32 =
-    if (n <= 1) acc else factacc0 (n - 1) (n * acc)
+ufcs = f
+
+m0() = m9
+m1() = m0
+m2() = m1
+m3() = m2
+m4() = m3
+m5() = m4
+m6() = m5
+m7() = m6
+m8() = m7
+m9(): () = m8
