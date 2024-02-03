@@ -1,5 +1,6 @@
-#include "check.h"
 #include "all.h"
+#include "check.h"
+#include "lower.h" // TODO: check comment at bottom
 
 cctx_t c;
 
@@ -106,7 +107,10 @@ void ccheck_all_symbols(rsym_t *po) {
 	}
 }
 
-void compiler_check(void) {
+// TODO: rename check.c to something more generic as it calls the main passses
+
+void compiler_passes(void) {
 	rsym_t *po = creorder_po_and_sanity();
 	ccheck_all_symbols(po);
+	llower_all_symbols(po);
 }

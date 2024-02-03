@@ -221,6 +221,7 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 			}
 			break;
 		}
+		// TODO: field accesses since we already support them
 		default: {
 			err_with_pos(expr->loc, "this expression is not an lvalue");
 		}

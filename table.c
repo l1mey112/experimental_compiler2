@@ -1,4 +1,5 @@
 #include "all.h"
+#include "lir.h"
 //
 // global symbol (hash) table
 //
@@ -446,6 +447,204 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 	}
 }
 
+static void _print_lvalue(ir_desc_t *desc, lir_lvalue_t lvalue) {
+	if (lvalue.is_sym) {
+		sym_t *symbol = &symbols[lvalue.symbol];
+		printf("{%s}", sv_from(symbol->key));
+	} else {
+		_print_local(desc, lvalue.local);
+	}
+	for (u32 i = 0, c = arrlenu(lvalue.proj); i < c; i++) {
+		lir_lvalue_proj_t *proj = &lvalue.proj[i];
+		switch (proj->kind) {
+			case PROJ_DEREF: {
+				printf(".*");
+				break;
+			}
+			/* case PROJ_FIELD: {
+				if (proj->d_field.field != ISTR_NONE) {
+					printf(".%s", sv_from(proj->d_field.field));
+				} else {
+					printf(".%u", proj->d_field.field_idx);
+				}
+				break;
+			}
+			case PROJ_INDEX: {
+				printf("[");
+				_print_local(desc, proj->d_index.index);
+				printf("]");
+				break;
+			} */
+			default: {
+				assert_not_reached();
+			}
+		}
+	}
+}
+
+static void _print_value(ir_desc_t *desc, lir_value_t *value) {
+	switch (value->kind) {
+		case VALUE_INTEGER_LIT: {
+			printf("%s", sv_from(value->d_integer_lit));
+			break;
+		}
+		case VALUE_BOOL_LIT: {
+			printf("%s", value->d_bool_lit ? "true" : "false");
+			break;
+		}
+		case VALUE_ARRAY: {
+			printf("[");
+			for (u32 i = 0, c = arrlenu(value->d_array); i < c; i++) {
+				_print_value(desc, &value->d_array[i]);
+				if (i + 1 < c) {
+					printf(", ");
+				}
+			}
+			printf("]");
+			break;
+		}
+		/* case VALUE_UNDEFINED: {
+			printf("undefined");
+			break;
+		} */
+		case VALUE_TUPLE_UNIT: {
+			printf("()");
+			break;
+		}
+		case VALUE_TUPLE: {
+			printf("(");
+			for (u32 i = 0, c = arrlenu(value->d_tuple); i < c; i++) {
+				_print_value(desc, &value->d_tuple[i]);
+				if (i + 1 < c) {
+					printf(", ");
+				}
+			}
+			printf(")");
+			break;
+		}
+		case VALUE_ADD:
+		case VALUE_SUB:
+		case VALUE_MUL:
+		case VALUE_DIV:
+		case VALUE_MOD:
+		case VALUE_EQ:
+		case VALUE_NE:
+		case VALUE_LE:
+		case VALUE_LT:
+		case VALUE_GE:
+		case VALUE_GT:
+		case VALUE_AND:
+		case VALUE_OR: {
+			const char *lit_tbl[] = {
+				[VALUE_ADD] = "+",
+				[VALUE_SUB] = "-",
+				[VALUE_MUL] = "*",
+				[VALUE_DIV] = "/",
+				[VALUE_MOD] = "%",
+				[VALUE_EQ] = "==",
+				[VALUE_NE] = "!=",
+				[VALUE_LE] = "<=",
+				[VALUE_LT] = "<",
+				[VALUE_GE] = ">=",
+				[VALUE_GT] = ">",
+				[VALUE_AND] = "&",
+				[VALUE_OR] = "|",
+			};
+
+			_print_value(desc, value->d_infix.lhs);
+			printf(" %s ", lit_tbl[value->kind]);
+			_print_value(desc, value->d_infix.rhs);
+			break;
+		}
+		case VALUE_NEG:
+		case VALUE_NOT: {
+			const char *lit_tbl[] = {
+				[VALUE_NEG] = "-",
+				[VALUE_NOT] = "!",
+			};
+
+			printf("%s", lit_tbl[value->kind]);
+			_print_value(desc, value->d_unary.src);
+			break;
+		}
+		case VALUE_CALL: {
+			// value(a, b, c)
+			_print_value(desc, value->d_call.f);
+			printf("(");
+			for (u32 i = 0, c = arrlenu(value->d_call.args); i < c; i++) {
+				_print_value(desc, &value->d_call.args[i]);
+				if (i + 1 < c) {
+					printf(", ");
+				}
+			}
+			printf(")");
+			break;
+		}
+		case VALUE_CAST: {
+			// value as type
+			_print_value(desc, value->d_cast.src);
+			printf(": %s", type_dbg_str(value->type));
+			break;
+		}
+		case VALUE_LVALUE: {
+			_print_lvalue(desc, value->d_lvalue);
+			break;
+		}
+		case VALUE_ADDRESS_OF: {
+			printf("&");
+			if (value->d_address_of.is_mut) {
+				printf("'");
+			}
+			_print_lvalue(desc, value->d_address_of.lvalue);
+			break;
+		}
+		case VALUE_SLICE: {
+			// x[?lo..?hi]
+			_print_value(desc, value->d_slice.src);
+			printf("[");
+			if (value->d_slice.lo) {
+				_print_value(desc, value->d_slice.lo);
+			}
+			printf("..");
+			if (value->d_slice.hi) {
+				_print_value(desc, value->d_slice.hi);
+			}
+			printf("]");
+			break;
+		}
+		default: {
+			printf("\n\nkind: %u\n\n", value->kind);
+			assert_not_reached();
+		}
+	}
+}
+
+static void _print_stmt(ir_desc_t *desc, lir_stmt_t *stmt) {
+	switch (stmt->kind) {
+		case STMT_ASSIGN: {
+			_print_lvalue(desc, stmt->dest);
+			printf(" = ");
+		}
+		case STMT_DISCARD: {
+			_print_value(desc, &stmt->d_value);
+			break;
+		}
+		case STMT_RETURN: {
+			printf("ret ");
+			_print_value(desc, &stmt->d_value);
+			break;
+		}
+	}
+}
+
+static void _print_stmts(ir_desc_t *desc, lir_stmt_t *stmts) {
+	for (u32 i = 0, c = arrlen(stmts); i < c; i++) {
+		_print_tabs();
+		_print_stmt(desc, &stmts[i]);
+		printf("\n");
+	}
+}
+
 static void _dump_function(sym_t *sym) {
 	proc_t *proc = &sym->d_proc;
 	ir_desc_t *desc = &proc->desc;
@@ -467,10 +666,19 @@ static void _dump_function(sym_t *sym) {
 		}
 	}
 
-	printf(") -> %s hir = ", type_dbg_str(proc->ret_type));
+	printf(") -> %s ", type_dbg_str(proc->ret_type));
 
-	_print_expr(desc, &desc->hir);
-	printf("\n");
+	// have LIR
+	if (desc->lir.stmts != NULL) {
+		printf("lir\n");
+		_tabs++;
+		_print_stmts(desc, desc->lir.stmts);
+		_tabs--;
+	} else {
+		printf("hir = ");
+		_print_expr(desc, &desc->hir);
+		printf("\n");
+	}
 }
 
 static void _dump_global(sym_t *sym) {

@@ -113,7 +113,7 @@ ret:
 	table_dump_all();
 
 	if (!err && !setjmp(err_diag.unwind)) {
-		compiler_check();
+		compiler_passes();
 	}
 	
 	table_dump_all();

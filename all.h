@@ -309,7 +309,7 @@ const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
 void compiler_process_file(rfile_t f);
-void compiler_check(void);
+void compiler_passes(void);
 
 /* void hir_check_module(rmod_t mod);
 void hir_dump_module(rmod_t mod);
@@ -383,7 +383,7 @@ rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 struct ir_desc_t {
 	local_t *locals; // variables
 	hir_expr_t hir;
-	// lir_proc_t lir;
+	lir_proc_t lir;
 };
 
 struct proc_t {

@@ -211,12 +211,6 @@
 ; 
 ; test = &test
 ; 
-; 
-; factacc0(n: i32, acc: i32) -> i32 =
-;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
-; 
-; factacc(n: i32) = factacc0 n 1
-; 
 ; global = void :t do
 ;     29
 ;     29
@@ -227,25 +221,29 @@
 ; 
 ; factacc0(n: i32, acc: i32): i32 =
 ;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
+; 
+; maine(v': i32) = void do
+;     v++
+;     v++
+;     v++
+;     v++
+;     v++
+;     v++
+; 
+; unpackadd(a: (i32, i32)) = a.0 + a.1
+; 
+; struct Foo {
+;     x: i32
+;     y: i32
+; }
+; 
+; unpackfoo(a: Foo) = a.x + a.y
+; 
+; main() = do
+;     let (a', b) = (1, 2)
+;     a = 40
+;     a
 
-maine(v': i32) = void do
-    v++
-    v++
-    v++
-    v++
-    v++
-    v++
+add(x: i32, y': i32) = x + y
 
-unpackadd(a: (i32, i32)) = a.0 + a.1
-
-struct Foo {
-    x: i32
-    y: i32
-}
-
-unpackfoo(a: Foo) = a.x + a.y
-
-main() = do
-    let (a', b) = (1, 2)
-    a = 40
-    a
+addsome(x: i32) = add x 20

@@ -1,3 +1,5 @@
+#pragma once
+
 #include "all.h"
 
 // shared checker defs
