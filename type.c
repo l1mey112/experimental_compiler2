@@ -127,6 +127,18 @@ type_t type_array_or_slice_to_slice(type_t type) {
 	return type_new(typeinfo);
 }
 
+type_t type_array_or_slice_elem(type_t type) {
+	ti_kind kind = type_kind(type);
+	
+	assert(kind == TYPE_SLICE || kind == TYPE_ARRAY);
+	
+	if (kind == TYPE_SLICE) {
+		return type_get(type)->d_slice.elem;
+	} else {
+		return type_get(type)->d_array.elem;
+	}
+}
+
 static u8 *p;
 
 static const char *ctinfo_str[] = {

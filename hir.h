@@ -81,14 +81,14 @@ struct hir_expr_t {
             enum : u8 {
                 EXPR_K_INC,
                 EXPR_K_DEC,
-            } kind;
+            } op;
 		} d_postfix;
 		struct {
 			hir_expr_t *expr;
 			 enum : u8 {
                 EXPR_K_NOT,
                 EXPR_K_SUB,
-            } kind;
+            } op;
 		} d_prefix;
 		struct {
 			hir_expr_t *exprs; // all do blocks have at least one expr, unless they become a EXPR_TUPLE_UNIT

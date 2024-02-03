@@ -1,6 +1,4 @@
 #include "all.h"
-#include "hir.h"
-#include <stdbool.h>
 #include "parser.h"
 
 pctx_t p;
@@ -8,12 +6,6 @@ pctx_t p;
 type_t pfn_arg(ir_desc_t *desc) {
 	bool is_mut = false;
 	
-	if (p.token.kind == TOK_TACK) {
-		is_mut = true;
-		pnext();
-		// fallthrough
-	}
-
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
@@ -21,9 +13,13 @@ type_t pfn_arg(ir_desc_t *desc) {
 	// TODO: possibly insert error if not `f(`, error on `f (`
 	
 	pnext();
-	// (v: i32)
-	//   ^
-	// force type for args
+	// (v': i32)
+	if (p.token.kind == TOK_TACK) {
+		is_mut = true;
+		pnext();
+		// fallthrough
+	}
+
 	pexpect(TOK_COLON);
 	type_t arg_type = ptype();
 

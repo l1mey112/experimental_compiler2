@@ -677,7 +677,7 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 							.loc = token.loc,
 							.type = TYPE_INFER,
 							.d_prefix.expr = hir_dup(rhs),
-							.d_prefix.kind = k,
+							.d_prefix.op = k,
 						};
 						break;
 					}
@@ -756,7 +756,7 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 					.loc = token.loc,
 					.type = TYPE_INFER,
 					.d_postfix.expr = hir_dup(expr),
-					.d_postfix.kind = k,
+					.d_postfix.op = k,
 				};
 				continue;
 			}

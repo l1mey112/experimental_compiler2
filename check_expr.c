@@ -1,5 +1,6 @@
 #include "check.h"
 #include "all.h"
+#include "hir.h"
 
 // TODO: in the future, use a zero cost invariant/assert marker
 //
@@ -53,26 +54,49 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 				}),
 			},
 		};
-		
+
 		blk->brk_type = TYPE_UNIT;
 		arrpush(expr->d_do_block.exprs, brk_unit);
 	} else {
+		if (blk->brk_type != TYPE_INFER) {
+			ctype_unify(blk->brk_type, stmt_last);
+		} else {
+			blk->brk_type = stmt_last->type;
+		}
+
 		hir_expr_t brk_last = (hir_expr_t){
 			.kind = EXPR_BREAK,
 			.loc = stmt_last->loc,
 			.type = TYPE_BOTTOM,
 			.d_break = {
 				.blk_id = blk_id,
-				.expr = stmt_last,
+				.expr = NULL,
 			},
 		};
 
-		if (blk->brk_type != TYPE_INFER) {
-			ctype_unify(blk->brk_type, stmt_last);
+		// these should compile into eachother, a `let` "expr" is supposed to
+		// be basically a statement, evaluating to ()
+		//
+		// do
+		//     let a = ...
+		//
+		// :0 do
+		//     let a = ...
+		//     brk :0 ()
+		//
+		if (stmt_last->kind == EXPR_LET) {
+			brk_last.d_break.expr = hir_dup((hir_expr_t){
+				.kind = EXPR_TUPLE_UNIT,
+				.loc = stmt_last->loc,
+				.type = TYPE_UNIT,
+			});
+
+			arrpush(expr->d_do_block.exprs, brk_last);
 		} else {
-			blk->brk_type = stmt_last->type;
+			brk_last.d_break.expr = hir_dup(*stmt_last);
+
+			*stmt_last = brk_last;
 		}
-		arrpush(expr->d_do_block.exprs, brk_last);
 	}
 	//}
 
@@ -149,7 +173,7 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	}
 }
 
-void cufcs_lvalue(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
+void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 	// f x
 	// f = x
 	// do nothing, a call isn't applicable here
@@ -172,6 +196,143 @@ void cufcs_lvalue(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 		};
 		*expr = call;
 		cexpr(desc, TYPE_INFER, expr, BM_RECALL);
+	}
+}
+
+void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
+	switch (expr->kind) {
+		case EXPR_LOCAL: {
+			local_t *local = &desc->locals[expr->d_local];
+			if (is_mutable && local->kind != LOCAL_MUT) {
+				// TODO: then pull a rust and suggest on a loc_t?
+				print_err_with_pos(expr->loc, "cannot mutate immutable variable");
+				print_hint_with_pos(local->loc, "variable `%s` declared here", sv_from(local->name));
+				err_unwind();
+			}
+			break;
+		}
+		case EXPR_DEREF: {
+			type_t ptr_type = expr->d_deref->type;
+			assert(type_kind(ptr_type) == TYPE_PTR);
+			tinfo_t *info = type_get(ptr_type);
+
+			if (is_mutable && !info->d_ptr.is_mut) {
+				err_with_pos(expr->loc, "cannot mutate immutable pointer `%s`", type_dbg_str(ptr_type));
+			}
+			break;
+		}
+		default: {
+			err_with_pos(expr->loc, "this expression is not an lvalue");
+		}
+	}
+}
+
+void cassign(ir_desc_t *desc, hir_expr_t *expr) {
+	hir_expr_t *lhs = expr->d_infix.lhs;
+	hir_expr_t *rhs = expr->d_infix.rhs;
+
+	type_t lhs_type = cexpr(desc, TYPE_INFER, lhs, BM_LVALUE);
+	clvalue(desc, lhs, true);
+	(void)cexpr(desc, lhs_type, rhs, BM_RVALUE);
+
+	// lhs = rhs
+	ctype_unify(lhs_type, rhs);
+
+	expr->type = lhs_type;
+}
+
+// check trivial irrefutable patterns, leave everything else up to dataflow analysis
+void cpattern(ir_desc_t *desc, pattern_t *pattern, type_t type) {
+	switch (pattern->kind) {
+		case PATTERN_TUPLE: {
+			if (type_kind(type) != TYPE_TUPLE) {
+				err_with_pos(pattern->loc, "type mismatch: expected tuple, got `%s`", type_dbg_str(type));
+			}
+			tinfo_t *tinfo = type_get(type);
+			if (arrlenu(tinfo->d_tuple) != arrlenu(pattern->d_tuple)) {
+				// TODO: printing pattern???
+				err_with_pos(pattern->loc, "cannot match tuple pattern against tuple type `%s` of different length", type_dbg_str(type));
+			}
+			for (size_t i = 0; i < arrlenu(pattern->d_tuple); i++) {
+				cpattern(desc, &pattern->d_tuple[i], tinfo->d_tuple[i]);
+			}
+			break;
+		}
+		case PATTERN_TUPLE_UNIT: {
+			if (type != TYPE_UNIT) {
+				err_with_pos(pattern->loc, "type mismatch: expected `()`, got `%s`", type_dbg_str(type));
+			}
+			break;
+		}
+		case PATTERN_LOCAL: {
+			local_t *local = &desc->locals[pattern->d_local];
+			if (local->type == TYPE_INFER) {
+				local->type = type;
+			} else {
+				(void)ctype_unify_type(local->type, type, pattern->loc);
+			}
+			break;
+		}
+		case PATTERN_INTEGER_LIT: {
+			// TODO: check integer is inbounds for type
+			if (type_is_number(type)) {
+				err_with_pos(pattern->loc, "type mismatch: expected integer, got `%s`", type_dbg_str(type));
+			}
+			break;
+		}
+		case PATTERN_UNDERSCORE: {
+			break;
+		}
+		case PATTERN_ARRAY: {
+			// [xs..., x] and [x, ...xs]
+			//
+			// never [xs...] and [...xs]
+			//
+			// []T and [3]T match [a, b, c]
+			// []T and [3]T match [a, b, ...c]
+
+			type_t elem_type;
+			size_t elems = 0; // can't be 0
+
+			switch (type_kind(type)) {
+				case TYPE_SLICE: {
+					elem_type = type_get(type)->d_slice.elem;
+					break;
+				}
+				case TYPE_ARRAY: {
+					elem_type = type_get(type)->d_array.elem;
+					elems = type_get(type)->d_array.length;
+					break;
+				}
+				default: {
+					err_with_pos(pattern->loc, "cannot match array pattern against non-array type `%s`", type_dbg_str(type));
+				}
+			}
+
+			size_t len = arrlenu(pattern->d_array.elems);
+
+			if (pattern->d_array.match) {
+				type_t make_slice = type_array_or_slice_to_slice(type);
+				cpattern(desc, pattern->d_array.match, make_slice);
+
+				// error on:
+				//   [3]T -> [a, b, c, ...xs]
+				//   [3]T -> [xs..., a, b, c]
+				len++;
+			}
+
+			for (u32 i = 0, c = arrlenu(pattern->d_array.elems); i < c; i++) {
+				cpattern(desc, &pattern->d_array.elems[i], elem_type);
+			}
+
+			if (elems != 0 && len != elems) {
+				err_with_pos(pattern->loc, "cannot match array pattern against array type `%s` of different length", type_dbg_str(type));
+			}
+			break;
+		}
+		default: {
+			assert_not_reached();
+		}
 	}
 }
 
@@ -307,30 +468,92 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			expr->type = ctype_unify(then_type, expr->d_if.els);
 			break;
 		}
-		/* case EXPR_ASSIGN: {
-			
-		} */
+		case EXPR_ASSIGN: {
+			cassign(desc, expr);
+			break;
+		}
 		case EXPR_INFIX: {
 			cinfix(desc, upvalue, expr);
 			break;
 		}
 		case EXPR_POSTFIX: {
-
+			// v++ | v--
+			type_t type = cexpr(desc, upvalue, expr->d_postfix.expr, BM_LVALUE);
+			clvalue(desc, expr->d_postfix.expr, true);
+			if (!type_is_number(type)) {
+				err_with_pos(expr->loc, "type mismatch: expected numeric type, got `%s`", type_dbg_str(type));
+			}
+			expr->type = type;
+			break;
 		}
 		case EXPR_PREFIX: {
+			type_t type = cexpr(desc, upvalue, expr->d_prefix.expr, BM_RVALUE);
 
+			switch (expr->d_prefix.op) {
+				case EXPR_K_NOT: {
+					(void)ctype_unify(TYPE_BOOL, expr->d_prefix.expr);
+					expr->type = TYPE_BOOL;
+					break;
+				}
+				case EXPR_K_SUB: {
+					if (!type_is_number(type)) {
+						err_with_pos(expr->loc, "type mismatch: expected numeric type, got `%s`", type_dbg_str(type));
+					}
+					expr->type = type;
+					break;
+				}
+				default: {
+					assert_not_reached();
+				}
+			}
+			break;
 		}
 		case EXPR_DEREF: {
-
+			// lvalue needs to propagate cfg
+			type_t type = cexpr(desc, TYPE_INFER, expr->d_deref, cfg);
+			if (type_kind(type) != TYPE_PTR) {
+				err_with_pos(expr->loc, "type mismatch: expected pointer type, got `%s`", type_dbg_str(type));
+			}
+			expr->type = type_get(type)->d_ptr.ref;
+			break;
 		}
-		case EXPR_ADDR_OF: {
+		/* case EXPR_ADDR_OF: {
 
-		}
+		} */
 		case EXPR_INDEX: {
+			// lvalue needs to propagate cfg
+			type_t type = cexpr(desc, TYPE_INFER, expr->d_index.expr, cfg);
 
+			if (type_kind(type) != TYPE_ARRAY && type_kind(type) != TYPE_SLICE) {
+				err_with_pos(expr->d_index.expr->loc, "type mismatch: expected array or slice type, got `%s`", type_dbg_str(type));
+			}
+
+			type_t index_type = cexpr(desc, TYPE_USIZE, expr->d_index.index, BM_RVALUE);
+			ctype_unify(TYPE_USIZE, expr->d_index.index);
+
+			expr->type = type_array_or_slice_elem(type);
+			break;
 		}
 		case EXPR_SLICE: {
+			// possibly? lvalue needs to propagate cfg
+			type_t type = cexpr(desc, TYPE_INFER, expr->d_slice.expr, cfg);
 
+			if (type_kind(type) != TYPE_ARRAY && type_kind(type) != TYPE_SLICE) {
+				err_with_pos(expr->d_slice.expr->loc, "type mismatch: expected array or slice type, got `%s`", type_dbg_str(type));
+			}
+
+			if (expr->d_slice.lo) {
+				type_t index_type = cexpr(desc, TYPE_USIZE, expr->d_slice.lo, BM_RVALUE);
+				ctype_unify(TYPE_USIZE, expr->d_slice.lo);
+			}
+
+			if (expr->d_slice.hi) {
+				type_t index_type = cexpr(desc, TYPE_USIZE, expr->d_slice.hi, BM_RVALUE);
+				ctype_unify(TYPE_USIZE, expr->d_slice.hi);
+			}
+
+			expr->type = type_array_or_slice_to_slice(type);
+			break;
 		}
 		case EXPR_LOCAL: {
 			// TODO: nullary `f` doesn't take an () argument
@@ -344,7 +567,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 
 			expr->type = local->type;
 
-			cufcs_lvalue(desc, expr, cfg); // promote and recheck if rvalue
+			cufcs_autocall(desc, expr, cfg); // promote and recheck if rvalue
 			break;
 		}
 		case EXPR_SYM: {
@@ -376,7 +599,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 
 			expr->type = type;
 
-			cufcs_lvalue(desc, expr, cfg); // promote and recheck if rvalue
+			cufcs_autocall(desc, expr, cfg); // promote and recheck if rvalue
 			break;
 		}
 		case EXPR_CAST: {
@@ -499,10 +722,63 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;
 		}
 		case EXPR_FIELD: {
+			type_t type = cexpr(desc, TYPE_INFER, expr->d_field.expr, BM_RVALUE);
+			ti_kind kind = type_kind(type);
 
+			// x.field       (field: "field", field_idx: -1)
+			// x.0           (field: ISTR_NONE, field_idx: 0)
+
+			if (expr->d_field.field != ISTR_NONE) {
+				// TODO: better way for the double unpack on typesymbols
+
+				if (kind != TYPE_SYMBOL) {
+					err_with_pos(expr->loc, "type mismatch: expected struct type, got `%s`", type_dbg_str(type));
+				}
+				
+				tsymbol_t *struc_type = &symbols[type_get(type)->d_symbol].d_type;
+
+				if (struc_type->kind != TYPESYMBOL_STRUCT) {
+					err_with_pos(expr->loc, "type mismatch: expected struct type, got `%s`", type_dbg_str(type));
+				}
+
+				for (u32 i = 0, c = arrlenu(struc_type->d_struct.fields); i < c; i++) {
+					tsymbol_sf_t *field = &struc_type->d_struct.fields[i];
+					if (field->field == expr->d_field.field) {
+						expr->d_field.field_idx = i;
+						expr->type = field->type;
+						break;
+					}
+				}
+
+				if (expr->d_field.field_idx == (u16)-1) {
+					err_with_pos(expr->loc, "field `%s` not found in struct `%s`", sv_from(expr->d_field.field), type_dbg_str(type));
+				}
+			} else {
+				if (kind != TYPE_TUPLE) {
+					err_with_pos(expr->loc, "type mismatch: expected tuple type, got `%s`", type_dbg_str(type));
+				}
+
+				type_t *elems = type_get(type)->d_tuple;
+				u32 field = expr->d_field.field_idx;
+
+				if (field >= arrlenu(elems)) {
+					err_with_pos(expr->loc, "index out of range");
+				}
+				expr->type = elems[field];
+			}
+			break;
 		}
 		case EXPR_LET: {
+			// let non_trivial_pattern = expr
 
+			// TODO: let p = !
+			//       <- !
+
+			type_t type = cexpr(desc, TYPE_INFER, expr->d_let.expr, BM_RVALUE);
+
+			cpattern(desc, &expr->d_let.pattern, type);
+			expr->type = TYPE_UNIT;
+			break;
 		}
 		default: {
 			assert_not_reached();

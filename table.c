@@ -1,5 +1,4 @@
 #include "all.h"
-#include <assert.h>
 //
 // global symbol (hash) table
 //
@@ -238,7 +237,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 		}
 		case EXPR_POSTFIX: {
 			_print_expr(desc, expr->d_postfix.expr);
-			printf("%s", expr->d_postfix.kind == TOK_INC ? "++" : "--");
+			printf("%s", expr->d_postfix.op == EXPR_K_INC ? "++" : "--");
 			break;
 		}
 		case EXPR_ASSIGN: {
@@ -256,7 +255,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_PREFIX: {
-			printf("%s", tok_op_str(expr->d_prefix.kind));
+			printf("%s", expr->d_prefix.op == EXPR_K_NOT ? "!" : "-");
 			_print_expr(desc, expr->d_prefix.expr);
 			break;
 		}

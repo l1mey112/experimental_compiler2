@@ -316,6 +316,7 @@ void hir_dump_module(rmod_t mod);
 void hir_typed_desugar(void); */
 
 type_t type_array_or_slice_to_slice(type_t type);
+type_t type_array_or_slice_elem(type_t type);
 type_t type_new_inc_mul(type_t type, bool is_mut);
 type_t type_new(tinfo_t typeinfo);
 tinfo_t *type_get(type_t type);
