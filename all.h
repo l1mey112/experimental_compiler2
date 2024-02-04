@@ -309,7 +309,7 @@ const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
 void compiler_process_file(rfile_t f);
-void compiler_passes(void);
+void compiler_pass_all(void);
 
 /* void hir_check_module(rmod_t mod);
 void hir_dump_module(rmod_t mod);

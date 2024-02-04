@@ -1,6 +1,6 @@
 #include "all.h"
 #include "check.h"
-#include "lower.h" // TODO: check comment at bottom
+#include "pass.h"
 
 cctx_t c;
 
@@ -81,7 +81,7 @@ void cglobal(global_t *global) {
 	printf("type %s\n", type_dbg_str(ret));
 }
 
-void ccheck_all_symbols(rsym_t *po) {
+void pass_check_all(rsym_t *po) {
 	for (u32 i = 0, c = arrlenu(po); i < c; i++) {
 		rsym_t rsym = po[i];
 		sym_t *sym = &symbols[rsym];
@@ -105,12 +105,4 @@ void ccheck_all_symbols(rsym_t *po) {
 			}
 		}
 	}
-}
-
-// TODO: rename check.c to something more generic as it calls the main passses
-
-void compiler_passes(void) {
-	rsym_t *po = creorder_po_and_sanity();
-	ccheck_all_symbols(po);
-	llower_all_symbols(po);
 }

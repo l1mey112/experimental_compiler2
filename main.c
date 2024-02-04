@@ -113,9 +113,9 @@ ret:
 	table_dump_all();
 
 	if (!err && !setjmp(err_diag.unwind)) {
-		compiler_passes();
+		compiler_pass_all();
 	}
-	
+
 	table_dump_all();
 	
 	/* if (!err && !setjmp(err_diag.unwind)) {

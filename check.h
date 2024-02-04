@@ -22,9 +22,6 @@ struct cctx_t {
 
 extern cctx_t c;
 
-// return a postorder sorted list of symbols, reverse for proper ordering
-rsym_t *creorder_po_and_sanity(void);
-
 enum : u8 {
 	BM_RVALUE = 1 << 0, // rvalue is default
 	BM_LVALUE = 1 << 1,
