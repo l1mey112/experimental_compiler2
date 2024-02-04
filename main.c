@@ -95,7 +95,7 @@ int main(int argc, const char *argv[]) {
 		// queue can grow
 		for (rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
-			eprintf("parsing file '%s'\n", fs_files_queue[i].fp);
+			printf("parsing file '%s'\n", fs_files_queue[i].fp);
 			compiler_process_file(i);
 			if (old_sz != fs_files_queue_len) {
 				eprintf("  %u new files added\n", fs_files_queue_len - old_sz);

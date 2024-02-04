@@ -50,7 +50,8 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			// rule 1, 2, 3
 			if (rhs->kind == EXPR_INTEGER_LIT) {
 				switch (expr->d_infix.kind) {
-					case TOK_SUB: {
+					// TODO: disable rule 3
+					/* case TOK_SUB: {
 						// transform to -c + t
 						rhs = hir_dup((hir_expr_t){
 							.kind = EXPR_PREFIX,
@@ -63,7 +64,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 						});
 
 						// fallthrough
-					}
+					} */
 					case TOK_ADD:
 					case TOK_MUL: {
 						// swap lhs and rhs
