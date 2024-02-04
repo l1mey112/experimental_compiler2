@@ -3,10 +3,10 @@
 
 enum : u8 {
 	ST_NONE,
-	ST_POISON,
+	ST_DIVERGING,
 };
 
-#define POISON(expr) if ((expr) == ST_POISON) { return ST_POISON; }
+#define DIVERGING(expr) if ((expr) == ST_DIVERGING) { return ST_DIVERGING; }
 
 u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	switch (expr->kind) {
@@ -32,8 +32,8 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			//
 
 			// transform lhs and rhs
-			POISON(nhir_expr(desc, stmts, expr->d_infix.lhs));
-			POISON(nhir_expr(desc, stmts, expr->d_infix.rhs));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_infix.lhs));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_infix.rhs));
 
 			// RULES: `t` are terms, `c` are constants, constants are also terms
 			//
@@ -51,20 +51,21 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			if (rhs->kind == EXPR_INTEGER_LIT) {
 				switch (expr->d_infix.kind) {
 					// TODO: disable rule 3
-					/* case TOK_SUB: {
+					case TOK_SUB: {
 						// transform to -c + t
 						rhs = hir_dup((hir_expr_t){
 							.kind = EXPR_PREFIX,
-							.type = expr->type,
-							.loc = expr->loc,
+							.type = rhs->type,
+							.loc = rhs->loc,
 							.d_prefix = {
 								.op = EXPR_K_SUB,
 								.expr = rhs,
 							},
 						});
+						expr->d_infix.kind = TOK_ADD;
 
 						// fallthrough
-					} */
+					}
 					case TOK_ADD:
 					case TOK_MUL: {
 						// swap lhs and rhs
@@ -105,18 +106,18 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_RETURN: {
-			POISON(nhir_expr(desc, stmts, expr->d_return.expr));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_return.expr));
 			arrpush(*stmts, *expr);
-			return ST_POISON;
+			return ST_DIVERGING;
 		}
 		case EXPR_ASSIGN: {
-			POISON(nhir_expr(desc, stmts, expr->d_assign.lhs));
-			POISON(nhir_expr(desc, stmts, expr->d_assign.rhs));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.lhs));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.rhs));
 			arrpush(*stmts, *expr);
 			break;
 		}
 		case EXPR_IF: {
-			POISON(nhir_expr(desc, stmts, expr->d_if.cond));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_if.cond));
 
 			// intermediary local
 			rlocal_t local = ir_local_new(desc, (local_t){
@@ -130,7 +131,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			hir_expr_t *else_stmts = NULL;
 
 			// generate assignments
-			if (nhir_expr(desc, &then_stmts, expr->d_if.then) != ST_POISON) {
+			if (nhir_expr(desc, &then_stmts, expr->d_if.then) != ST_DIVERGING) {
 				hir_expr_t assign = {
 					.kind = EXPR_ASSIGN,
 					.type = TYPE_BOTTOM,
@@ -146,7 +147,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 				};
 				arrpush(then_stmts, assign);
 			}
-			if (nhir_expr(desc, &else_stmts, expr->d_if.els) != ST_POISON) {
+			if (nhir_expr(desc, &else_stmts, expr->d_if.els) != ST_DIVERGING) {
 				hir_expr_t assign = {
 					.kind = EXPR_ASSIGN,
 					.type = TYPE_BOTTOM,
@@ -197,10 +198,10 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_CALL: {
-			POISON(nhir_expr(desc, stmts, expr->d_call.f));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_call.f));
 			// transform args
 			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++) {
-				POISON(nhir_expr(desc, stmts, &expr->d_call.args[i]));
+				DIVERGING(nhir_expr(desc, stmts, &expr->d_call.args[i]));
 			}
 			break;
 		}
@@ -239,7 +240,7 @@ void nproc(proc_t *proc) {
 	hir_expr_t *hir = hir_dup(proc->desc.hir);
 
 	// construct return value
-	if (nhir_expr(&proc->desc, &stmts, hir) != ST_POISON) {
+	if (nhir_expr(&proc->desc, &stmts, hir) != ST_DIVERGING) {
 		hir_expr_t ret = {
 			.kind = EXPR_RETURN,
 			.type = TYPE_BOTTOM,
