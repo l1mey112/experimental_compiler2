@@ -1,4 +1,5 @@
 #include "all.h"
+#include "hir.h"
 #include "lir.h"
 //
 // global symbol (hash) table
@@ -218,6 +219,12 @@ static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
 	}
 }
 
+static void _print_blk_id_space(u8 blk_id) {
+	if (blk_id != BLK_ID_NONE) {
+		printf(":%u ", blk_id);
+	}
+}
+
 static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_LOCAL: {
@@ -248,9 +255,9 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_INFIX: {
-			printf("(%s ", tok_op_str(expr->d_infix.kind));
+			printf("(");
 			_print_expr(desc, expr->d_infix.lhs);
-			printf(" ");
+			printf(" %s ", tok_op_str(expr->d_infix.kind));
 			_print_expr(desc, expr->d_infix.rhs);
 			printf(")");
 			break;
@@ -273,12 +280,14 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_LOOP: {
-			printf(":%u loop ", expr->d_loop.blk_id);
+			_print_blk_id_space(expr->d_loop.blk_id);
+			printf("loop ");
 			_print_expr(desc, expr->d_loop.expr);
 			break;
 		}
 		case EXPR_DO_BLOCK: {
-			printf(":%u do\n", expr->d_do_block.blk_id);
+			_print_blk_id_space(expr->d_do_block.blk_id);
+			printf("do\n");
 			_tabs++;
 			for (int i = 0, c = arrlen(expr->d_do_block.exprs); i < c; i++) {
 				_print_tabs();

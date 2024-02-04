@@ -243,7 +243,24 @@
 ;     let (a', b) = (1, 2)
 ;     a = 40
 ;     a
+; 
+; f() = 20 + ret 5 + ret 255
+; 
+; f(v': i32) = (v = 50) + ret v
+; 
+; f(c: bool) = if (c) 250 else 12
 
-add(x: i32, y': i32) = x + y
+; factacc(n: i32) = factacc0 n 1
+; 
+; factacc0(n: i32, acc: i32): i32 =
+;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
 
-addsome(x: i32) = add x 20
+; main() = do
+;     50
+;     60
+;     23
+
+factacc(n: i32) = factacc0 n 1
+
+factacc0(n: i32, acc: i32): i32 =
+    if (n <= 1) acc else factacc0 (n - 1) (n * acc)

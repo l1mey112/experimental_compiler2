@@ -311,10 +311,6 @@ void fs_dump_tree(void);
 void compiler_process_file(rfile_t f);
 void compiler_pass_all(void);
 
-/* void hir_check_module(rmod_t mod);
-void hir_dump_module(rmod_t mod);
-void hir_typed_desugar(void); */
-
 type_t type_array_or_slice_to_slice(type_t type);
 type_t type_array_or_slice_elem(type_t type);
 type_t type_new_inc_mul(type_t type, bool is_mut);

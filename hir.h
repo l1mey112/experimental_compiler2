@@ -6,6 +6,8 @@ typedef struct hir_expr_t hir_expr_t;
 
 // TODO: need to represent `let` decls as actual exprs..
 
+#define BLK_ID_NONE ((u8)-1)
+
 struct hir_expr_t {
 	enum {
 		EXPR_INTEGER_LIT,

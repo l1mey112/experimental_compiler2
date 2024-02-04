@@ -162,10 +162,10 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		if (is_cmp_op) {
 			expr->type = TYPE_BOOL;
 		} else {
-			if (!type_is_number(lhs_t)) {
+			if (!(type_is_number(lhs_t) || lhs_t == TYPE_BOTTOM)) {
 				err_with_pos(expr->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
 			}
-			if (!type_is_number(rhs_t)) {
+			if (!(type_is_number(rhs_t) || rhs_t == TYPE_BOTTOM)) {
 				err_with_pos(expr->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
 			}
 			expr->type = type;
