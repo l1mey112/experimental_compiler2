@@ -260,7 +260,14 @@
 ;     60
 ;     23
 
-factacc(n: i32) = factacc0 n 1
+; factacc(n: i32) = factacc0 n 1
+; 
+; factacc0(n: i32, acc: i32): i32 =
+;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
 
-factacc0(n: i32, acc: i32): i32 =
-    if (n <= 1) acc else factacc0 (n - 1) (n * acc)
+fact_iter(i': i32) = do
+    let f' = 1
+    loop do
+        if (i < 1) brk f
+        f = f * i
+        i--

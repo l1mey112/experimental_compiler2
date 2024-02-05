@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <unistd.h>
+#include "ansi.h"
 
 const char* __asan_default_options(void) { return "detect_leaks=0"; }
 
@@ -53,7 +54,7 @@ int main(int argc, const char *argv[]) {
 
 	bool err = 0;
 
-	if (argc == 1) {
+	/* if (argc == 1) {
 		// TODO: repl shoudln't tear down the parsing context every SINGLE time
 		//       just edit pfile() instead
 		// TODO: how would this work with error recovery?
@@ -84,7 +85,7 @@ int main(int argc, const char *argv[]) {
 			}
 		}
 		eprintf("exiting repl\n");
-	} else if (argc == 2) {
+	} else  */if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
 			err = true;
 			goto ret;
@@ -105,34 +106,43 @@ int main(int argc, const char *argv[]) {
 		eprintf("usage: %s <file|dir>\n", argv[0]);
 		eprintf("usage: %s\n", argv[0]);
 	}
-ret:
+ret:;
 	// TODO: register_root() etc for module system
 
-	//lir_print_symbols();
-	
-	table_dump_all();
+	fs_dump_tree();
 
-	if (!err && !setjmp(err_diag.unwind)) {
-		compiler_pass_all();
-	}
+	extern void hir_reorder(void);
+	extern void hir_typing(void);
+	extern void hir_normalisation(void);
 
-	table_dump_all();
-	
-	/* if (!err && !setjmp(err_diag.unwind)) {
-		for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
-			hir_check_module(i);
+	typedef struct {
+		void (*pass)(void);
+		const char *name;
+	} pass_t;
+
+	#define X(x) { x, #x }
+
+	pass_t hir_passes[] = {
+		X(hir_reorder),
+		X(hir_typing),
+		X(hir_normalisation),
+	};
+
+	#undef X
+
+	if (!err) for (u32 i = 0; i < ARRAYLEN(hir_passes); i++) {
+		printf(BMAG "HIR pass: %s\n" RESET, hir_passes[i].name);
+
+		if (!setjmp(err_diag.unwind)) {
+			hir_passes[i].pass();
+		} else {
+			printf(BRED "HIR pass: %s failed\n" RESET, hir_passes[i].name);
+			err = true;
+			break;
 		}
+
+		table_dump_all();
 	}
-	// hir_typed_desugar();
-	for (rmod_t i = 0; i < fs_mod_arena_len; i++) {
-		printf("\n");
-		mod_t *modp = MOD_PTR(i);
-		if (modp->exprs) {
-			hir_dump_module(i); // main module
-		}
-	}
-	printf("\n");
-	fs_dump_tree(); */
 
 	return err;
 }

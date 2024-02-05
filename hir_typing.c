@@ -1,6 +1,5 @@
 #include "all.h"
 #include "check.h"
-#include "pass.h"
 
 cctx_t c;
 
@@ -63,8 +62,6 @@ void cproc(proc_t *proc) {
 	}
 
 	proc->ret_type = ret_type;
-
-	printf("type %s\n", type_dbg_str(proc->type));
 }
 
 void cglobal(global_t *global) {
@@ -77,16 +74,12 @@ void cglobal(global_t *global) {
 	} else {
 		ctype_unify(global->type, &global->desc.hir);
 	}
-
-	printf("type %s\n", type_dbg_str(ret));
 }
 
-void pass_check_all(rsym_t *po) {
-	for (u32 i = 0, c = arrlenu(po); i < c; i++) {
-		rsym_t rsym = po[i];
+void hir_typing(void) {
+	for (u32 i = 0, c = arrlenu(symbols_po); i < c; i++) {
+		rsym_t rsym = symbols_po[i];
 		sym_t *sym = &symbols[rsym];
-
-		printf("check: %s\n", sv_from(sym->key));
 
 		switch (sym->kind) {
 			case SYMBOL_PROC: {

@@ -368,7 +368,6 @@ struct pattern_t {
 };
 
 #include "hir.h"
-#include "lir.h"
 
 typedef struct proc_t proc_t;
 typedef struct global_t global_t;
@@ -379,7 +378,6 @@ rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 struct ir_desc_t {
 	local_t *locals; // variables
 	hir_expr_t hir;
-	lir_proc_t lir;
 };
 
 struct proc_t {
@@ -452,6 +450,7 @@ struct sym_t {
 
 // search by qualified name
 extern sym_t *symbols;
+extern rsym_t *symbols_po;
 
 rsym_t table_resolve(rmod_t mod, istr_t short_name);
 rsym_t table_register(sym_t desc);

@@ -382,7 +382,7 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 //  4. is this function self recursive without return type annotation?
 //  5. is this symbol used in the right context? (e.g. typesymbol in a type)
 //
-rsym_t *pass_reorder_sanity(void) {
+void hir_reorder(void) {
 	// use the algorithm under `3-color DFS and edge classification` from Eli's website:
 	// https://eli.thegreenplace.net/2015/directed-graph-traversal-orderings-and-applications-to-data-flow-analysis
 	//
@@ -425,5 +425,5 @@ rsym_t *pass_reorder_sanity(void) {
 		}
 	}
 
-	return po;
+	symbols_po = po;
 }
