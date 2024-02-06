@@ -441,33 +441,19 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 			//            optional
 
 			hir_expr_t *els = NULL;
+			type_t type = TYPE_INFER;
 			if (p.token.kind == TOK_ELSE) {
 				pnext();
 				els = hir_dup(pexpr(desc, 0));
 			} else {
-				// desugar to () return using voiding
-
 				// if (t) effect
-				//
-				// if (t) void effect
-				// else   ()
-
-				els = hir_dup((hir_expr_t){
-					.kind = EXPR_TUPLE_UNIT,
-					.loc = oloc,
-					.type = TYPE_UNIT,
-				});
-				then = hir_dup((hir_expr_t){
-					.kind = EXPR_VOIDING,
-					.loc = then->loc,
-					.type = TYPE_UNIT,
-					.d_voiding = then,
-				});
+				type = TYPE_UNIT;
+				els = NULL;
 			}
 
 			expr = (hir_expr_t){
 				.kind = EXPR_IF,
-				.type = TYPE_INFER,
+				.type = type,
 				.loc = token.loc,
 				.d_if = {
 					.cond = cond,

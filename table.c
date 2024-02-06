@@ -347,8 +347,10 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			_print_expr(desc, expr->d_if.cond);
 			printf(") ");
 			_print_expr(desc, expr->d_if.then);
-			printf(" else ");
-			_print_expr(desc, expr->d_if.els);
+			if (expr->d_if.els) {
+				printf(" else ");
+				_print_expr(desc, expr->d_if.els);
+			}
 			break;
 		}
 		case EXPR_ARRAY: {

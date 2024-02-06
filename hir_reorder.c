@@ -108,7 +108,9 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 		case EXPR_IF: {
 			visit_successors_hir_impl(po, rsym, expr->d_if.cond, true);
 			visit_successors_hir_impl(po, rsym, expr->d_if.then, true);
-			visit_successors_hir_impl(po, rsym, expr->d_if.els, true);
+			if (expr->d_if.els) {
+				visit_successors_hir_impl(po, rsym, expr->d_if.els, true);
+			}
 			break;
 		}
 		case EXPR_ASSIGN: {

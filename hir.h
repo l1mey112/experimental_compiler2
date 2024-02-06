@@ -19,7 +19,7 @@ struct hir_expr_t {
 		EXPR_MATCH,
 		EXPR_DO_BLOCK,
 		EXPR_LOOP,
-		EXPR_IF, // in checker, if type == TYPE_BOOL it is a desugared logic op
+		EXPR_IF,
 		EXPR_ASSIGN,
 		EXPR_INFIX,
 		EXPR_POSTFIX,
@@ -138,7 +138,7 @@ struct hir_expr_t {
 		struct {
 			hir_expr_t *cond;
 			hir_expr_t *then;
-			hir_expr_t *els;
+			hir_expr_t *els; // can be none
 		} d_if;
 	};
 };

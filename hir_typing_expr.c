@@ -112,7 +112,7 @@ void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		.upvalue = upvalue,
 	};
 
-	(void)cexpr(desc, TYPE_INFER, expr->d_loop.expr, BM_RVALUE);
+	(void)cexpr(desc, TYPE_UNIT, expr->d_loop.expr, BM_RVALUE);
 	c.blocks_len--;
 
 	// if a loop block has no breaks, it loops forever
@@ -465,8 +465,13 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			(void)ctype_unify(TYPE_BOOL, expr->d_if.cond);
 
 			type_t then_type = cexpr(desc, upvalue, expr->d_if.then, BM_RVALUE);
-			type_t else_type = cexpr(desc, upvalue, expr->d_if.els, BM_RVALUE);
-			expr->type = ctype_unify(then_type, expr->d_if.els);
+			if (expr->d_if.els) {
+				type_t else_type = cexpr(desc, upvalue, expr->d_if.els, BM_RVALUE);
+				expr->type = ctype_unify(then_type, expr->d_if.els);				
+			} else {
+				// fake construction of type unit will be unwrapped by normalisation passes
+				expr->type = TYPE_UNIT;
+			}
 			break;
 		}
 		case EXPR_ASSIGN: {

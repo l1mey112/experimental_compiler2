@@ -13,6 +13,14 @@ enum : u8 {
 
 #define DIVERGING(expr) if ((expr) == ST_DIVERGING) { return ST_DIVERGING; }
 
+// TODO: call these at discard roots on expressions that may have side effects,
+//       unwrapping such into the stmts. return false if expr needs to go,
+//       return true if expr needs to stay
+
+// TODO: discard with effects will forward all side effects to a stmt and
+//       RETURN NOTHING, DISCARD EXPR ITSELF ENTIRELY
+bool nhir_dce_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
+
 u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 	switch (expr->kind) {
 		case EXPR_SYM:
@@ -55,8 +63,12 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 			// rule 1, 2, 3
 			if (rhs->kind == EXPR_INTEGER_LIT) {
 				switch (expr->d_infix.kind) {
-					// TODO: disable rule 3
 					case TOK_SUB: {
+						// don't negate unsigned numbers
+						if (type_is_unsigned(expr->type)) {
+							break;
+						}
+						
 						// transform to -c + t
 						rhs = hir_dup((hir_expr_t){
 							.kind = EXPR_PREFIX,
@@ -91,7 +103,6 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 				hir_expr_t *t2 = rhs->d_infix.lhs;
 				hir_expr_t *t3 = rhs->d_infix.rhs;
 
-				// transform to (t1 + t2) + t3
 				lhs = hir_dup((hir_expr_t){
 					.kind = EXPR_INFIX,
 					.type = expr->type,
@@ -126,19 +137,25 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 		case EXPR_IF: {
 			DIVERGING(nhir_expr(desc, stmts, expr->d_if.cond, RC_NONE));
 
+			bool has_else = expr->d_if.els != NULL;
+
 			// intermediary local
-			rlocal_t local = ir_local_new(desc, (local_t){
-				.name = ISTR_NONE, // tmp name
-				.kind = LOCAL_IMM,
-				.type = expr->type,
-				.loc = expr->loc,
-			});
+			rlocal_t local;
+			
+			if (has_else) {
+				local = ir_local_new(desc, (local_t){
+					.name = ISTR_NONE, // tmp name
+					.kind = LOCAL_IMM,
+					.type = expr->type,
+					.loc = expr->loc,
+				});
+			}
 
 			hir_expr_t *then_stmts = NULL;
 			hir_expr_t *else_stmts = NULL;
 
 			// generate assignments
-			if (nhir_expr(desc, &then_stmts, expr->d_if.then, rc) != ST_DIVERGING) {
+			if (nhir_expr(desc, &then_stmts, expr->d_if.then, rc) != ST_DIVERGING && has_else) {
 				hir_expr_t assign = {
 					.kind = EXPR_ASSIGN,
 					.type = TYPE_BOTTOM,
@@ -154,7 +171,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 				};
 				arrpush(then_stmts, assign);
 			}
-			if (nhir_expr(desc, &else_stmts, expr->d_if.els, rc) != ST_DIVERGING) {
+			if (has_else && nhir_expr(desc, &else_stmts, expr->d_if.els, rc) != ST_DIVERGING) {
 				hir_expr_t assign = {
 					.kind = EXPR_ASSIGN,
 					.type = TYPE_BOTTOM,
@@ -171,6 +188,19 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 				arrpush(else_stmts, assign);
 			}
 
+			hir_expr_t *new_els = NULL;
+
+			if (has_else) {
+				new_els = hir_dup((hir_expr_t){
+					.kind = EXPR_DO_BLOCK,
+					.type = TYPE_BOTTOM,
+					.d_do_block = {
+						.exprs = else_stmts,
+						.blk_id = BLK_ID_NONE,
+					},
+				});
+			}
+
 			hir_expr_t if_stmt = {
 				.kind = EXPR_IF,
 				.type = TYPE_BOTTOM,
@@ -185,25 +215,26 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, u8 rc) {
 							.blk_id = BLK_ID_NONE,
 						},
 					}),
-					.els = hir_dup((hir_expr_t){
-						.kind = EXPR_DO_BLOCK,
-						.type = TYPE_BOTTOM,
-						.d_do_block = {
-							.exprs = else_stmts,
-							.blk_id = BLK_ID_NONE,
-						},
-					}),
+					.els = new_els,
 				},
 			};
 
 			arrpush(*stmts, if_stmt);
 
-			*expr = (hir_expr_t){
-				.kind = EXPR_LOCAL,
-				.type = expr->type,
-				.d_local = local,
-				.loc = expr->loc,
-			};
+			if (has_else) {
+				*expr = (hir_expr_t){
+					.kind = EXPR_LOCAL,
+					.type = expr->type,
+					.d_local = local,
+					.loc = expr->loc,
+				};
+			} else {
+				*expr = (hir_expr_t){
+					.kind = EXPR_TUPLE_UNIT,
+					.type = TYPE_UNIT,
+					.loc = expr->loc,
+				};
+			}
 			break;
 		}
 		case EXPR_CALL: {
