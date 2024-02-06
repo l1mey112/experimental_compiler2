@@ -306,8 +306,9 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 
 	// TODO: implement `:do` syntax
 
-	u8 blk_id = p.blks_len++;
-	p.blks[blk_id] = (pblk_t){
+	u8 blk_id = desc->next_blk_id++;
+	p.blks[p.blks_len++] = (pblk_t){
+		.blk_id = blk_id,
 		.kind = BLK_LABEL,
 		.label = opt_label,
 		.loc = opt_loc,
@@ -362,8 +363,9 @@ hir_expr_t ploop(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 
-	u8 blk_id = p.blks_len++;
-	p.blks[blk_id] = (pblk_t){
+	u8 blk_id = desc->next_blk_id++;
+	p.blks[p.blks_len++] = (pblk_t){
+		.blk_id = blk_id,
 		.kind = BLK_LABEL,
 		.label = opt_label,
 		.loc = opt_loc,

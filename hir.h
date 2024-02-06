@@ -93,12 +93,13 @@ struct hir_expr_t {
             } op;
 		} d_prefix;
 		struct {
-			hir_expr_t *exprs; // all do blocks have at least one expr, unless they become a EXPR_TUPLE_UNIT
-			u8 blk_id;
+			hir_expr_t *exprs; // all do blocks have at least one expr (before transformations), unless they become a EXPR_TUPLE_UNIT
+			u32 blk_id;
+			bool is_single_expr; // no reps, brks at non last position
 		} d_do_block;
 		struct {
 			hir_expr_t *expr;
-			u8 blk_id;
+			u32 blk_id;
 		} d_loop;
 		struct {
 			hir_expr_t *lhs;
@@ -133,7 +134,7 @@ struct hir_expr_t {
 		} d_continue;
 		struct {
 			hir_expr_t *expr;
-			u8 blk_id; // functions are blocks on their own
+			u32 blk_id; // functions are blocks on their own
 		} d_return;
 		struct {
 			hir_expr_t *cond;

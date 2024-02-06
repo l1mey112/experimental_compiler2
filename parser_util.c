@@ -772,7 +772,7 @@ u32 pblk_locate_label(istr_t opt_label, loc_t onerror) {
 			continue;
 		}
 		if (blk->label == opt_label) {
-			return i;
+			return blk->blk_id;
 		}
 	}
 
@@ -792,7 +792,7 @@ u32 pblk_locate_fn(loc_t onerror) {
 			continue;
 		}
 		
-		return i;
+		return blk->blk_id;
 	}
 
 	err_with_pos(onerror, "not inside function");

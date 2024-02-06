@@ -13,7 +13,7 @@
 
 // sets expr->type
 void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
-	u8 blk_id = c.blocks_len++;
+	u32 blk_id = expr->d_do_block.blk_id;
 	cblk_t *blk = &c.blocks[blk_id];
 
 	// all do blocks have at least one expr
@@ -32,9 +32,11 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			err_with_pos(expr->d_do_block.exprs[i + 1].loc, "unreachable code");
 		}
 	}
-	c.blocks_len--;
 
 	hir_expr_t *stmt_last = &expr->d_do_block.exprs[stmts_len - 1];
+
+	// singular exit brk, and no rep
+	expr->d_do_block.is_single_expr = blk->brk_type == TYPE_INFER && !blk->is_rep;
 
 	// TODO: what happens on `stmt_last !` ???
 
@@ -105,7 +107,7 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 
 // sets expr->type
 void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
-	cblk_t *blk = &c.blocks[c.blocks_len++];
+	cblk_t *blk = &c.blocks[expr->d_loop.blk_id];
 
 	*blk = (cblk_t){
 		.brk_type = TYPE_INFER,
@@ -113,7 +115,6 @@ void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	};
 
 	(void)cexpr(desc, TYPE_UNIT, expr->d_loop.expr, BM_RVALUE);
-	c.blocks_len--;
 
 	// if a loop block has no breaks, it loops forever
 	if (blk->brk_type == TYPE_INFER) {
@@ -694,7 +695,8 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;
 		}
 		case EXPR_CONTINUE: {
-			// no need to pass or inspect anything
+			cblk_t *blk = &c.blocks[expr->d_continue.blk_id];
+			blk->is_rep = true;
 			expr->type = TYPE_BOTTOM;
 			break;
 		}

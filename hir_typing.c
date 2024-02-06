@@ -6,7 +6,7 @@ cctx_t c;
 void cproc(proc_t *proc) {
 	c = (cctx_t){};
 
-	cblk_t *blk = &c.blocks[c.blocks_len++];
+	cblk_t *blk = &c.blocks[0]; // we saved space for this in parser.c
 
 	*blk = (cblk_t){
 		.upvalue = proc->ret_type,
@@ -30,8 +30,6 @@ void cproc(proc_t *proc) {
 	}
 
 	type_t expr_type = cexpr(&proc->desc, proc->ret_type, &proc->desc.hir, BM_RVALUE);
-
-	c.blocks_len--;
 
 	type_t ret_type;
 

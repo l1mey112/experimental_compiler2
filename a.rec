@@ -264,13 +264,16 @@
 ; 
 ; factacc0(n: i32, acc: i32): i32 =
 ;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
-; 
-; fact_iter(i': i32) = do
-;     let f' = 1
-;     loop do
-;         if (i < 1) brk f
-;         f = f * i
-;         i--
 
-cond(c: bool) = do
-    let a = if (c) 50
+fact_iter(i': i32) = do
+    let f' = 1
+    loop do
+        if (i < 1) brk f
+        f = f * i
+        i--
+
+fact_full(n: i32): i32 = do
+    if (n == 0) ret 1
+    else ret n * fact_full (n - 1)
+
+unitmaker(c: bool) = if (c) () else ()

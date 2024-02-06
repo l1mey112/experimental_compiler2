@@ -98,6 +98,7 @@ void pfn2(void) {
 
 	pexpect(TOK_ASSIGN);
 
+	proc.desc.next_blk_id++; // save pos for later
 	p.blks[p.blks_len++] = (pblk_t){
 		.kind = BLK_FN,
 		.loc = name_loc,
@@ -107,7 +108,6 @@ void pfn2(void) {
 	hir_expr_t expr = pexpr(&proc.desc, 0);
 	ppop_scope();
 	ppop_scope();
-
 	p.blks_len--;
 
 	// create function type if return is annotated

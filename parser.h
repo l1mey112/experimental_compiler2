@@ -12,11 +12,12 @@ struct pblk_t {
 		BLK_LABEL,
 		BLK_FN,
 	} kind;
+
+	u32 blk_id;
 	
 	istr_t label;
 	loc_t loc; // TODO: i don't even think we'll need this?
 	bool always_brk; // if false, a `brk` without a label doesn't resolve to this
-	bool is_brk; // if broken to (used with loop)
 };
 
 struct pimport_t {
@@ -66,7 +67,7 @@ struct pctx_t {
 	u32 scope_len;
 	pscope_entry_t scope_entries[256]; // scope entries
 	u32 scope_entries_len;
-	pblk_t blks[256]; // block stack, idx encoded in a u8
+	pblk_t blks[256]; // not a stack, shared throughout the entire function. index by blocks len
 	u32 blks_len;
 	//
 	rfile_t file;
