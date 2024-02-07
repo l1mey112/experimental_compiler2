@@ -15,7 +15,7 @@ enum : u8 {
 	PREC_CALL,    // a b       (determined elsewhere)
 	PREC_CAST,    // :
 	PREC_PREFIX,  // - * ! &
-	PREC_POSTFIX, // ++ --
+	PREC_POSTFIX, // ++ -- struct{}
 	PREC_DOT,     // .x
 	PREC_INDEX,   // x[]
 };
@@ -30,6 +30,7 @@ u8 ptok_prec(tok_t kind) {
 			return PREC_DOT;
 		case TOK_INC:
 		case TOK_DEC:
+		case TOK_OCBR:
 			return PREC_POSTFIX;
 		case TOK_COLON:
 			return PREC_CAST;
@@ -747,6 +748,16 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 					.d_postfix.op = k,
 				};
 				continue;
+			}
+			case TOK_OCBR: {
+				// TODO: later, allow: &struct{}
+
+				// compile to two different kinds of exprs, later on perform fully qualified kind
+				//   T{1, 2}
+				//   T{a: 1, b: 2, ...xs}
+				
+				// TODO: impl
+				assert_not_reached();
 			}
 			case TOK_OSQ: {
 				// x[0..1] and x[0]

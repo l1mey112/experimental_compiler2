@@ -265,6 +265,8 @@
 ; factacc0(n: i32, acc: i32): i32 =
 ;     if (n <= 1) acc else factacc0 (n - 1) (n * acc)
 
+; not_allowed() = 20:!
+
 fact_iter(i': i32) = do
     let f' = 1
     loop do
@@ -272,8 +274,25 @@ fact_iter(i': i32) = do
         f = f * i
         i--
 
-fact_full(n: i32): i32 = do
-    if (n == 0) ret 1
-    else ret n * fact_full (n - 1)
+; fact_full(n: i32): i32 = do
+;     if (n == 0) ret 1
+;     else ret n * fact_full (n - 1)
+; 
+; unitmaker(c: bool) = if (c) () else ()
 
-unitmaker(c: bool) = if (c) () else ()
+; repeat() = :t do
+;     rep :t
+
+; struct T {
+;     count: i32
+; }
+; 
+; new(): T = T{}
+; 
+; incv_lit(v: T): T = T{}
+; 
+; incv_field(v': T): T = do
+;     v.count++
+;     v
+
+cond(c: bool) = if (c) 1230 else if (!c) 230 else 592

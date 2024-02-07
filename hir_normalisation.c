@@ -23,76 +23,168 @@ nblk_t blks[128];
 u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
 void nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
 
-// single result. blocks returning (), !, or a singular expr brk
-u8 nhir_flatten_do(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	// TODO: duplicate below deletions
 	nblk_t* blk = &blks[expr->d_do_block.blk_id];
 	*blk = (nblk_t){
 		.dest = (rlocal_t)-1,
 	};
 
-	bool has_result = expr->d_do_block.is_single_expr;
-	u32 c = arrlenu(expr->d_do_block.exprs);
-	u8 st_last;
+	type_t loop_type = expr->type;
 
-	if (has_result) {
-		assert(expr->d_do_block.exprs[c - 1].kind == EXPR_BREAK);
+	if (loop_type != TYPE_UNIT && loop_type != TYPE_BOTTOM) {
+		blk->dest = ir_local_new(desc, (local_t){
+			.name = ISTR_NONE,
+			.kind = LOCAL_IMM,
+			.type = loop_type,
+			.loc = expr->loc,
+		});
 	}
 
-	for (u32 i = 0; i < c; i++) {
-		hir_expr_t *nexpr = &expr->d_do_block.exprs[i];
+	hir_expr_t *loop_expr = expr->d_loop.expr;
+	hir_expr_t *loop_stmts = NULL;
 
-		if (i + 1 == c && has_result) {
-			st_last = nhir_expr(desc, stmts, nexpr->d_break.expr);
-			*expr = *nexpr->d_break.expr;
-			break;
-		}
+	// convert `loop expr` into:
+	//
+	// :0 do
+	//     expr
+	//     rep :0
 
-		// trim exprs up to idx
-		if (nhir_expr(desc, stmts, nexpr) == ST_DIVERGING) {
-			break;
-		}
+	hir_expr_t do_res = {
+		.kind = EXPR_DO_BLOCK,
+		.type = loop_type != TYPE_BOTTOM ? TYPE_UNIT : TYPE_BOTTOM,
+		.loc = expr->loc,
+		.d_do_block = {
+			.exprs = NULL,
+			.blk_id = expr->d_do_block.blk_id,
+		},
+	};
 
-		nhir_discard_expr(desc, stmts, nexpr);
-	}
+	DIVERGING(nhir_expr(desc, &loop_stmts, loop_expr));
+	nhir_discard_expr(desc, stmts, loop_expr);
 
-	if (has_result) {
-		return st_last;
-	}
+	// loop to top
+	hir_expr_t do_rep = {
+		.kind = EXPR_CONTINUE,
+		.type = TYPE_BOTTOM,
+		.loc = expr->loc,
+		.d_continue = {
+			.blk_id = expr->d_do_block.blk_id,
+		},
+	};
 
-	if (expr->type == TYPE_BOTTOM) {
+	arrpush(loop_stmts, do_rep);
+
+	do_res.d_do_block.exprs = loop_stmts;
+
+	arrpush(*stmts, do_res);
+
+	if (loop_type == TYPE_BOTTOM) {
 		return ST_DIVERGING;
 	}
 
-	*expr = UNIT(expr->loc);
+	if (loop_type == TYPE_UNIT) {
+		*expr = UNIT(expr->loc);
+	} else {
+		*expr = (hir_expr_t){
+			.kind = EXPR_LOCAL,
+			.type = loop_type,
+			.d_local = blk->dest,
+			.loc = expr->loc,
+		};
+	}
+
 	return ST_NONE;
 }
 
-// always returning a meaningful value, never diverging
-void nhir_do(ir_desc_t *desc, hir_expr_t *expr) {
-	hir_expr_t *do_stmts = NULL;
+u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	hir_expr_t do_expr = *expr;
 
-	nblk_t* blk = &blks[expr->d_do_block.blk_id];
-	*blk = (nblk_t){
-		.dest = ir_local_new(desc, (local_t){
-			.name = ISTR_NONE,
-			.kind = LOCAL_IMM,
-			.type = expr->type,
-			.loc = expr->loc,
-		})
-	};
+	nblk_t* blk = &blks[do_expr.d_do_block.blk_id];
+	*blk = (nblk_t){};
 
-	for (u32 i = 0, c = arrlenu(expr->d_do_block.exprs); i < c; i++) {
-		hir_expr_t *nexpr = &expr->d_do_block.exprs[i];
+	bool single_brk = do_expr.d_do_block.is_single_expr;
+	u32 c = arrlenu(do_expr.d_do_block.exprs);
 
-		if (nhir_expr(desc, &do_stmts, nexpr) == ST_DIVERGING) {
+	if (single_brk) {
+		assert(do_expr.d_do_block.exprs[c - 1].kind == EXPR_BREAK);
+	}
+
+	// what a silly switch case
+	switch (do_expr.type) {
+		default: {
+			if (!single_brk) {
+				blk->dest = ir_local_new(desc, (local_t){
+					.name = ISTR_NONE,
+					.kind = LOCAL_IMM,
+					.type = do_expr.type,
+					.loc = do_expr.loc,
+				});
+			}
+			// fallthrough
+		}
+		case TYPE_UNIT:
+		case TYPE_BOTTOM: {
+			blk->dest = (rlocal_t)-1;
+			break;
+		}
+	}
+
+	// used if `do` block is recreated
+	hir_expr_t *sep_stmts = NULL;
+	hir_expr_t **nstmts = single_brk ? stmts : &sep_stmts;
+	u8 status;
+
+	for (u32 i = 0; i < c; i++) {
+		hir_expr_t *nexpr = &do_expr.d_do_block.exprs[i];
+
+		if (i + 1 == c && single_brk) {
+			*expr = *nexpr->d_break.expr;
+			status = nhir_expr(desc, nstmts, expr);
+
+			// will be discarded by further code down the line and replaced with ()
+			if (status != ST_DIVERGING && do_expr.type == TYPE_UNIT) {
+				nhir_discard_expr(desc, nstmts, expr);
+			}
+
 			break;
 		}
 
-		nhir_discard_expr(desc, &do_stmts, nexpr);
+		status = nhir_expr(desc, nstmts, nexpr);
+
+		if (status == ST_DIVERGING) {
+			break;
+		}
+
+		// append
+		nhir_discard_expr(desc, nstmts, nexpr);
 	}
 
-	expr->d_do_block.exprs = do_stmts;
-	expr->type = TYPE_UNIT;
+	// do -> stmts
+	if (!single_brk) {
+		print_hint_with_pos(do_expr.loc, "teste");
+		do_expr.d_do_block.exprs = sep_stmts;
+		do_expr.type = do_expr.type == TYPE_BOTTOM ? TYPE_BOTTOM : TYPE_UNIT;
+
+		arrpush(*stmts, do_expr);
+	}
+
+	// construct ret1
+	if (do_expr.type == TYPE_UNIT) {
+		*expr = UNIT(do_expr.loc);
+		status = ST_NONE;
+	} else if (do_expr.type == TYPE_BOTTOM) {
+		status = ST_DIVERGING;
+	} else if (!single_brk) {
+		*expr = (hir_expr_t){
+			.kind = EXPR_LOCAL,
+			.type = do_expr.type,
+			.loc = do_expr.loc,
+			.d_local = blk->dest,
+		};
+	}
+
+	return status;
 }
 
 // TODO: call these at discard roots on expressions that may have side effects,
@@ -233,6 +325,9 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_IF: {
+			// TODO: extract to seperate function passing in variable to convert
+			//       if () else if () else if -> share same variable no duplicate `do` stmts
+
 			DIVERGING(nhir_expr(desc, stmts, expr->d_if.cond));
 
 			bool has_else = expr->d_if.els != NULL;
@@ -352,88 +447,14 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_DO_BLOCK: {
-			bool single_expr = expr->d_do_block.is_single_expr;
-
-			// single result. blocks returning (), !, or a singular expr brk
-			if (single_expr || expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM) {
-				return nhir_flatten_do(desc, stmts, expr);
-			} else {
-				nhir_do(desc, expr);
-			}
-			break;
+			return nhir_do2(desc, stmts, expr);
 		}
 		case EXPR_LOOP: {
-			// TODO: duplicate below deletions
-			nblk_t* blk = &blks[expr->d_do_block.blk_id];
-			*blk = (nblk_t){
-				.dest = (rlocal_t)-1,
-			};
-
-			type_t loop_type = expr->type;
-
-			if (loop_type != TYPE_UNIT && loop_type != TYPE_BOTTOM) {
-				blk->dest = ir_local_new(desc, (local_t){
-					.name = ISTR_NONE,
-					.kind = LOCAL_IMM,
-					.type = loop_type,
-					.loc = expr->loc,
-				});
-			}
-
-			hir_expr_t *loop_expr = expr->d_loop.expr;
-			hir_expr_t *loop_stmts = NULL;
-
-			// convert `loop expr` into:
-			//
-			// :0 do
-			//     expr
-			//     rep :0
-
-			hir_expr_t do_res = {
-				.kind = EXPR_DO_BLOCK,
-				.type = loop_type != TYPE_BOTTOM ? TYPE_UNIT : TYPE_BOTTOM,
-				.loc = expr->loc,
-				.d_do_block = {
-					.exprs = NULL,
-					.blk_id = expr->d_do_block.blk_id,
-				},
-			};
-
-			DIVERGING(nhir_expr(desc, &loop_stmts, loop_expr));
-			nhir_discard_expr(desc, stmts, loop_expr);
-
-			// loop to top
-			hir_expr_t do_rep = {
-				.kind = EXPR_CONTINUE,
-				.type = TYPE_BOTTOM,
-				.loc = expr->loc,
-				.d_continue = {
-					.blk_id = expr->d_do_block.blk_id,
-				},
-			};
-
-			arrpush(loop_stmts, do_rep);
-
-			do_res.d_do_block.exprs = loop_stmts;
-
-			arrpush(*stmts, do_res);
-
-			if (loop_type == TYPE_BOTTOM) {
-				return ST_DIVERGING;
-			}
-
-			if (loop_type == TYPE_UNIT) {
-				*expr = UNIT(expr->loc);
-			} else {
-				*expr = (hir_expr_t){
-					.kind = EXPR_LOCAL,
-					.type = loop_type,
-					.d_local = blk->dest,
-					.loc = expr->loc,
-				};
-			}
-
-			break;
+			return nhir_loop(desc, stmts, expr);
+		}
+		case EXPR_CONTINUE: {
+			arrpush(*stmts, *expr);
+			return ST_DIVERGING;
 		}
 		case EXPR_BREAK: {
 			nblk_t *blk = &blks[expr->d_break.blk_id];
@@ -542,12 +563,15 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			DIVERGING(nhir_expr(desc, stmts, expr->d_postfix.expr));
 			break;
 		}
+		case EXPR_PREFIX: {
+			// -v !v
+			DIVERGING(nhir_expr(desc, stmts, expr->d_prefix.expr));
+			break;
+		}
 		/* 
 		case EXPR_ARRAY:
 		case EXPR_TUPLE:
 		case EXPR_LOOP:
-		case EXPR_POSTFIX:
-		case EXPR_PREFIX:
 		case EXPR_DEREF:
 		case EXPR_ADDR_OF:
 		case EXPR_INDEX:
@@ -558,6 +582,11 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		case EXPR_VOIDING:
 		case EXPR_FIELD:
 		case EXPR_LET: */
+		case EXPR_CAST: {
+			// TODO: `value: !` IS illegal, not currently though we don't have good casting rules/matrix
+			DIVERGING(nhir_expr(desc, stmts, expr->d_cast.expr));
+			break;
+		}
 		default: {
 			printf("\n\nkind: %u\n\n", expr->kind);
 			assert_not_reached();

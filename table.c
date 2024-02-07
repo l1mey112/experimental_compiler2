@@ -380,7 +380,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			_hir_dump_expr(modp, expr->d_lambda.scope, expr->d_lambda.expr);
 			break;
 		} */
-		case EXPR_MATCH: {
+		/* case EXPR_MATCH: {
 			// match expr
 			//    (x, y) -> ...
 
@@ -400,7 +400,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			}
 			_tabs--;
 			break;
-		}
+		} */
 		case EXPR_VOIDING: {
 			printf("void ");
 			_print_expr(desc, expr->d_voiding);
