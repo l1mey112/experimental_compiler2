@@ -95,7 +95,7 @@ static u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	return ST_NONE;
 }
 
-static u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static u8 nhir_do(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	hir_expr_t do_expr = *expr;
 
 	nblk_t* blk = &blks[do_expr.d_do_block.blk_id];
@@ -157,17 +157,10 @@ static u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		}
 	}
 
-	// do -> stmts
-	if (!single_brk) {
-		do_expr.d_do_block.exprs = sep_stmts;
-		do_expr.type = do_expr.type == TYPE_BOTTOM ? TYPE_BOTTOM : TYPE_UNIT;
-
-		arrpush(*stmts, do_expr);
-	}
-
 	// construct ret
 	if (do_expr.type == TYPE_UNIT) {
 		*expr = UNIT(do_expr.loc);
+		status = ST_NONE;
 	} else if (do_expr.type == TYPE_BOTTOM) {
 		assert(status == ST_DIVERGING);
 	} else if (!single_brk) {
@@ -177,8 +170,17 @@ static u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			.loc = do_expr.loc,
 			.d_local = blk->dest,
 		};
+		status = ST_NONE;
 	} else {
 		// expr is already set, it's the last expression
+	}
+
+	// do -> stmts
+	if (!single_brk) {
+		do_expr.d_do_block.exprs = sep_stmts;
+		do_expr.type = do_expr.type == TYPE_BOTTOM ? TYPE_BOTTOM : TYPE_UNIT;
+
+		arrpush(*stmts, do_expr);
 	}
 
 	return status;
@@ -199,6 +201,8 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 	status = nhir_expr_target(desc, &then_stmts, expr->d_if.then, target);
 	if (has_else) {
 		status &= nhir_expr_target(desc, &else_stmts, expr->d_if.els, target);
+	} else {
+		status = ST_NONE;
 	}
 
 	// if (c) <empty> else <empty>
@@ -406,7 +410,7 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_DO_BLOCK: {
-			return nhir_do2(desc, stmts, expr);
+			return nhir_do(desc, stmts, expr);
 		}
 		case EXPR_LOOP: {
 			return nhir_loop(desc, stmts, expr);

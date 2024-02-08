@@ -300,10 +300,11 @@ fact_iter(i': i32) = do
 ; 
 ;     if (!c) 40 else 2
 
-dostuffs() = :t do
-    do
+dostuffs() = do
+    let a = :t do
         brk :t 50
+    8
 
-expr_forwarding(c: bool) = do
-    let a = if (c) if (c) 120 else 23 else 59
-    a
+; expr_forwarding(c: bool) = do
+;     let a = if (c) if (c) 120 else 23 else 59
+;     a
