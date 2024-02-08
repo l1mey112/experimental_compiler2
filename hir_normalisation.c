@@ -6,8 +6,6 @@ enum : u8 {
 	ST_DIVERGING,
 };
 
-// i hate rebuilding these data structures, it's a joke
-
 #define UNIT(loc_v) (hir_expr_t){ .kind = EXPR_TUPLE_UNIT, .type = TYPE_UNIT, .loc = loc_v }
 
 typedef struct nblk_t nblk_t;
@@ -20,10 +18,10 @@ nblk_t blks[128];
 
 #define DIVERGING(expr) if ((expr) == ST_DIVERGING) { return ST_DIVERGING; }
 
-u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
-void nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
+static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
+static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, rlocal_t target);
 
-u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	// TODO: duplicate below deletions
 	nblk_t* blk = &blks[expr->d_do_block.blk_id];
 	*blk = (nblk_t){
@@ -60,8 +58,8 @@ u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		},
 	};
 
-	DIVERGING(nhir_expr(desc, &loop_stmts, loop_expr));
-	nhir_discard_expr(desc, stmts, loop_expr);
+	// discard
+	DIVERGING(nhir_expr_target(desc, &loop_stmts, loop_expr, (rlocal_t)-1));
 
 	// loop to top
 	hir_expr_t do_rep = {
@@ -97,7 +95,7 @@ u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	return ST_NONE;
 }
 
-u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	hir_expr_t do_expr = *expr;
 
 	nblk_t* blk = &blks[do_expr.d_do_block.blk_id];
@@ -120,6 +118,7 @@ u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 					.type = do_expr.type,
 					.loc = do_expr.loc,
 				});
+				break;
 			}
 			// fallthrough
 		}
@@ -140,41 +139,37 @@ u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 
 		if (i + 1 == c && single_brk) {
 			*expr = *nexpr->d_break.expr;
-			status = nhir_expr(desc, nstmts, expr);
 
 			// will be discarded by further code down the line and replaced with ()
-			if (status != ST_DIVERGING && do_expr.type == TYPE_UNIT) {
-				nhir_discard_expr(desc, nstmts, expr);
+			if (do_expr.type == TYPE_UNIT || do_expr.type == TYPE_BOTTOM) {
+				status = nhir_expr_target(desc, nstmts, expr, (rlocal_t)-1);
+			} else {
+				status = nhir_expr(desc, nstmts, expr);
 			}
 
 			break;
 		}
 
-		status = nhir_expr(desc, nstmts, nexpr);
+		status = nhir_expr_target(desc, nstmts, nexpr, (rlocal_t)-1);
 
 		if (status == ST_DIVERGING) {
 			break;
 		}
-
-		// append
-		nhir_discard_expr(desc, nstmts, nexpr);
 	}
 
 	// do -> stmts
 	if (!single_brk) {
-		print_hint_with_pos(do_expr.loc, "teste");
 		do_expr.d_do_block.exprs = sep_stmts;
 		do_expr.type = do_expr.type == TYPE_BOTTOM ? TYPE_BOTTOM : TYPE_UNIT;
 
 		arrpush(*stmts, do_expr);
 	}
 
-	// construct ret1
+	// construct ret
 	if (do_expr.type == TYPE_UNIT) {
 		*expr = UNIT(do_expr.loc);
-		status = ST_NONE;
 	} else if (do_expr.type == TYPE_BOTTOM) {
-		status = ST_DIVERGING;
+		assert(status == ST_DIVERGING);
 	} else if (!single_brk) {
 		*expr = (hir_expr_t){
 			.kind = EXPR_LOCAL,
@@ -182,36 +177,110 @@ u8 nhir_do2(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			.loc = do_expr.loc,
 			.d_local = blk->dest,
 		};
+	} else {
+		// expr is already set, it's the last expression
 	}
 
 	return status;
 }
 
-// TODO: call these at discard roots on expressions that may have side effects,
-//       unwrapping such into the stmts. return false if expr needs to go,
-//       return true if expr needs to stay
+static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, rlocal_t target) {
+	bool has_else = expr->d_if.els != NULL;
+	bool has_tmpvar = target != (rlocal_t)-1;
 
-// TODO: discard with effects will forward all side effects to a stmt and
-//       RETURN NOTHING, DISCARD EXPR ITSELF ENTIRELY
+	hir_expr_t *then_stmts = NULL;
+	hir_expr_t *else_stmts = NULL;
 
-// consume expr. will spill to stmts all effects to statements
-// TODO: impl more, this is just for show
-void nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
-	switch (expr->kind) {
-		case EXPR_SYM:
-		case EXPR_INTEGER_LIT:
-		case EXPR_BOOL_LIT:
-		case EXPR_TUPLE_UNIT:
-		case EXPR_LOCAL: {
-			return;
-		}
-		default: {
-			arrpush(*stmts, *expr); // TODO: we don't know for sure, just keep it.
-		}
+	u8 status;
+
+	// normalise `else` and `then` first before `cond`
+
+	// don't rely on `!` as a means for diverging, it's possible the checker misses some propagation
+	status = nhir_expr_target(desc, &then_stmts, expr->d_if.then, target);
+	if (has_else) {
+		status &= nhir_expr_target(desc, &else_stmts, expr->d_if.els, target);
 	}
+
+	// if (c) <empty> else <empty>
+	// if (c) <empty>
+	if (arrlenu(then_stmts) == 0 && (!has_else || arrlenu(else_stmts) == 0)) {
+		DIVERGING(nhir_expr_target(desc, stmts, expr->d_if.cond, (rlocal_t)-1));
+		*expr = UNIT(expr->loc);
+		return ST_NONE;
+	} else {
+		DIVERGING(nhir_expr(desc, stmts, expr->d_if.cond));
+	}
+
+	hir_expr_t *new_els = NULL;
+
+	if (has_else) {
+		new_els = hir_dup((hir_expr_t){
+			.kind = EXPR_DO_BLOCK,
+			.type = TYPE_BOTTOM,
+			.d_do_block = {
+				.exprs = else_stmts,
+				.blk_id = BLK_ID_NONE,
+			},
+		});
+	}
+
+	hir_expr_t if_stmt = {
+		.kind = EXPR_IF,
+		.type = TYPE_BOTTOM,
+		.loc = expr->loc,
+		.d_if = {
+			.cond = expr->d_if.cond,
+			.then = hir_dup((hir_expr_t){
+				.kind = EXPR_DO_BLOCK,
+				.type = TYPE_BOTTOM,
+				.d_do_block = {
+					.exprs = then_stmts,
+					.blk_id = BLK_ID_NONE,
+				},
+			}),
+			.els = new_els,
+		},
+	};
+
+	arrpush(*stmts, if_stmt);
+
+	if (has_tmpvar) {
+		*expr = (hir_expr_t){
+			.kind = EXPR_LOCAL,
+			.type = expr->type,
+			.d_local = target,
+			.loc = expr->loc,
+		};
+	} else if (expr->type == TYPE_BOTTOM) {
+		assert(status == ST_DIVERGING);
+	} else {
+		*expr = UNIT(expr->loc);
+	}
+	return status;
 }
 
-u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static u8 nhir_if(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	bool has_else = expr->d_if.els != NULL;
+	bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
+
+	// intermediary local
+	rlocal_t target;
+
+	if (has_tmpvar) {
+		target = ir_local_new(desc, (local_t){
+			.name = ISTR_NONE, // tmp name
+			.kind = LOCAL_IMM,
+			.type = expr->type,
+			.loc = expr->loc,
+		});
+	} else {
+		target = (rlocal_t)-1;
+	}
+
+	return nhir_if_target(desc, stmts, expr, target);
+}
+
+static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_SYM:
 		case EXPR_INTEGER_LIT:
@@ -317,6 +386,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			return ST_DIVERGING;
 		}
 		case EXPR_ASSIGN: {
+			// TODO: SIDE EFFECTING LVALUES!
 			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.lhs));
 			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.rhs));
 			arrpush(*stmts, *expr);
@@ -325,118 +395,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_IF: {
-			// TODO: extract to seperate function passing in variable to convert
-			//       if () else if () else if -> share same variable no duplicate `do` stmts
-
-			DIVERGING(nhir_expr(desc, stmts, expr->d_if.cond));
-
-			bool has_else = expr->d_if.els != NULL;
-			bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
-
-			// intermediary local
-			rlocal_t local;
-			
-			if (has_tmpvar) {
-				local = ir_local_new(desc, (local_t){
-					.name = ISTR_NONE, // tmp name
-					.kind = LOCAL_IMM,
-					.type = expr->type,
-					.loc = expr->loc,
-				});
-			}
-
-			hir_expr_t *then_stmts = NULL;
-			hir_expr_t *else_stmts = NULL;
-
-			// generate assignments
-			if (nhir_expr(desc, &then_stmts, expr->d_if.then) != ST_DIVERGING && has_tmpvar) {
-				hir_expr_t assign = {
-					.kind = EXPR_ASSIGN,
-					.type = TYPE_BOTTOM,
-					.loc = expr->d_if.then->loc,
-					.d_assign = {
-						.lhs = hir_dup((hir_expr_t){
-							.kind = EXPR_LOCAL,
-							.d_local = local,
-							.type = expr->type,
-						}),
-						.rhs = expr->d_if.then,
-					},
-				};
-				arrpush(then_stmts, assign);
-			}
-			if (has_else && nhir_expr(desc, &else_stmts, expr->d_if.els) != ST_DIVERGING && has_tmpvar) {
-				hir_expr_t assign = {
-					.kind = EXPR_ASSIGN,
-					.type = TYPE_BOTTOM,
-					.loc = expr->d_if.els->loc,
-					.d_assign = {
-						.lhs = hir_dup((hir_expr_t){
-							.kind = EXPR_LOCAL,
-							.d_local = local,
-							.type = expr->type,
-						}),
-						.rhs = expr->d_if.els,
-					},
-				};
-				arrpush(else_stmts, assign);
-			}
-
-			hir_expr_t *new_els = NULL;
-
-			// if (c) <empty> else <empty>
-			// if (c) <empty>
-			// TODO: will DELETE effectful expressions!
-			if (arrlenu(then_stmts) == 0 && (!has_else || arrlenu(else_stmts) == 0)) {
-				nhir_discard_expr(desc, stmts, expr->d_if.cond);
-				*expr = UNIT(expr->loc);
-				break;
-			}
-
-			if (has_else) {
-				new_els = hir_dup((hir_expr_t){
-					.kind = EXPR_DO_BLOCK,
-					.type = TYPE_BOTTOM,
-					.d_do_block = {
-						.exprs = else_stmts,
-						.blk_id = BLK_ID_NONE,
-					},
-				});
-			}
-
-			hir_expr_t if_stmt = {
-				.kind = EXPR_IF,
-				.type = TYPE_BOTTOM,
-				.loc = expr->loc,
-				.d_if = {
-					.cond = expr->d_if.cond,
-					.then = hir_dup((hir_expr_t){
-						.kind = EXPR_DO_BLOCK,
-						.type = TYPE_BOTTOM,
-						.d_do_block = {
-							.exprs = then_stmts,
-							.blk_id = BLK_ID_NONE,
-						},
-					}),
-					.els = new_els,
-				},
-			};
-
-			arrpush(*stmts, if_stmt);
-
-			if (has_tmpvar) {
-				*expr = (hir_expr_t){
-					.kind = EXPR_LOCAL,
-					.type = expr->type,
-					.d_local = local,
-					.loc = expr->loc,
-				};
-			} else if (expr->type == TYPE_BOTTOM) {
-				return ST_DIVERGING;
-			} else {
-				*expr = UNIT(expr->loc);
-			}
-			break;
+			return nhir_if(desc, stmts, expr);
 		}
 		case EXPR_CALL: {
 			DIVERGING(nhir_expr(desc, stmts, expr->d_call.f));
@@ -458,34 +417,9 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		}
 		case EXPR_BREAK: {
 			nblk_t *blk = &blks[expr->d_break.blk_id];
-			
-			DIVERGING(nhir_expr(desc, stmts, expr->d_break.expr));
 
-			if (blk->dest != (rlocal_t)-1) {
-				assert(expr->d_break.expr->type != TYPE_UNIT || expr->d_break.expr->type != TYPE_BOTTOM);
-
-				// transform break expr
-				//
-				// brk expr -> _0 = expr; brk ()
-
-				hir_expr_t assign = {
-					.kind = EXPR_ASSIGN,
-					.type = TYPE_UNIT,
-					.loc = expr->loc,
-					.d_assign = {
-						.lhs = hir_dup((hir_expr_t){
-							.kind = EXPR_LOCAL,
-							.d_local = blk->dest,
-							.type = expr->d_break.expr->type,
-						}),
-						.rhs = expr->d_break.expr,
-					},
-				};
-				
-				arrpush(*stmts, assign);
-			} else {
-				nhir_discard_expr(desc, stmts, expr->d_break.expr);
-			}
+			// `blk->dest` can be -1
+			DIVERGING(nhir_expr_target(desc, stmts, expr->d_break.expr, blk->dest));
 
 			hir_expr_t brk_unit = {
 				.kind = EXPR_BREAK,
@@ -502,8 +436,7 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		}
 		case EXPR_VOIDING: {
 			// no presence of voiding
-			DIVERGING(nhir_expr(desc, stmts, expr->d_voiding));
-			nhir_discard_expr(desc, stmts, expr->d_voiding);
+			DIVERGING(nhir_expr_target(desc, stmts, expr->d_voiding, (rlocal_t)-1));
 			*expr = UNIT(expr->loc);
 			break;
 		}
@@ -515,30 +448,14 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			pattern_t *pat = &expr->d_let.pattern;
 			hir_expr_t *rhs = expr->d_let.expr;
 
-			DIVERGING(nhir_expr(desc, stmts, rhs));
-
 			// let is statement ONLY
 			switch (pat->kind) {
 				case PATTERN_UNDERSCORE: {
-					*expr = *rhs;
+					DIVERGING(nhir_expr_target(desc, stmts, rhs, (rlocal_t)-1));
 					break;
 				}
 				case PATTERN_LOCAL: {
-					hir_expr_t assign = {
-						.kind = EXPR_ASSIGN,
-						.type = TYPE_UNIT,
-						.loc = expr->loc,
-						.d_assign = {
-							.lhs = hir_dup((hir_expr_t){
-								.kind = EXPR_LOCAL,
-								.d_local = pat->d_local,
-								.type = rhs->type,
-							}),
-							.rhs = rhs,
-						},
-					};
-
-					*expr = assign;
+					DIVERGING(nhir_expr_target(desc, stmts, rhs, pat->d_local));
 					break;
 				}
 				default: {
@@ -554,6 +471,8 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 				}
 			}
 
+			// let evaluates to (), is always a statement though
+			*expr = UNIT(expr->loc);
 			break;
 		}
 		case EXPR_POSTFIX: {
@@ -595,7 +514,72 @@ u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	return ST_NONE;
 }
 
-void nproc(proc_t *proc) {
+// don't call directly, call `nhir_expr_target` with -1 for best results
+// consume expr. will spill to stmts all effects to statements
+// TODO: impl more, this is just for show
+static void nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	switch (expr->kind) {
+		case EXPR_SYM:
+		case EXPR_INTEGER_LIT:
+		case EXPR_BOOL_LIT:
+		case EXPR_TUPLE_UNIT:
+		case EXPR_LOCAL: {
+			return;
+		}
+		default: {
+			arrpush(*stmts, *expr); // TODO: we don't know for sure, just keep it.
+		}
+	}
+}
+
+// forward the result of expressions to targets
+// used to reduce the amount of temporary variables
+static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, rlocal_t target) {
+	// target == -1, discard
+
+	// forwarding invalid targets also avoids creating a
+	// new temporary that would go unused anyway
+
+	switch (expr->kind) {
+		case EXPR_IF: {
+			bool has_else = expr->d_if.els != NULL;
+			bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
+
+			if (has_tmpvar) {
+				return nhir_if_target(desc, stmts, expr, target);
+			}
+			goto ndefault;
+		}
+		ndefault: default: {
+			DIVERGING(nhir_expr(desc, stmts, expr));
+
+			if (target == (rlocal_t)-1) {
+				nhir_discard_expr(desc, stmts, expr);
+			} else {
+				hir_expr_t assign = {
+					.kind = EXPR_ASSIGN,
+					.type = TYPE_UNIT,
+					.loc = expr->loc,
+					.d_assign = {
+						.lhs = hir_dup((hir_expr_t){
+							.kind = EXPR_LOCAL,
+							.d_local = target,
+							.type = expr->type,
+						}),
+						.rhs = expr,
+					},
+				};
+
+				arrpush(*stmts, assign);
+			}
+			break;
+		}
+	}
+
+	return ST_NONE;
+}
+
+static void nproc(proc_t *proc) {
 	hir_expr_t *stmts = NULL;
 	hir_expr_t *hir = hir_dup(proc->desc.hir);
 
@@ -621,7 +605,7 @@ void nproc(proc_t *proc) {
 	};
 }
 
-void nglobal(global_t *global) {
+static void nglobal(global_t *global) {
 	assert_not_reached();
 }
 

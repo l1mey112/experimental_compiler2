@@ -295,4 +295,15 @@ fact_iter(i': i32) = do
 ;     v.count++
 ;     v
 
-cond(c: bool) = if (c) 1230 else if (!c) 230 else 592
+; cond(c: bool) = :t do
+;     if (c) brk :t 20
+; 
+;     if (!c) 40 else 2
+
+dostuffs() = :t do
+    do
+        brk :t 50
+
+expr_forwarding(c: bool) = do
+    let a = if (c) if (c) 120 else 23 else 59
+    a
