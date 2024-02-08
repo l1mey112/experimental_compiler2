@@ -86,20 +86,21 @@ static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 	return ST_NONE;
 }
 
+// needs var
+static bool nhir_loop_nv(hir_expr_t *expr) {
+	return expr->type != TYPE_UNIT && expr->type != TYPE_BOTTOM;
+}
+
 static u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
-	type_t loop_type = expr->type;
+	rlocal_t local = (rlocal_t)-1;
 
-	rlocal_t local;
-
-	if (loop_type != TYPE_UNIT && loop_type != TYPE_BOTTOM) {
+	if (nhir_loop_nv(expr)) {
 		local = ir_local_new(desc, (local_t){
 			.name = ISTR_NONE,
 			.kind = LOCAL_IMM,
-			.type = loop_type,
+			.type = expr->type,
 			.loc = expr->loc,
 		});
-	} else {
-		local = (rlocal_t)-1;
 	}
 
 	return nhir_loop_target(desc, stmts, expr, local);
@@ -177,29 +178,20 @@ static u8 nhir_do_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 	return status;
 }
 
-static u8 nhir_do(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
-	rlocal_t local;
-	bool single_brk = expr->d_do_block.is_single_expr;
+static bool nhir_do_nv(hir_expr_t *expr) {
+	return expr->type != TYPE_UNIT && expr->type != TYPE_BOTTOM && !expr->d_do_block.is_single_expr;
+}
 
-	// what a silly switch case
-	switch (expr->type) {
-		default: {
-			if (!single_brk) {
-				local = ir_local_new(desc, (local_t){
-					.name = ISTR_NONE,
-					.kind = LOCAL_IMM,
-					.type = expr->type,
-					.loc = expr->loc,
-				});
-				break;
-			}
-			// fallthrough
-		}
-		case TYPE_UNIT:
-		case TYPE_BOTTOM: {
-			local = (rlocal_t)-1;
-			break;
-		}
+static u8 nhir_do(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	rlocal_t local = (rlocal_t)-1;
+
+	if (nhir_do_nv(expr)) {
+		local = ir_local_new(desc, (local_t){
+			.name = ISTR_NONE,
+			.kind = LOCAL_IMM,
+			.type = expr->type,
+			.loc = expr->loc,
+		});
 	}
 
 	return nhir_do_target(desc, stmts, expr, local);
@@ -282,25 +274,28 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 	return status;
 }
 
-static u8 nhir_if(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static bool nhir_if_nv(hir_expr_t *expr) {
+	rlocal_t target = (rlocal_t)-1;
+
 	bool has_else = expr->d_if.els != NULL;
 	bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
 
-	// intermediary local
-	rlocal_t target;
+	return has_tmpvar;
+}
 
-	if (has_tmpvar) {
-		target = ir_local_new(desc, (local_t){
+static u8 nhir_if(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	rlocal_t local = (rlocal_t)-1;
+
+	if (nhir_if_nv(expr)) {
+		local = ir_local_new(desc, (local_t){
 			.name = ISTR_NONE, // tmp name
 			.kind = LOCAL_IMM,
 			.type = expr->type,
 			.loc = expr->loc,
 		});
-	} else {
-		target = (rlocal_t)-1;
 	}
 
-	return nhir_if_target(desc, stmts, expr, target);
+	return nhir_if_target(desc, stmts, expr, local);
 }
 
 static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
@@ -565,19 +560,22 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 	switch (expr->kind) {
 		case EXPR_IF: {
-			// unlike `loop` and `do`, values are returned through the target without `brk`
-			bool has_else = expr->d_if.els != NULL;
-			bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
-			if (has_tmpvar) {
+			if (nhir_if_nv(expr)) {
 				return nhir_if_target(desc, stmts, expr, target);
 			}
 			goto ndefault;
 		}
 		case EXPR_LOOP: {
-			return nhir_loop_target(desc, stmts, expr, target);
+			if (nhir_loop_nv(expr)) {
+				return nhir_loop_target(desc, stmts, expr, target);
+			}
+			goto ndefault;
 		}
 		case EXPR_DO_BLOCK: {
-			return nhir_do_target(desc, stmts, expr, target);
+			if (nhir_do_nv(expr)) {
+				return nhir_do_target(desc, stmts, expr, target);
+			}
+			goto ndefault;
 		}
 		ndefault: default: {
 			DIVERGING(nhir_expr(desc, stmts, expr));

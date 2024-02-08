@@ -340,7 +340,12 @@ if_forwarding_discard(c: bool) = do
 ;     loc: none
 ; }
 
-loop_forwarding_i32(c': i32) = do
-    loop do
-        if (c <= 0) brk c
-        c--
+; loop_forwarding_i32(c': i32) = do
+;     loop do
+;         if (c <= 0) brk c
+;         c--
+
+some(c: bool) = do
+    let a = :t do
+        if (c) brk :t ()
+        ()
