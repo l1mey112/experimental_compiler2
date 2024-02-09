@@ -300,10 +300,10 @@
 ; 
 ;     if (!c) 40 else 2
 
-dostuffs() = do
-    let a = :t do
-        brk :t 50
-    8
+; dostuffs() = do
+;     let a = :t do
+;         brk :t 50
+;     8
 
 ; expr_forwarding(c: bool) = do
 ;     let a = if (c) if (c) 120 else 23 else 59
@@ -317,21 +317,21 @@ dostuffs() = do
 ;         i--
 ;     take
 
-do_forwarding(c: bool) = do
-    let take = :t do
-        if (c) brk :t 20
-        240
-    take
-
-do_forwarding_discard(c: bool) = do
-    let _ = :t do
-        if (c) brk :t 20
-        240
-    50
-
-if_forwarding_discard(c: bool) = do
-    let t = if (c) () else ()
-    50
+; do_forwarding(c: bool) = do
+;     let take = :t do
+;         if (c) brk :t 20
+;         240
+;     take
+; 
+; do_forwarding_discard(c: bool) = do
+;     let _ = :t do
+;         if (c) brk :t 20
+;         240
+;     50
+; 
+; if_forwarding_discard(c: bool) = do
+;     let t = if (c) () else ()
+;     50
 
 ; local = hir.local_new desc hir.local_t{
 ;     name: none
@@ -345,7 +345,11 @@ if_forwarding_discard(c: bool) = do
 ;         if (c <= 0) brk c
 ;         c--
 
-some(c: bool) = do
-    let a = :t do
-        if (c) brk :t ()
-        ()
+; ret_forwarding(c: bool) = do
+;     ret :t do
+;         if (c) brk :t 230
+;         40
+
+zst(a: ()) = a
+
+nop(b: !) = 20
