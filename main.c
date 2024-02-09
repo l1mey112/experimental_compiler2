@@ -54,38 +54,7 @@ int main(int argc, const char *argv[]) {
 
 	bool err = 0;
 
-	/* if (argc == 1) {
-		// TODO: repl shoudln't tear down the parsing context every SINGLE time
-		//       just edit pfile() instead
-		// TODO: how would this work with error recovery?
-		//       discard the stream, but keep the module etc (typedecls need to stay too)
-		rfile_t repl = fs_set_entry_repl();
-		file_t *replp = FILE_PTR(repl);
-
-		rfile_t i = fs_files_queue_len - 1;
-		
-		while (true) {
-			printf("> ");
-			if (!fgets(inp, sizeof(inp), stdin)) {
-				break;
-			}
-
-			if (setjmp(err_diag.unwind)) {
-				continue;
-			}
-
-			replp->data = (u8*)inp;
-			replp->len = strlen(inp);
-
-			compiler_process_file(repl);
-
-			// queue can grow
-			for (; i < fs_files_queue_len; i++) {
-				compiler_process_file(i);
-			}
-		}
-		eprintf("exiting repl\n");
-	} else  */if (argc == 2) {
+	if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
 			err = true;
 			goto ret;
@@ -104,10 +73,12 @@ int main(int argc, const char *argv[]) {
 		}
 	} else {
 		eprintf("usage: %s <file|dir>\n", argv[0]);
-		eprintf("usage: %s\n", argv[0]);
 	}
 ret:;
 	// TODO: register_root() etc for module system
+
+	target_t target = target_host();
+	printf("target: %s\n", target_string(target));
 
 	fs_dump_tree();
 

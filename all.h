@@ -457,3 +457,39 @@ rsym_t table_resolve(rmod_t mod, istr_t short_name);
 rsym_t table_register(sym_t desc);
 void table_dump(sym_t *sym);
 void table_dump_all(void);
+
+typedef struct arch_t arch_t;
+typedef struct platform_t platform_t;
+typedef struct target_t target_t;
+
+#define X_ARCHS \
+	X(ARCH_AMD64, "amd64")
+
+#define X_PLATFORMS \
+	X(PLATFORM_C, "c")
+
+struct arch_t {
+	enum : u8 {
+		#define X(arch, name) arch,
+			X_ARCHS
+		#undef X
+	} kind;
+
+	u8 pointer_size;
+};
+
+struct platform_t {
+	enum : u8 {
+		#define X(platform, name) platform,
+			X_PLATFORMS
+		#undef X
+	} kind;
+};
+
+struct target_t {
+	arch_t arch;
+	platform_t platform;
+};
+
+const char *target_string(target_t target);
+target_t target_host(void);
