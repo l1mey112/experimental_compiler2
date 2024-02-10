@@ -361,11 +361,15 @@
 ; 
 ;     i[g = k++] = 0
 
-ud2(b: !) = 20
+; unit() = ()
+; 
+; takers(a: (), b: i32, c: ()) = b
+; 
+; users() = do
+;     takers unit 40 unit
 
-unit() = ()
+loopin() = loop ()
 
-takers(a: (), b: i32, c: ()) = b
-
-users() = do
-    takers unit 40 unit
+along_us() = do
+    let a = loopin
+    a

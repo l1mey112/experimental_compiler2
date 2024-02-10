@@ -146,8 +146,16 @@ struct hir_expr_t {
 		struct {
 			enum : u8 {
 				UNREACHABLE_ASSERTION, // full debuginfo - generates an assertion, deleted on production
-				UNREACHABLE_HEURISTIC, // no debuginfo - doesn't generate an unreachable at runtime
-				UNREACHABLE_UD2, // minimal debuginfo - unreachable, generates a trap
+				UNREACHABLE_HEURISTIC, // no debuginfo - doesn't generate an assertion at all
+				UNREACHABLE_UD2, // minimal debuginfo - unreachable, generates a trap always
+				//
+				//                         +-------------------------+-------------------------+
+				//                         | debug                   | prod                    |
+				// +-----------------------+-------------------------+-------------------------+
+				// | UNREACHABLE_ASSERTION | assert(0)               | __builtin_unreachable() |
+				// | UNREACHABLE_HEURISTIC | __builtin_unreachable() | __builtin_unreachable() |
+				// | UNREACHABLE_UD2       | __builtin_trap()        | __builtin_trap()        |
+				// +-----------------------+-------------------------+-------------------------+
 			} kind;
 		} d_unreachable;
 	};

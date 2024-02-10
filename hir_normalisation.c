@@ -544,6 +544,10 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		case EXPR_CALL: {
 			DIVERGING(nhir_expr(desc, stmts, expr->d_call.f));
 
+			tinfo_t *finfo = type_get(expr->d_call.f->type);
+			assert(finfo->kind == TYPE_FUNCTION);
+			type_t ret_type = finfo->d_fn.ret;
+
 			hir_expr_t *nargs = NULL;
 
 			// transform args and remove ZSTs
@@ -559,6 +563,23 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			}
 
 			expr->d_call.args = nargs;
+
+			// __builtin_unreachable()
+			if (ret_type == TYPE_BOTTOM) {
+				hir_expr_t unreachable = {
+					.kind = EXPR_UNREACHABLE,
+					.type = TYPE_BOTTOM,
+					.loc = expr->loc,
+					.d_unreachable = {
+						.kind = UNREACHABLE_HEURISTIC,
+					},
+				};
+
+				arrpush(*stmts, *expr);
+				arrpush(*stmts, unreachable);
+
+				return ST_DIVERGING;
+			}
 			break;
 		}
 		case EXPR_ARRAY: {
@@ -869,23 +890,27 @@ static void nproc(proc_t *proc) {
 
 	if (!diverging) {
 		nhir_expr_target(&proc->desc, &stmts, hir, TARGET_RETURN);
-
-		proc->desc.hir = (hir_expr_t){
-			.kind = EXPR_DO_BLOCK,
-			.type = TYPE_BOTTOM,
-			.d_do_block = {
-				.exprs = stmts,
-				.blk_id = BLK_ID_NONE,
-			},
-		};
 	} else {
-		proc->desc.hir = (hir_expr_t){
+		hir_expr_t unreachable = {
 			.kind = EXPR_UNREACHABLE,
 			.type = TYPE_BOTTOM,
 			.loc = hir->loc,
-			.d_unreachable = UNREACHABLE_UD2,
+			.d_unreachable = {
+				.kind = UNREACHABLE_UD2,
+			},
 		};
+
+		arrpush(stmts, unreachable);
 	}
+
+	proc->desc.hir = (hir_expr_t){
+		.kind = EXPR_DO_BLOCK,
+		.type = TYPE_BOTTOM,
+		.d_do_block = {
+			.exprs = stmts,
+			.blk_id = BLK_ID_NONE,
+		},
+	};
 }
 
 static void nglobal(global_t *global) {
