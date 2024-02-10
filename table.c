@@ -130,6 +130,10 @@ static void _dump_type(sym_t *sym) {
 			printf("}\n");
 			break;
 		}
+		case TYPESYMBOL_ALIAS: {
+			printf("type %s = %s\n", sv_from(sym->key), type_dbg_str(typeinfo->d_alias.type));
+			break;
+		}
 		default: {
 			assert_not_reached();
 		}
@@ -156,7 +160,7 @@ static void _print_local_type(ir_desc_t *desc, rlocal_t local) {
 }
 
 static void _print_sym(ir_desc_t *desc, rsym_t sym) {
-	printf("{%s}", sv_from(symbols[sym].key));
+	printf("%s", sv_from(symbols[sym].key));
 }
 
 static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
@@ -321,6 +325,31 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			} else {
 				printf(".%u", expr->d_field.field_idx);
 			}
+			break;
+		}
+		case EXPR_STRUCT: {
+			_print_expr(desc, expr->d_struct.expr);
+			printf("{");
+			for (int i = 0, c = arrlen(expr->d_struct.fields); i < c; i++) {
+				printf("%s: ", sv_from(expr->d_struct.fields[i].field));
+				_print_expr(desc, expr->d_struct.fields[i].expr);
+				if (i != c - 1) {
+					printf(", ");
+				}
+			}
+			printf("}");
+			break;
+		}
+		case EXPR_STRUCT_POSITIONAL: {
+			_print_expr(desc, expr->d_struct_positional.expr);
+			printf("{");
+			for (int i = 0, c = arrlen(expr->d_struct_positional.exprs); i < c; i++) {
+				_print_expr(desc, &expr->d_struct_positional.exprs[i]);
+				if (i != c - 1) {
+					printf(", ");
+				}
+			}
+			printf("}");
 			break;
 		}
 		case EXPR_BREAK: {

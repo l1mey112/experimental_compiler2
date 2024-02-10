@@ -1,6 +1,9 @@
 #include "all.h"
-#include "check.h"
 #include "hir.h"
+
+// TODO: move to arguments (or just ctx struct)
+static rmod_t r_mod;
+static ir_desc_t *r_desc;
 
 static void visit_po(rsym_t **po, rsym_t rsym);
 static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror);
@@ -72,6 +75,50 @@ static void visit_sanity_value_sym(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 	}
 
 	// check `test = &test` without `: T`
+}
+
+// Foo{} -> create type from `Foo`
+static type_t visit_struct_expr(rsym_t **po, hir_expr_t *expr) {
+	type_t type;
+	rsym_t symbol;
+
+	switch (expr->kind) {
+		case EXPR_LOCAL: {
+			// convert local name to symbol
+
+			istr_t name = r_desc->locals[expr->d_local].name;
+			// mod.name
+
+			symbol = table_resolve(r_mod, name);
+			type = type_new((tinfo_t){
+				.kind = TYPE_SYMBOL,
+				.d_symbol = symbol,
+			});
+
+			*expr = (hir_expr_t){
+				.kind = EXPR_SYM,
+				.loc = expr->loc,
+				.d_sym = symbol, // symbol
+				.type = type,
+			};
+			break;
+		}
+		case EXPR_SYM: {
+			symbol = expr->d_sym;
+			type = type_new((tinfo_t){
+				.kind = TYPE_SYMBOL,
+				.d_symbol = symbol,
+			});
+			break;
+		}
+		default: {
+			err_with_pos(expr->loc, "expected type, got value");
+		}
+	}
+
+	visit_sanity_type(po, type, expr->d_cast.type_loc);
+
+	return type;
 }
 
 // &expr -> direct = true
@@ -181,6 +228,20 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 			}
 			break;
 		}
+		case EXPR_STRUCT: {
+			expr->type = visit_struct_expr(po, expr->d_struct.expr);
+			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
+				visit_successors_hir_impl(po, rsym, expr->d_struct.fields[i].expr, true);
+			}
+			break;
+		}
+		case EXPR_STRUCT_POSITIONAL: {
+			expr->type = visit_struct_expr(po, expr->d_struct_positional.expr);
+			for (u32 i = 0, c = arrlenu(expr->d_struct_positional.exprs); i < c; i++) {
+				visit_successors_hir_impl(po, rsym, &expr->d_struct_positional.exprs[i], true);
+			}
+			break;
+		}
 		case EXPR_FIELD: {
 			visit_successors_hir_impl(po, rsym, expr->d_field.expr, direct);
 			break;
@@ -235,6 +296,7 @@ static void visit_successors_type(rsym_t **po, rsym_t rsym, type_t type, loc_t o
 		case TYPE_PTR: break;
 		case TYPE_SLICE: break;
 		case TYPE_FUNCTION: break;
+		case TYPE_SUM: break;
 		default: {
 			assert_not_reached();
 		}
@@ -284,6 +346,12 @@ static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror) {
 			}
 			break;
 		}
+		case TYPE_SUM: {
+			for (u32 i = 0, c = arrlenu(info->d_sum.elems); i < c; i++) {
+				visit_sanity_type(po, info->d_sum.elems[i], onerror);
+			}
+			break;
+		}
 		default: {
 			assert_not_reached();
 		}
@@ -299,6 +367,13 @@ static void visit_successors_typeinfo(rsym_t **po, rsym_t rsym, tsymbol_t *typei
 				visit_successors_type(po, rsym, type, onerror);
 				visit_sanity_type(po, type, onerror);
 			}
+			break;
+		}
+		case TYPESYMBOL_ALIAS: {
+			type_t type = typeinfo->d_alias.type;
+			loc_t onerror = typeinfo->d_alias.type_loc;
+			visit_successors_type(po, rsym, type, onerror);
+			visit_sanity_type(po, type, onerror);
 			break;
 		}
 		default: {
@@ -329,6 +404,9 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 	switch (sym->kind) {
 		case SYMBOL_PROC: {
 			proc_t *proc = &sym->d_proc;
+
+			r_mod = sym->mod;
+			r_desc = &proc->desc;
 			
 			visit_successors_hir(po, rsym, &proc->desc.hir);
 			if (proc->ret_type != TYPE_INFER) {
@@ -339,6 +417,9 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 		}
 		case SYMBOL_GLOBAL: {
 			global_t *global = &sym->d_global;
+
+			r_mod = sym->mod;
+			r_desc = &global->desc;
 			
 			visit_successors_hir(po, rsym, &sym->d_global.desc.hir);
 			visit_desc_locals(po, global->desc.locals);

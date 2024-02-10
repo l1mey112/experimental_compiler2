@@ -306,7 +306,7 @@
 ;     8
 
 ; expr_forwarding(c: bool) = do
-;     let a = if (c) if (c) 120 else 23 else 59
+;     let a = if (c) (if (c) 120 else 23) else 59
 ;     a
 
 ; fact_iter_forwarding(i': i32) = do
@@ -368,8 +368,30 @@
 ; users() = do
 ;     takers unit 40 unit
 
-loopin() = loop ()
+; loopin() = loop ()
+; 
+; along_us() = do
+;     let a = loopin
+;     a
 
-along_us() = do
-    let a = loopin
-    a
+; from_lvalue(i: []i32): () = do
+;     let k': usize = 0
+;     let g'
+; 
+;     i[g = k++] = 0
+
+; struct Foo {
+;     x: i32
+;     y: i32
+; }
+; 
+; make_foo() = Foo{x: 20}
+
+; Foo{x: 20}
+; Foo{20, 50}
+
+; type Alias = i32
+; 
+; ret_alias(): Alias = 20:Alias
+
+type Sum = u32 | i32

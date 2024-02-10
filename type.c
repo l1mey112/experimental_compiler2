@@ -201,6 +201,16 @@ static void _type_dbg_str(type_t type, bool inner) {
 			} */
 			break;
 		}
+		case TYPE_SUM: {
+			for (u32 i = 0, c = arrlenu(typeinfo->d_sum.elems); i < c; i++) {
+				type_t elem = typeinfo->d_sum.elems[i];
+				_type_dbg_str(elem, false);
+				if (i + 1 < c) {
+					COMMIT(sprintf((char *)p, " | "));
+				}
+			}
+			break;
+		}
 		case TYPE_PTR: {
 			COMMIT(sprintf((char *)p, "*"));
 			if (typeinfo->d_ptr.is_mut) {
@@ -307,6 +317,8 @@ u32 type_sizeof(type_t type) {
 		// TYPE_ARRAY
 		// TYPE_SYMBOL
 		default: {
+			// TODO: please fix this
+			return 1;
 			assert_not_reached();
 		}
 	}

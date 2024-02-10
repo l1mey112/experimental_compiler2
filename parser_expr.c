@@ -751,13 +751,86 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 			}
 			case TOK_OCBR: {
 				// TODO: later, allow: &struct{}
+				// TODO: duplicate field init, check for this
 
 				// compile to two different kinds of exprs, later on perform fully qualified kind
 				//   T{1, 2}
 				//   T{a: 1, b: 2, ...xs}
-				
-				// TODO: impl
-				assert_not_reached();
+
+				pnext();
+				// T{1, 2}
+				//   ^
+
+				// designated initialisers
+				if (p.peek.kind == TOK_COLON) {
+					// hir_expr_t init = 
+
+					hir_sf_t *sfs = NULL;
+					
+					while (p.token.kind != TOK_CCBR) {
+						istr_t field = p.token.lit;
+						loc_t field_loc = p.token.loc;
+						pnext();
+						pexpect(TOK_COLON);
+						// x: ...
+						//    ^^^
+						
+						hir_expr_t expr = pexpr(desc, 0);
+
+						hir_sf_t sf = {
+							.field = field,
+							.field_loc = field_loc,
+							.expr = hir_dup(expr),
+						};
+
+						arrpush(sfs, sf);
+						
+						if (p.token.kind == TOK_COMMA) {
+							pnext();
+						} else if (p.token.kind != TOK_CCBR) {
+							punexpected("expected `,` or `}`");
+						}
+					}
+					pnext();
+					
+					expr = (hir_expr_t){
+						.kind = EXPR_STRUCT,
+						.loc = token.loc, // TODO: should be on `expr` not `{`
+						.type = TYPE_INFER,
+						.d_struct = {
+							.expr = hir_dup(expr),
+							.fields = sfs,
+						},
+					};
+				} else {
+					// T{1, 2}
+					//   ^
+
+					hir_expr_t *exprs = NULL;
+
+					while (p.token.kind != TOK_CCBR) {
+						hir_expr_t expr = pexpr(desc, 0);
+						arrpush(exprs, expr);
+
+						if (p.token.kind == TOK_COMMA) {
+							pnext();
+						} else if (p.token.kind != TOK_CCBR) {
+							punexpected("expected `,` or `}`");
+						}
+					}
+
+					expr = (hir_expr_t){
+						.kind = EXPR_STRUCT_POSITIONAL,
+						.loc = token.loc,
+						.type = TYPE_INFER,
+						.d_struct_positional = {
+							.expr = hir_dup(expr),
+							.exprs = exprs,
+						},
+					};
+					pnext();
+				}
+				continue;
 			}
 			case TOK_OSQ: {
 				// x[0..1] and x[0]

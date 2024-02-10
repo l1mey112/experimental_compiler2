@@ -255,6 +255,44 @@ void pstruct(void) {
 	});
 }
 
+// semantically these are "newtype"
+void palias() {
+	pnext();
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
+	// type Foo = i32
+	//      ^^^
+
+	pnext();
+
+	// TODO: can omit `=` for a ZST
+
+	pexpect(TOK_ASSIGN);
+	loc_t type_loc = p.token.loc;
+	type_t type = ptype();
+
+	tsymbol_t typeinfo = {
+		.kind = TYPESYMBOL_ALIAS,
+		.d_alias = {
+			.type = type,
+			.type_loc = type_loc,
+		},
+	};
+
+	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+
+	table_register((sym_t){
+		.key = qualified_name,
+		.mod = p.mod,
+		.short_name = name,
+		.loc = name_loc,
+		.kind = SYMBOL_TYPE,
+		.d_type = typeinfo,
+	});
+}
+
 // functions, constants, globals, types, attributes, etc.
 void ptop_stmt(void) {
 	if (p.token.kind != TOK_IMPORT) {
@@ -288,6 +326,10 @@ void ptop_stmt(void) {
 		// todo make this just a normal decl statement and not restricted to toplevel
 		case TOK_STRUCT: {
 			pstruct();
+			break;
+		}
+		case TOK_TYPE: {
+			palias();
 			break;
 		}
 		default: {

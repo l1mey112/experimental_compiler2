@@ -358,6 +358,7 @@ static hir_expr_t *nhir_lvalue(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *
 		case EXPR_LOCAL: {
 			return expr;
 		}
+		// TODO: everything else
 		default: {
 			break;
 		}
@@ -744,6 +745,15 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			DIVERGING(nhir_expr(desc, stmts, expr->d_cast.expr));
 			break;
 		}
+		case EXPR_STRUCT: {
+			// TODO: check if this is okay
+
+			// lhs is assumed to be symbol, these are okay
+			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
+				DIVERGING(nhir_expr(desc, stmts, expr->d_struct.fields[i].expr));
+			}
+			break;
+		}
 		default: {
 			printf("\n\nkind: %u\n\n", expr->kind);
 			assert_not_reached();
@@ -759,7 +769,7 @@ static u8 nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *exp
 // don't call directly, call `nhir_expr_target` with -1 for best results
 // consume expr. will spill to stmts all effects to statements
 // TODO: impl more, this is just for show
-static void nhir_discard_pure_impl(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static void nhir_discard_pure(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_SYM:
 		case EXPR_INTEGER_LIT:
@@ -769,7 +779,7 @@ static void nhir_discard_pure_impl(ir_desc_t *desc, hir_expr_t **stmts, hir_expr
 			return;
 		}
 		case EXPR_DEREF: {
-			nhir_discard_pure_impl(desc, stmts, expr->d_deref);
+			nhir_discard_pure(desc, stmts, expr->d_deref);
 			break;
 		}
 		default: {
@@ -816,7 +826,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 			switch (target) {
 				case TARGET_DISCARD: {
-					nhir_discard_pure_impl(desc, stmts, expr);
+					nhir_discard_pure(desc, stmts, expr);
 					break;
 				}
 				case TARGET_RETURN: {

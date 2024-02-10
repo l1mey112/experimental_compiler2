@@ -878,6 +878,39 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			}
 			break;
 		}
+		case EXPR_STRUCT: {
+			assert(expr->d_struct.expr->kind == EXPR_SYM);
+			assert(symbols[expr->d_struct.expr->d_sym].kind == SYMBOL_TYPE);
+
+			// assume no duplicate fields, parser has checked that
+
+			// type_get(type_t type)
+			tsymbol_t *struc = &symbols[expr->d_struct.expr->d_sym].d_type;
+			tsymbol_sf_t *fields = struc->d_struct.fields;
+
+			// O(n^2) but n is small
+			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
+				tsymbol_sf_t *field = NULL;
+				hir_sf_t *expr_field = &expr->d_struct.fields[i];
+
+				for (u32 j = 0, c = arrlenu(fields); j < c; j++) {
+					if (fields[j].field == expr_field->field) {
+						field = &fields[j];
+						break;
+					}
+				}
+
+				if (field == NULL) {
+					err_with_pos(expr_field->field_loc, "field `%s` not found in struct `%s`", sv_from(expr->d_struct.fields[i].field), type_dbg_str(expr->type));
+				}
+
+				(void)cexpr(desc, field->type, expr_field->expr, BM_RVALUE);
+				(void)ctype_unify(field->type, expr_field->expr);
+			}
+
+			// expr->type is already set inside the reorder pass
+			break;
+		}
 		case EXPR_LET: {
 			// let non_trivial_pattern = expr
 

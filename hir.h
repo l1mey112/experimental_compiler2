@@ -1,12 +1,20 @@
 #pragma once
 
 typedef struct hir_expr_t hir_expr_t;
+typedef struct hir_sf_t hir_sf_t;
 
 #include "all.h"
 
 // TODO: need to represent `let` decls as actual exprs..
 
 #define BLK_ID_NONE ((u8)-1)
+
+struct hir_sf_t {
+	istr_t field;
+	loc_t field_loc;
+	hir_expr_t *expr;
+	//type_t type;
+};
 
 struct hir_expr_t {
 	enum {
@@ -40,6 +48,8 @@ struct hir_expr_t {
         EXPR_FIELD, // named field and tuple field
 		EXPR_LET,
 		EXPR_UNREACHABLE, // TODO: unreachable
+		EXPR_STRUCT_POSITIONAL,
+		EXPR_STRUCT, // canonical representation
 	} kind;
 	
 	type_t type;
@@ -158,6 +168,14 @@ struct hir_expr_t {
 				// +-----------------------+-------------------------+-------------------------+
 			} kind;
 		} d_unreachable;
+		struct {
+			hir_expr_t *expr;
+			hir_sf_t *fields;
+		} d_struct;
+		struct {
+			hir_expr_t *expr;
+			hir_expr_t *exprs;
+		} d_struct_positional;
 	};
 };
 

@@ -185,6 +185,7 @@ enum ti_kind {
 	TYPE_SLICE,
 	TYPE_ARRAY,
 	TYPE_SYMBOL, // or ALIAS ??
+	TYPE_SUM,
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
 	// TYPE_ENUM,
@@ -198,6 +199,7 @@ typedef u32 rsym_t;
 
 enum tsymbol_kind {
 	TYPESYMBOL_STRUCT,
+	TYPESYMBOL_ALIAS,
 };
 
 typedef enum ti_kind ti_kind;
@@ -226,6 +228,10 @@ struct tsymbol_t {
 		struct {
 			tsymbol_sf_t *fields;
 		} d_struct;
+		struct {
+			type_t type;
+			loc_t type_loc;
+		} d_alias;
 	};
 };
 
@@ -258,6 +264,9 @@ struct tinfo_t {
 			type_t ref;
 			bool is_mut;
 		} d_ptr;
+		struct {
+			type_t *elems;
+		} d_sum;
 	};
 };
 

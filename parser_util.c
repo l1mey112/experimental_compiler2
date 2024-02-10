@@ -250,6 +250,7 @@ enum : u8 {
 u8 ptype_prec(void) {
 	switch (p.token.kind) {
 		case TOK_ARROW: return PREC_CALL;
+		case TOK_PIPE: return PREC_CALL; // TODO: same prec?
 		default: return PREC_UNKNOWN;
 	}
 }
@@ -278,7 +279,6 @@ type_t ptype_expr(u8 prec) {
 
 			bool is_array = false;
 			token_t int_size;
-
 
 			if (p.token.kind == TOK_INTEGER) {
 				int_size = p.token;
@@ -441,7 +441,7 @@ type_t ptype_expr(u8 prec) {
 				tinfo_t *info;
 				if (TI_GUARD(type, TYPE_FUNCTION, info)) {
 					u32 len = arrlenu(info->d_fn.args);
-					type_t *nptr = arraddnptr(args, len);
+					type_t *nptr = arraddnptr(args, len); // TODO: 1+ on cap
 					memcpy(nptr, info->d_fn.args, len * sizeof(type_t));
 					arrpush(nptr, info->d_fn.ret);
 					args = nptr;
@@ -453,6 +453,31 @@ type_t ptype_expr(u8 prec) {
 					.kind = TYPE_FUNCTION,
 					.d_fn.args = args,
 					.d_fn.ret = ret,
+				});
+				continue;
+			}
+			case TOK_PIPE: {
+				// TODO: same todo as above
+
+				pnext();
+				type_t *elems = NULL;
+				type_t elem = ptype_expr(PREC_CALL);
+				
+				tinfo_t *info;
+				if (TI_GUARD(type, TYPE_SUM, info)) {
+					u32 len = arrlenu(info->d_sum.elems);
+					type_t *nptr = arraddnptr(elems, len);
+					memcpy(nptr, info->d_sum.elems, len * sizeof(type_t));
+					elems = nptr;
+				} else {
+					arrpush(elems, type);
+				}
+
+				arrpush(elems, elem);
+
+				type = type_new((tinfo_t){
+					.kind = TYPE_SUM,
+					.d_sum.elems = elems,
 				});
 				continue;
 			}
