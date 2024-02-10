@@ -350,6 +350,17 @@
 ;         if (c) brk :t 230
 ;         40
 
-zst(a: ()) = a
+; zst(a: ()) = a
+; 
+; nop(b: !) = 20
 
-nop(b: !) = 20
+; access(k: usize, xs: []i32): i32 = xs[k]
+
+; from(i': i32) = do
+;     i += 3 + 50
+
+from_lvalue(i: []i32): () = do
+    let k': usize = 0
+
+    i[k++] = 0
+    i[k++] = 0

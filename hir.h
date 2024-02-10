@@ -71,10 +71,6 @@ struct hir_expr_t {
 			hir_expr_t *hi; // possible NULLs
 		} d_slice;
 		struct {
-			hir_expr_t *lhs;
-			hir_expr_t *rhs;
-		} d_assign;
-		struct {
 			hir_expr_t *ref;
 			bool is_mut;
 		} d_addr_of;
@@ -101,6 +97,11 @@ struct hir_expr_t {
 			hir_expr_t *expr;
 			u32 blk_id;
 		} d_loop;
+		struct {
+			hir_expr_t *lhs;
+			hir_expr_t *rhs;
+			tok_t kind; // TODO: create enum kind
+		} d_assign;
 		struct {
 			hir_expr_t *lhs;
 			hir_expr_t *rhs;

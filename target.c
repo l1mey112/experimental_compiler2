@@ -1,5 +1,7 @@
 #include "all.h"
 
+target_t target;
+
 const char *target_string(target_t target) {
 	const char *arch_string;
 	const char *platform_string;

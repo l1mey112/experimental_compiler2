@@ -124,6 +124,40 @@ void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	expr->type = blk->brk_type;
 }
 
+// assumes !bool_op and !cmp_op
+// assumes checked RHS
+void cinfix_rhs_arith_op(ir_desc_t *desc, loc_t onerror, type_t lhs_t, tok_t kind, hir_expr_t *rhs) {
+
+	bool is_ptr_arith = false;
+
+	ti_kind lhs_kind = type_kind(lhs_t);	
+	type_t rhs_t = rhs->type;
+
+	// TODO: will need to add in *opaque pointers, no arith on these
+	// TODO: introduce proper bounded ptr types for such too
+	// TODO: better errors and proper semantics, look at real compilers
+
+	if (lhs_kind == TYPE_PTR && (kind == TOK_ADD || kind == TOK_SUB)) {
+		is_ptr_arith = true;
+	} else if (lhs_kind == TYPE_PTR) {
+		err_with_pos(onerror, "invalid operation `%s` on pointer type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+	}
+
+	assert(!is_ptr_arith && "TODO: ptr arith proper types");
+
+	if (lhs_t != TYPE_BOTTOM) {
+		if (!is_ptr_arith && !type_is_number(lhs_t)) {
+			err_with_pos(onerror, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
+		}
+	}
+
+	if (rhs_t != TYPE_BOTTOM) {
+		if (!type_is_number(rhs_t)) {
+			err_with_pos(onerror, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
+		}
+	}
+}
+
 void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	hir_expr_t *lhs = expr->d_infix.lhs;
 	hir_expr_t *rhs = expr->d_infix.rhs;
@@ -131,7 +165,40 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 
 	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
 	bool is_cmp_op = kind == TOK_EQ || kind == TOK_NE || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE;
-	bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
+
+	type_t lhs_t = cexpr(desc, upvalue, lhs, BM_RVALUE);
+	type_t rhs_t = cexpr(desc, lhs_t, rhs, BM_RVALUE);
+
+	if (is_bool_op) {
+		// TODO: ! && _ -> !
+		// TODO: ! || _ -> !
+
+		(void)ctype_unify(TYPE_BOOL, lhs);
+		(void)ctype_unify(TYPE_BOOL, rhs);
+
+		expr->type = TYPE_BOOL;
+	} else {
+		(void)ctype_unify(lhs_t, rhs);
+
+		if (is_cmp_op) {
+			(void)ctype_unify(TYPE_BOOL, rhs);
+
+			expr->type = TYPE_BOOL;
+		} else {
+			cinfix_rhs_arith_op(desc, expr->loc, lhs_t, kind, rhs);
+		}
+	}
+
+	expr->type = lhs_t;
+}
+
+/* void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+	hir_expr_t *lhs = expr->d_infix.lhs;
+	hir_expr_t *rhs = expr->d_infix.rhs;
+	tok_t kind = expr->d_infix.kind;
+
+	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
+	bool is_cmp_op = kind == TOK_EQ || kind == TOK_NE || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE;
 	bool is_ptr_arith = false;
 
 	type_t lhs_t = cexpr(desc, upvalue, lhs, BM_RVALUE);
@@ -172,7 +239,7 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			expr->type = type;
 		}
 	}
-}
+} */
 
 void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 	// f x
@@ -222,6 +289,11 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 			}
 			break;
 		}
+		case EXPR_INDEX: {
+			// TODO: mutability of slices and so on...
+			// TODO: really need to standardise pointer types
+			break;
+		}
 		// TODO: field accesses since we already support them
 		default: {
 			err_with_pos(expr->loc, "this expression is not an lvalue");
@@ -230,12 +302,22 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 }
 
 void cassign(ir_desc_t *desc, hir_expr_t *expr) {
+	tok_t kind = expr->d_assign.kind;
+	bool is_infix_op = kind != TOK_ASSIGN;
+
 	hir_expr_t *lhs = expr->d_infix.lhs;
 	hir_expr_t *rhs = expr->d_infix.rhs;
+
+	// share infix and assignment code by desugaring
 
 	type_t lhs_type = cexpr(desc, TYPE_INFER, lhs, BM_LVALUE);
 	clvalue(desc, lhs, true);
 	(void)cexpr(desc, lhs_type, rhs, BM_RVALUE);
+
+	// a += 20 -> a = a + 20
+	if (is_infix_op) {
+		cinfix_rhs_arith_op(desc, expr->loc, lhs_type, tok_assign_op_to_op[kind], rhs);
+	}
 
 	// lhs = rhs
 	ctype_unify(lhs_type, rhs);
@@ -782,9 +864,26 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			// TODO: let p = !
 			//       <- !
 
-			type_t type = cexpr(desc, TYPE_INFER, expr->d_let.expr, BM_RVALUE);
+			// treat `let v = ...` as `v = ...`
 
-			cpattern(desc, &expr->d_let.pattern, type);
+			// duplcation of cpattern for locals, but `ctype_unify()`
+			if (expr->d_let.pattern.kind == PATTERN_LOCAL) {
+				local_t *local = &desc->locals[expr->d_let.pattern.d_local];
+
+				// forward type
+				type_t type = cexpr(desc, local->type, expr->d_let.expr, BM_RVALUE);
+				
+				if (local->type == TYPE_INFER) {
+					local->type = TYPE_INFER;
+				} else {
+					ctype_unify(local->type, expr->d_let.expr);
+				}
+			} else {
+				type_t type = cexpr(desc, TYPE_INFER, expr->d_let.expr, BM_RVALUE);
+
+				cpattern(desc, &expr->d_let.pattern, type);
+			}
+
 			expr->type = TYPE_UNIT;
 			break;
 		}

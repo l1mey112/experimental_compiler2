@@ -317,6 +317,15 @@ type_t type_new_inc_mul(type_t type, bool is_mut);
 type_t type_new(tinfo_t typeinfo);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);
+
+static const tok_t tok_assign_op_to_op[] = {
+	[TOK_ASSIGN_ADD] = TOK_ADD,
+	[TOK_ASSIGN_SUB] = TOK_SUB,
+	[TOK_ASSIGN_MUL] = TOK_MUL,
+	[TOK_ASSIGN_DIV] = TOK_DIV,
+	[TOK_ASSIGN_MOD] = TOK_MOD,
+};
+
 const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);
@@ -490,6 +499,8 @@ struct target_t {
 	arch_t arch;
 	platform_t platform;
 };
+
+extern target_t target;
 
 const char *target_string(target_t target);
 target_t target_host(void);

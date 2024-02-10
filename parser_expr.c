@@ -901,52 +901,19 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 
 					hir_expr_t rhs = pexpr(desc, ptok_prec(kind));
 
-					bool is_assign_op = kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
-
-					// sparse array
-					static const tok_t assign_op_to_op[] = {
-						[TOK_ASSIGN_ADD] = TOK_ADD,
-						[TOK_ASSIGN_SUB] = TOK_SUB,
-						[TOK_ASSIGN_MUL] = TOK_MUL,
-						[TOK_ASSIGN_DIV] = TOK_DIV,
-						[TOK_ASSIGN_MOD] = TOK_MOD,
-					};
-
 					hir_expr_t *p_expr = hir_dup(expr);
 					hir_expr_t *p_rhs = hir_dup(rhs);
+			
+					bool is_assign_op = kind == TOK_ASSIGN || kind == TOK_ASSIGN_ADD || kind == TOK_ASSIGN_SUB || kind == TOK_ASSIGN_MUL || kind == TOK_ASSIGN_DIV || kind == TOK_ASSIGN_MOD;
 
-					if (kind == TOK_ASSIGN) {
+					if (is_assign_op) {
 						expr = (hir_expr_t){
 							.kind = EXPR_ASSIGN,
 							.loc = token.loc,
 							.type = TYPE_INFER,
 							.d_assign.lhs = p_expr,
 							.d_assign.rhs = p_rhs,
-						};
-					} else if (is_assign_op) {
-						// desugar
-						//
-						// a += b -> a = a + b
-						//
-						tok_t desugared_infix = assign_op_to_op[kind];
-
-						// seems wildly unsafe to not do a deep copy of `p_expr` here
-						// but most likely will be okay, since the lhs is used in a very similar context
-
-						hir_expr_t op_expr = {
-							.kind = EXPR_INFIX,
-							.loc = token.loc,
-							.type = TYPE_INFER,
-							.d_infix.lhs = p_expr,
-							.d_infix.rhs = p_rhs,
-							.d_infix.kind = desugared_infix,
-						};
-						expr = (hir_expr_t){
-							.kind = EXPR_ASSIGN,
-							.loc = token.loc,
-							.type = TYPE_INFER,
-							.d_assign.lhs = p_expr,
-							.d_assign.rhs = hir_dup(op_expr),
+							.d_assign.kind = kind,
 						};
 					} else {
 						expr = (hir_expr_t){

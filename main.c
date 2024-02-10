@@ -54,6 +54,8 @@ int main(int argc, const char *argv[]) {
 
 	bool err = 0;
 
+	target = target_host();
+
 	if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
 			err = true;
@@ -77,7 +79,6 @@ int main(int argc, const char *argv[]) {
 ret:;
 	// TODO: register_root() etc for module system
 
-	target_t target = target_host();
 	printf("target: %s\n", target_string(target));
 
 	fs_dump_tree();

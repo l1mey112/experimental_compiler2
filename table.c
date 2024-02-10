@@ -250,7 +250,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 		}
 		case EXPR_ASSIGN: {
 			_print_expr(desc, expr->d_assign.lhs);
-			printf(" = ");
+			printf(" %s ", tok_op_str(expr->d_assign.kind));
 			_print_expr(desc, expr->d_assign.rhs);
 			break;
 		}

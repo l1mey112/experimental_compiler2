@@ -317,6 +317,10 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_INFIX: {
+			// infix
+			DIVERGING(nhir_expr(desc, stmts, expr->d_infix.lhs));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_infix.rhs));
+
 			// perform reassociation, but not constprop/eval.
 			// that is left to further passes where compile errors are raised,
 			// this is just to arrange expressions to catch overflow errors early.
@@ -326,11 +330,6 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			// so ignore them. IEEE floats don't hold properties in the same way
 			// as integers.
 			//
-
-			// transform lhs and rhs
-			DIVERGING(nhir_expr(desc, stmts, expr->d_infix.lhs));
-			DIVERGING(nhir_expr(desc, stmts, expr->d_infix.rhs));
-
 			// RULES: `t` are terms, `c` are constants, constants are also terms
 			//
 			// 1. t + c  = c + t
@@ -340,7 +339,9 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			// 5. t1 * (t2 * t3) = (t1 * t2) * t3
 			//
 
-			hir_expr_t *lhs = expr->d_infix.lhs;
+			// TODO: don't perform reassoc yet, we don't currently check constant overflow
+
+			/* hir_expr_t *lhs = expr->d_infix.lhs;
 			hir_expr_t *rhs = expr->d_infix.rhs;
 
 			// rule 1, 2, 3
@@ -401,7 +402,7 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			}
 
 			expr->d_infix.lhs = lhs;
-			expr->d_infix.rhs = rhs;
+			expr->d_infix.rhs = rhs; */
 			break;
 		}
 		case EXPR_RETURN: {
@@ -409,12 +410,42 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			return ST_DIVERGING;
 		}
 		case EXPR_ASSIGN: {
-			// TODO: SIDE EFFECTING LVALUES!
-			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.lhs));
-			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.rhs));
+			// += to +, etc. watch out for side effecting lvalues
+
+			tok_t kind = expr->d_assign.kind;
+
+			bool is_infix_op = kind != TOK_ASSIGN;
+
+			hir_expr_t *lhs = expr->d_assign.lhs;
+			hir_expr_t *rhs = expr->d_assign.rhs;
+
+			DIVERGING(nhir_expr(desc, stmts, lhs));
+
+			if (is_infix_op) {
+				kind = tok_assign_op_to_op[kind];
+
+				// x += 1 -> x = x + 1
+
+				*rhs = (hir_expr_t){
+					.kind = EXPR_INFIX,
+					.type = expr->type,
+					.loc = expr->loc,
+					.d_infix = {
+						.kind = kind,
+						.lhs = hir_dup(*lhs), // TODO: possible side effect duplication
+						.rhs = hir_dup(*rhs),
+					},
+				};
+
+				expr->d_assign.kind = TOK_ASSIGN;
+			}
+
+			DIVERGING(nhir_expr(desc, stmts, rhs));
 			arrpush(*stmts, *expr);
+
+			// TODO: possible side effect duplication
 			// <- lhs
-			*expr = *expr->d_assign.lhs;
+			*expr = *lhs;
 			break;
 		}
 		case EXPR_IF: {
@@ -426,6 +457,25 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++) {
 				DIVERGING(nhir_expr(desc, stmts, &expr->d_call.args[i]));
 			}
+			break;
+		}
+		case EXPR_ARRAY: {
+			// transform elements
+			for (u32 i = 0, c = arrlenu(expr->d_array); i < c; i++) {
+				DIVERGING(nhir_expr(desc, stmts, &expr->d_array[i]));
+			}
+			break;
+		}
+		case EXPR_TUPLE: {
+			// transform elements
+			for (u32 i = 0, c = arrlenu(expr->d_tuple); i < c; i++) {
+				DIVERGING(nhir_expr(desc, stmts, &expr->d_tuple[i]));
+			}
+			break;
+		}
+		case EXPR_INDEX: {
+			DIVERGING(nhir_expr(desc, stmts, expr->d_index.expr));
+			DIVERGING(nhir_expr(desc, stmts, expr->d_index.index));
 			break;
 		}
 		case EXPR_DO_BLOCK: {
@@ -511,7 +561,6 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		/* 
-		case EXPR_ARRAY:
 		case EXPR_TUPLE:
 		case EXPR_LOOP:
 		case EXPR_DEREF:
@@ -618,6 +667,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 								.type = expr->type,
 							}),
 							.rhs = expr,
+							.kind = TOK_ASSIGN,
 						},
 					};
 
