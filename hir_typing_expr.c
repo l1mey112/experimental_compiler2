@@ -181,15 +181,12 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		(void)ctype_unify(lhs_t, rhs);
 
 		if (is_cmp_op) {
-			(void)ctype_unify(TYPE_BOOL, rhs);
-
 			expr->type = TYPE_BOOL;
 		} else {
 			cinfix_rhs_arith_op(desc, expr->loc, lhs_t, kind, rhs);
+			expr->type = lhs_t;
 		}
 	}
-
-	expr->type = lhs_t;
 }
 
 /* void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
@@ -895,9 +892,9 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 
 				// forward type
 				type_t type = cexpr(desc, local->type, expr->d_let.expr, BM_RVALUE);
-				
+
 				if (local->type == TYPE_INFER) {
-					local->type = TYPE_INFER;
+					local->type = type;
 				} else {
 					ctype_unify(local->type, expr->d_let.expr);
 				}

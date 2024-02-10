@@ -64,6 +64,8 @@ void pfn2(void) {
 
 	type_t *arg_types = NULL;
 
+	rlocal_t args = 0;
+
 	ppush_scope();
 	while (p.token.kind != TOK_CPAR) {
 		type_t type = pfn_arg(&proc.desc);
@@ -75,7 +77,9 @@ void pfn2(void) {
 			punexpected("expected `,` or `)`");
 		}
 
-		proc.arguments++;
+		// push rlocal_t
+		arrpush(proc.arguments, (rlocal_t)args);
+		args++;
 	}
 	pnext();
 

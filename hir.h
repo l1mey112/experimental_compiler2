@@ -39,6 +39,7 @@ struct hir_expr_t {
 		//EXPR_SIZEOF_TYPE, // is usize
         EXPR_FIELD, // named field and tuple field
 		EXPR_LET,
+		EXPR_UNREACHABLE, // TODO: unreachable
 	} kind;
 	
 	type_t type;
@@ -142,6 +143,13 @@ struct hir_expr_t {
 			hir_expr_t *then;
 			hir_expr_t *els; // can be none
 		} d_if;
+		struct {
+			enum : u8 {
+				UNREACHABLE_ASSERTION, // full debuginfo - generates an assertion, deleted on production
+				UNREACHABLE_HEURISTIC, // no debuginfo - doesn't generate an unreachable at runtime
+				UNREACHABLE_UD2, // minimal debuginfo - unreachable, generates a trap
+			} kind;
+		} d_unreachable;
 	};
 };
 

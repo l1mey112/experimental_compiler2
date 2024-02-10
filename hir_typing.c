@@ -23,8 +23,8 @@ void cproc(proc_t *proc) {
 	// have `type` set and must be inferred
 
 	if (!ret_annotated) {
-		for (u32 i = 0; i < proc->arguments; i++) {
-			local_t *arg = &proc->desc.locals[i];
+		for (u32 i = 0, c = arrlenu(proc->arguments); i < c; i++) {
+			local_t *arg = &proc->desc.locals[proc->arguments[i]];
 			arrpush(args_types, arg->type);
 		}
 	}

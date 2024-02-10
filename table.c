@@ -450,6 +450,23 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			_print_expr(desc, expr->d_let.expr);
 			break;
 		}
+		case EXPR_UNREACHABLE: {
+			switch (expr->d_unreachable.kind) {
+				case UNREACHABLE_ASSERTION: {
+					printf("unreachable");
+					break;
+				}
+				case UNREACHABLE_HEURISTIC: {
+					printf("unreachable(heuristic)");
+					break;
+				}
+				case UNREACHABLE_UD2: {
+					printf("unreachable(ud2)");
+					break;
+				}
+			}
+			break;
+		}
 		default: {
 			printf("\nunknown expr kind %d\n", expr->kind);
 			print_hint_with_pos(expr->loc, "LOC HERE");
@@ -465,14 +482,15 @@ static void _dump_function(sym_t *sym) {
 	printf("%s(", sv_from(sym->key));
 
 	// print args
-	for (u32 i = 0, c = proc->arguments; i < c; i++) {
-		local_t *localp = &desc->locals[i];
+	for (u32 i = 0, c = arrlenu(proc->arguments); i < c; i++) {
+		rlocal_t local = proc->arguments[i];
+		local_t *localp = &desc->locals[local];
 
 		if (localp->kind == LOCAL_MUT) {
 			printf("'");
 		}
-		_print_local(desc, i);
-		_print_local_type(desc, i);
+		_print_local(desc, local);
+		_print_local_type(desc, local);
 
 		if (i + 1 < c) {
 			printf(", ");

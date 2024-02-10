@@ -341,6 +341,9 @@ bool type_is_float(type_t type);
 bool type_is_signed(type_t type);
 bool type_is_unsigned(type_t type);
 
+#define TYPE_SIZE_DIVERGING ((u32)-1)
+u32 type_sizeof(type_t type);
+
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
 
@@ -395,7 +398,7 @@ struct proc_t {
 	type_t type; // type available/constructed after checking
 	type_t ret_type; // annotation
 	loc_t ret_type_loc; // used in sym analysis
-	u16 arguments;   // first [0..arguments] are locals with types inserted
+	rlocal_t *arguments; // locals with types inserted
 };
 
 struct global_t {
@@ -410,6 +413,7 @@ struct local_t {
 	enum : u8 {
 		LOCAL_MUT, // assigned multiple times
 		LOCAL_IMM, // assigned once in all flows of control
+		_LOCAL_ZST_DELETED,
 	} kind;
 
 	// TODO: optimised out or removed flag so debuggers
@@ -484,7 +488,7 @@ struct arch_t {
 		#undef X
 	} kind;
 
-	u8 pointer_size;
+	u8 ptr_size;
 };
 
 struct platform_t {

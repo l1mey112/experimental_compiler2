@@ -29,7 +29,7 @@ target_t target_host(void) {
 	target_t target = {
 		.arch = {
 			.kind = ARCH_AMD64,
-			.pointer_size = 8,
+			.ptr_size = 8,
 		},
 		.platform = {
 			.kind = PLATFORM_C,

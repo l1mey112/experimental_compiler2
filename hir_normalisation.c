@@ -21,6 +21,16 @@ struct nblk_t {
 
 nblk_t blks[128];
 
+// a ZST is a type with a single value.
+// this doesn't fit in our imperative vision after normalisation.
+// after normalisation, all mentions of ZSTs are removed.
+// no shuffling, no construction, no nothing
+static bool is_trivial_zst(type_t type) {
+	u32 s = type_sizeof(type);
+
+	return s == 0 || s == TYPE_SIZE_DIVERGING;
+}
+
 #define DIVERGING(expr) if ((expr) == ST_DIVERGING) { return ST_DIVERGING; }
 
 static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
@@ -533,10 +543,22 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 		}
 		case EXPR_CALL: {
 			DIVERGING(nhir_expr(desc, stmts, expr->d_call.f));
-			// transform args
+
+			hir_expr_t *nargs = NULL;
+
+			// transform args and remove ZSTs
 			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++) {
-				DIVERGING(nhir_expr(desc, stmts, &expr->d_call.args[i]));
+				hir_expr_t *arg = &expr->d_call.args[i];
+				DIVERGING(nhir_expr(desc, stmts, arg));
+
+				if (is_trivial_zst(arg->type)) {
+					nhir_discard_expr(desc, stmts, arg);
+				} else {
+					arrpush(nargs, *arg);
+				}
 			}
+
+			expr->d_call.args = nargs;
 			break;
 		}
 		case EXPR_ARRAY: {
@@ -741,6 +763,14 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 	// forwarding invalid targets also avoids creating a
 	// new temporary that would go unused anyway
 
+	rlocal_t otarget = target;
+	bool zst = is_trivial_zst(expr->type);
+
+	// discard all
+	if (zst) {
+		target = TARGET_DISCARD;
+	}
+
 	switch (expr->kind) {
 		case EXPR_IF: {
 			if (nhir_if_nv(expr)) {
@@ -791,6 +821,21 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 		}
 	}
 
+	if (zst && otarget == TARGET_RETURN) {
+		hir_expr_t ret = {
+			.kind = EXPR_RETURN,
+			.type = TYPE_BOTTOM,
+			.loc = expr->loc,
+			.d_return = {
+				.expr = hir_dup(UNIT(expr->loc)),
+				.blk_id = BLK_ID_NONE,
+			},
+		};
+
+		arrpush(*stmts, ret);
+		return ST_DIVERGING;
+	}
+
 	return ST_NONE;
 }
 
@@ -798,16 +843,49 @@ static void nproc(proc_t *proc) {
 	hir_expr_t *stmts = NULL;
 	hir_expr_t *hir = hir_dup(proc->desc.hir);
 
-	nhir_expr_target(&proc->desc, &stmts, hir, TARGET_RETURN);
+	bool diverging = false;
 
-	proc->desc.hir = (hir_expr_t){
-		.kind = EXPR_DO_BLOCK,
-		.type = TYPE_BOTTOM,
-		.d_do_block = {
-			.exprs = stmts,
-			.blk_id = BLK_ID_NONE,
-		},
-	};
+	rlocal_t *narguments = NULL;
+
+	for (u32 i = 0, c = arrlenu(proc->arguments); i < c; i++) {
+		local_t *local = &proc->desc.locals[proc->arguments[i]];
+
+		u32 s = type_sizeof(local->type);
+
+		if (s == TYPE_SIZE_DIVERGING) {
+			diverging = true;
+		}
+
+		if (s == TYPE_SIZE_DIVERGING || s == 0) {
+			local->kind = _LOCAL_ZST_DELETED;
+		} else {
+			arrpush(narguments, proc->arguments[i]);
+		}
+	}
+
+	proc->arguments = narguments;
+
+	// none(v: !) -> unreachable
+
+	if (!diverging) {
+		nhir_expr_target(&proc->desc, &stmts, hir, TARGET_RETURN);
+
+		proc->desc.hir = (hir_expr_t){
+			.kind = EXPR_DO_BLOCK,
+			.type = TYPE_BOTTOM,
+			.d_do_block = {
+				.exprs = stmts,
+				.blk_id = BLK_ID_NONE,
+			},
+		};
+	} else {
+		proc->desc.hir = (hir_expr_t){
+			.kind = EXPR_UNREACHABLE,
+			.type = TYPE_BOTTOM,
+			.loc = hir->loc,
+			.d_unreachable = UNREACHABLE_UD2,
+		};
+	}
 }
 
 static void nglobal(global_t *global) {

@@ -273,3 +273,41 @@ const char *type_dbg_str(type_t type) {
 
 	return (const char *)oldp;
 }
+
+// relies on target arch
+u32 type_sizeof(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	// TODO: store type size on typeinfo
+	// TODO: search for ! inside types
+	
+	switch (kind) {
+		case TYPE_I8: return 1;
+		case TYPE_I16: return 2;
+		case TYPE_I32: return 4;
+		case TYPE_I64: return 8;
+		case TYPE_ISIZE: return target.arch.ptr_size;
+		case TYPE_U8: return 1;
+		case TYPE_U16: return 2;
+		case TYPE_U32: return 4;
+		case TYPE_U64: return 8;
+		case TYPE_USIZE: return target.arch.ptr_size;
+		case TYPE_F32: return 4;
+		case TYPE_F64: return 8;
+		case TYPE_BOOL: return 1;
+		//
+		case TYPE_UNIT: return 0;
+		case TYPE_BOTTOM: return TYPE_SIZE_DIVERGING;
+		// TYPE_TUPLE
+		// TYPE_FUNCTION
+		// TYPE_CLOSURE
+		// TYPE_CLOSURE_UNION
+		// TYPE_PTR
+		// TYPE_SLICE
+		// TYPE_ARRAY
+		// TYPE_SYMBOL
+		default: {
+			assert_not_reached();
+		}
+	}
+}
