@@ -361,6 +361,6 @@
 
 from_lvalue(i: []i32): () = do
     let k': usize = 0
+    let g'                ; `let g; g = ...` doesn't work as it's a current limitation
 
-    i[k++] = 0
-    i[k++] = 0
+    i[g = k++] = 0

@@ -304,6 +304,86 @@ static u8 nhir_if(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	return nhir_if_target(desc, stmts, expr, local);
 }
 
+static void nhir_assign(hir_expr_t **stmts, loc_t loc, hir_expr_t *lhs, hir_expr_t *rhs) {
+	hir_expr_t assign = {
+		.kind = EXPR_ASSIGN,
+		.type = TYPE_UNIT,
+		.loc = loc,
+		.d_assign = {
+			.lhs = lhs,
+			.rhs = rhs,
+			.kind = TOK_ASSIGN,
+		},
+	};
+
+	arrpush(*stmts, assign);
+}
+
+static hir_expr_t *nhir_local_ptr(ir_desc_t *desc, loc_t loc, rlocal_t local) {
+	hir_expr_t *lhs = hir_dup((hir_expr_t){
+		.kind = EXPR_LOCAL,
+		.d_local = local,
+		.type = desc->locals[local].type,
+		.loc = loc,
+	});
+
+	return lhs;
+}
+
+static void nhir_assign_local(ir_desc_t *desc, hir_expr_t **stmts, loc_t loc, rlocal_t local, hir_expr_t *rhs) {
+	hir_expr_t *lhs = nhir_local_ptr(desc, loc, local);
+
+	nhir_assign(stmts, loc, lhs, rhs);
+}
+
+// will unwrap possible side effecting lvalue to a pure expression, running the side effects once
+// call if you're using an lvalue multiple times
+// converting: p[k++] goes into
+//
+// _0 = &p[k++]
+// <- *_0
+static hir_expr_t *nhir_lvalue(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+	// catch non side effecting expressions
+	switch (expr->kind) {
+		case EXPR_LOCAL: {
+			return expr;
+		}
+		default: {
+			break;
+		}
+	}
+
+	type_t ptr_type = type_new_inc_mul(expr->type, false);
+
+	rlocal_t _0 = ir_local_new(desc, (local_t){
+		.name = ISTR_NONE,
+		.kind = LOCAL_IMM,
+		.type = ptr_type,
+		.loc = expr->loc,
+	});
+
+	hir_expr_t *ref = hir_dup((hir_expr_t){
+		.kind = EXPR_ADDR_OF,
+		.type = ptr_type,
+		.loc = expr->loc,
+		.d_addr_of = {
+			.ref = hir_dup(*expr),
+			.is_mut = true,
+		},
+	});
+
+	// _0 = &expr
+	nhir_assign_local(desc, stmts, expr->loc, _0, ref);
+
+	// <- *_0
+	return hir_dup((hir_expr_t){
+		.kind = EXPR_DEREF,
+		.type = expr->type,
+		.loc = expr->loc,
+		.d_deref = nhir_local_ptr(desc, expr->loc, _0),
+	});
+}
+
 static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_SYM:
@@ -416,10 +496,11 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 
 			bool is_infix_op = kind != TOK_ASSIGN;
 
+			DIVERGING(nhir_expr(desc, stmts, expr->d_assign.lhs));
+			expr->d_assign.lhs = nhir_lvalue(desc, stmts, expr->d_assign.lhs);
+
 			hir_expr_t *lhs = expr->d_assign.lhs;
 			hir_expr_t *rhs = expr->d_assign.rhs;
-
-			DIVERGING(nhir_expr(desc, stmts, lhs));
 
 			if (is_infix_op) {
 				kind = tok_assign_op_to_op[kind];
@@ -432,7 +513,7 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 					.loc = expr->loc,
 					.d_infix = {
 						.kind = kind,
-						.lhs = hir_dup(*lhs), // TODO: possible side effect duplication
+						.lhs = hir_dup(*lhs),
 						.rhs = hir_dup(*rhs),
 					},
 				};
@@ -443,7 +524,6 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			DIVERGING(nhir_expr(desc, stmts, rhs));
 			arrpush(*stmts, *expr);
 
-			// TODO: possible side effect duplication
 			// <- lhs
 			*expr = *lhs;
 			break;
@@ -552,7 +632,50 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			// TODO: cannot v++ -> v = v + 1 as v can be ANY lvalue
 			//       preferable we perform this transformation
 			// TODO: spill lvalue to lvalue if possible
-			DIVERGING(nhir_expr(desc, stmts, expr->d_postfix.expr));
+
+			// convert: v++
+			// _0 = v + 1
+			// v = _0
+			// <- _0
+
+			hir_expr_t *v = nhir_lvalue(desc, stmts, expr->d_postfix.expr);
+
+			rlocal_t _0 = ir_local_new(desc, (local_t){
+				.name = ISTR_NONE,
+				.kind = LOCAL_IMM,
+				.type = expr->type,
+				.loc = expr->loc,
+			});
+
+			hir_expr_t v_op_1 = {
+				.kind = EXPR_INFIX,
+				.type = expr->type,
+				.loc = expr->loc,
+				.d_infix = {
+					.kind = expr->d_postfix.op == EXPR_K_INC ? TOK_ADD : TOK_SUB,
+					.lhs = v /* hir_dup(*v) */,
+					.rhs = hir_dup((hir_expr_t){
+						.kind = EXPR_INTEGER_LIT,
+						.type = expr->type,
+						.loc = expr->loc,
+						.d_integer_lit = sv_move("1"),
+					}),
+				},
+			};
+
+			// _0 = v + 1
+			nhir_assign_local(desc, stmts, expr->loc, _0, hir_dup(v_op_1));
+
+			// v = _0
+			nhir_assign(stmts, expr->loc, v, nhir_local_ptr(desc, expr->loc, _0));
+
+			// <- _0
+			*expr = (hir_expr_t){
+				.kind = EXPR_LOCAL,
+				.d_local = _0,
+				.type = expr->type,
+				.loc = expr->loc,
+			};
 			break;
 		}
 		case EXPR_PREFIX: {
@@ -593,7 +716,7 @@ static u8 nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *exp
 // don't call directly, call `nhir_expr_target` with -1 for best results
 // consume expr. will spill to stmts all effects to statements
 // TODO: impl more, this is just for show
-static void nhir_discard_expr_impl(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
+static void nhir_discard_pure_impl(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_SYM:
 		case EXPR_INTEGER_LIT:
@@ -601,6 +724,10 @@ static void nhir_discard_expr_impl(ir_desc_t *desc, hir_expr_t **stmts, hir_expr
 		case EXPR_TUPLE_UNIT:
 		case EXPR_LOCAL: {
 			return;
+		}
+		case EXPR_DEREF: {
+			nhir_discard_pure_impl(desc, stmts, expr->d_deref);
+			break;
 		}
 		default: {
 			arrpush(*stmts, *expr); // TODO: we don't know for sure, just keep it.
@@ -638,7 +765,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 			switch (target) {
 				case TARGET_DISCARD: {
-					nhir_discard_expr_impl(desc, stmts, expr);
+					nhir_discard_pure_impl(desc, stmts, expr);
 					break;
 				}
 				case TARGET_RETURN: {
@@ -656,22 +783,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 					return ST_DIVERGING;
 				}
 				default: {
-					hir_expr_t assign = {
-						.kind = EXPR_ASSIGN,
-						.type = TYPE_UNIT,
-						.loc = expr->loc,
-						.d_assign = {
-							.lhs = hir_dup((hir_expr_t){
-								.kind = EXPR_LOCAL,
-								.d_local = target,
-								.type = expr->type,
-							}),
-							.rhs = expr,
-							.kind = TOK_ASSIGN,
-						},
-					};
-
-					arrpush(*stmts, assign);
+					nhir_assign_local(desc, stmts, expr->loc, target, expr);
 					break;
 				}
 			}

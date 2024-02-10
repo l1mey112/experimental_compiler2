@@ -267,6 +267,8 @@ void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 	}
 }
 
+// TODO: doesn't support `immutable` properly
+//       let g; g = 50 should work, but it doesn't
 void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 	switch (expr->kind) {
 		case EXPR_LOCAL: {
@@ -279,6 +281,18 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 			}
 			break;
 		}
+		// TODO: EXPR_SYM - how to do global functions taking address of
+		/* case EXPR_SYM: {
+			sym_t *symbol = &symbols[expr->d_sym];
+			if (symbol->kind == SYMBOL_GLOBAL) {
+				if (is_mutable && symbol->d_global.kind != GLOBAL_MUT) {
+					err_with_pos(expr->loc, "cannot mutate immutable global variable `%s`", sv_from(symbol->d_global.name));
+				}
+			} else {
+				err_with_pos(expr->loc, "cannot mutate non-local variable");
+			}
+			break;
+		} */
 		case EXPR_DEREF: {
 			type_t ptr_type = expr->d_deref->type;
 			assert(type_kind(ptr_type) == TYPE_PTR);
@@ -308,11 +322,20 @@ void cassign(ir_desc_t *desc, hir_expr_t *expr) {
 	hir_expr_t *lhs = expr->d_infix.lhs;
 	hir_expr_t *rhs = expr->d_infix.rhs;
 
-	// share infix and assignment code by desugaring
+	type_t lhs_type;
 
-	type_t lhs_type = cexpr(desc, TYPE_INFER, lhs, BM_LVALUE);
+	// let g; g = ...
+	if (lhs->kind == EXPR_LOCAL && desc->locals[lhs->d_local].type == TYPE_INFER) {
+		type_t rhs_type = cexpr(desc, TYPE_INFER, rhs, BM_RVALUE);
+		desc->locals[lhs->d_local].type = rhs_type;
+		// assign local stuffs
+		lhs_type = cexpr(desc, TYPE_INFER, lhs, BM_LVALUE);
+	} else {
+		lhs_type = cexpr(desc, TYPE_INFER, lhs, BM_LVALUE);
+		(void)cexpr(desc, lhs_type, rhs, BM_RVALUE);
+	}
+
 	clvalue(desc, lhs, true);
-	(void)cexpr(desc, lhs_type, rhs, BM_RVALUE);
 
 	// a += 20 -> a = a + 20
 	if (is_infix_op) {
