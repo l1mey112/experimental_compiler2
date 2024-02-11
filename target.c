@@ -1,3 +1,6 @@
+#define __USE_GNU
+#define _GNU_SOURCE
+
 #include "all.h"
 
 target_t target;
