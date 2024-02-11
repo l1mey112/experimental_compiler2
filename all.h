@@ -46,7 +46,7 @@ typedef struct file_t file_t;
 typedef u32 istr_t;
 
 #define RMOD_NONE ((rmod_t)-1)
-
+#define RSYM_NONE ((rsym_t)-1)
 #define ISTR_NONE ((istr_t)-1)
 
 #define LOC_NONE ((loc_t){})
@@ -186,6 +186,7 @@ enum ti_kind {
 	TYPE_ARRAY,
 	TYPE_SYMBOL, // or ALIAS ??
 	TYPE_SUM,
+	TYPE_STRUCT,
 	// TYPE_OPTION,
 	// TYPE_ARRAY,
 	// TYPE_ENUM,
@@ -197,42 +198,45 @@ enum ti_kind {
 typedef struct sym_t sym_t;
 typedef u32 rsym_t;
 
-enum tsymbol_kind {
-	TYPESYMBOL_STRUCT,
-	TYPESYMBOL_ALIAS,
-};
-
 typedef enum ti_kind ti_kind;
 typedef struct tinfo_t tinfo_t;
-typedef struct tsymbol_sf_t tsymbol_sf_t;
+typedef struct tinfo_sf_t tinfo_sf_t;
 
-typedef struct tsymbol_t tsymbol_t;
-typedef enum tsymbol_kind tsymbol_kind;
+typedef struct typesymbol_debug_t typesymbol_debug_t;
+typedef struct typesymbol_debug_sf_t typesymbol_debug_sf_t;
+typedef struct typesymbol_t typesymbol_t;
 
 // named types are typesymbols.
 // named struct types aren't interned, they're just a list of fields
 
-struct tsymbol_sf_t {
+struct tinfo_sf_t {
 	istr_t field;
 	type_t type;
+	
+};
+
+struct typesymbol_debug_sf_t {
 	loc_t field_loc;
 	loc_t type_loc;
 };
 
-struct tsymbol_t {
-	tsymbol_kind kind;
-
-	loc_t name_loc;
-
+// TODO: possibly switch to an AST representation for types just after the parsing stage
+//       since we'll eventually need to represent types with debuginfo and in match arms
+struct typesymbol_debug_t {
+	enum : u8 {
+		TYPESYMBOL_STRUCT,
+		TYPESYMBOL_ALIAS,
+	} kind;
+	
 	union {
-		struct {
-			tsymbol_sf_t *fields;
-		} d_struct;
-		struct {
-			type_t type;
-			loc_t type_loc;
-		} d_alias;
+		typesymbol_debug_sf_t *d_struct;
+		loc_t d_alias;
 	};
+};
+
+struct typesymbol_t {
+	type_t type;
+	typesymbol_debug_t debug;
 };
 
 struct tinfo_t {
@@ -267,6 +271,9 @@ struct tinfo_t {
 		struct {
 			type_t *elems;
 		} d_sum;
+		struct {
+			tinfo_sf_t *fields;
+		} d_struct;
 	};
 };
 
@@ -312,8 +319,9 @@ void fs_set_entry_argp(const char *argp);
 rfile_t fs_set_entry_repl(void); // will register current directory
 rmod_t fs_register_root(const char *dp);
 rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
-//
 istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
+// return qualified_name:selector
+istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector);
 const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
@@ -326,6 +334,13 @@ type_t type_new_inc_mul(type_t type, bool is_mut);
 type_t type_new(tinfo_t typeinfo);
 tinfo_t *type_get(type_t type);
 ti_kind type_kind(type_t type);
+
+// unalias a type
+type_t type_underlying(type_t type);
+// ***i32 -> i32
+type_t type_strip_muls(type_t type);
+// ***i32 -> 3
+u32 type_nr_muls(type_t type);
 
 static const tok_t tok_assign_op_to_op[] = {
 	[TOK_ASSIGN_ADD] = TOK_ADD,
@@ -467,7 +482,7 @@ struct sym_t {
 	union {
 		proc_t d_proc;
 		global_t d_global;
-		tsymbol_t d_type;
+		typesymbol_t d_type;
 	};
 };
 
@@ -476,6 +491,8 @@ extern sym_t *symbols;
 extern rsym_t *symbols_po;
 
 rsym_t table_resolve(rmod_t mod, istr_t short_name);
+// returns RSYM_NONE if not found
+rsym_t table_resolve_qualified_opt(istr_t qualified_name);
 rsym_t table_register(sym_t desc);
 void table_dump(sym_t *sym);
 void table_dump_all(void);

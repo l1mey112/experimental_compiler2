@@ -358,8 +358,29 @@ static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror) {
 	}
 }
 
-static void visit_successors_typeinfo(rsym_t **po, rsym_t rsym, tsymbol_t *typeinfo) {
-	switch (typeinfo->kind) {
+static void visit_successors_typeinfo(rsym_t **po, rsym_t rsym, typesymbol_t *typesymbol) {
+	switch (typesymbol->debug.kind) {
+		case TYPESYMBOL_STRUCT: {
+			tinfo_t *struc = type_get(typesymbol->type);
+			assert(struc->kind == TYPE_STRUCT);
+			for (u32 i = 0, c = arrlenu(typesymbol->debug.d_struct); i < c; i++) {
+				type_t type = struc->d_struct.fields[i].type;
+				loc_t onerror = typesymbol->debug.d_struct[i].type_loc;
+				visit_successors_type(po, rsym, type, onerror);
+				visit_sanity_type(po, type, onerror);
+			}
+			break;
+		}
+		case TYPESYMBOL_ALIAS: {
+			type_t type = typesymbol->type;
+			loc_t onerror = typesymbol->debug.d_alias;
+			visit_successors_type(po, rsym, type, onerror);
+			visit_sanity_type(po, type, onerror);
+			break;
+		}
+	}
+	
+	/* switch (typeinfo->kind) {
 		case TYPESYMBOL_STRUCT: {
 			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
 				type_t type = typeinfo->d_struct.fields[i].type;
@@ -379,7 +400,7 @@ static void visit_successors_typeinfo(rsym_t **po, rsym_t rsym, tsymbol_t *typei
 		default: {
 			assert_not_reached();
 		}
-	}
+	} */
 }
 
 static void visit_desc_locals(rsym_t **po, local_t *locals) {

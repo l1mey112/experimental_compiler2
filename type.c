@@ -139,6 +139,36 @@ type_t type_array_or_slice_elem(type_t type) {
 	}
 }
 
+type_t type_underlying(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	if (kind == TYPE_SYMBOL) {
+		return type_underlying(symbols[type_get(type)->d_symbol].d_type.type);
+	}
+
+	return type;
+}
+
+type_t type_strip_muls(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	if (kind == TYPE_PTR) {
+		return type_strip_muls(type_get(type)->d_ptr.ref);
+	}
+
+	return type;
+}
+
+u32 type_nr_muls(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	if (kind == TYPE_PTR) {
+		return 1 + type_nr_muls(type_get(type)->d_ptr.ref);
+	}
+
+	return 0;
+}
+
 static u8 *p;
 
 static const char *ctinfo_str[] = {
@@ -201,16 +231,6 @@ static void _type_dbg_str(type_t type, bool inner) {
 			} */
 			break;
 		}
-		case TYPE_SUM: {
-			for (u32 i = 0, c = arrlenu(typeinfo->d_sum.elems); i < c; i++) {
-				type_t elem = typeinfo->d_sum.elems[i];
-				_type_dbg_str(elem, false);
-				if (i + 1 < c) {
-					COMMIT(sprintf((char *)p, " | "));
-				}
-			}
-			break;
-		}
 		case TYPE_PTR: {
 			COMMIT(sprintf((char *)p, "*"));
 			if (typeinfo->d_ptr.is_mut) {
@@ -231,6 +251,29 @@ static void _type_dbg_str(type_t type, bool inner) {
 		}
 		case TYPE_SYMBOL: {
 			COMMIT(sprintf((char *)p, "%s", sv_from(symbols[typeinfo->d_symbol].key)));
+			break;
+		}
+		case TYPE_STRUCT: {
+			COMMIT(sprintf((char *)p, "struct { "));
+			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
+				tinfo_sf_t *field = &typeinfo->d_struct.fields[i];
+				COMMIT(sprintf((char *)p, "%s: ", sv_from(field->field)));
+				_type_dbg_str(field->type, false);
+				if (i + 1 < c) {
+					COMMIT(sprintf((char *)p, ", "));
+				}
+			}
+			COMMIT(sprintf((char *)p, " }"));
+			break;
+		}
+		case TYPE_SUM: {
+			for (u32 i = 0, c = arrlenu(typeinfo->d_sum.elems); i < c; i++) {
+				type_t elem = typeinfo->d_sum.elems[i];
+				_type_dbg_str(elem, false);
+				if (i + 1 < c) {
+					COMMIT(sprintf((char *)p, " | "));
+				}
+			}
 			break;
 		}
 		default: {

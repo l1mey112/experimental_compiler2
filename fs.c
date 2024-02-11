@@ -256,6 +256,18 @@ istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol) {
 	return intern;
 }
 
+istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector) {
+	u8 *p = alloc_scratch(0);
+	const char *sv = sv_from(qualified_name);
+	u32 nwritten = ptrcpy(p, (u8 *)sv, strlen(sv));
+	p[nwritten++] = ':';
+	sv = sv_from(selector);
+	nwritten += ptrcpy(p + nwritten, (u8 *)sv, strlen(sv));
+	p[nwritten++] = '\0';
+	(void)alloc_scratch(nwritten);
+	return sv_intern(p, nwritten - 1);
+}
+
 static const char *_fs_path_to_str(istr_t *path, u32 path_len) {
 	u8 *p = alloc_scratch(0);
 	u8 *po = p;

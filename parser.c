@@ -40,27 +40,11 @@ type_t pfn_arg(ir_desc_t *desc) {
 	return arg_type;
 }
 
-// TODO: in pident and ( after it, make that illegal
-//       can't define a function inside an expression
-
-// c() = 0
-void pfn2(void) {
-	pcheck(TOK_IDENT);
-	istr_t name = p.token.lit;
-	loc_t name_loc = p.token.loc;
-
-	pnext();
+void pfn_shared(proc_t *proc) {
 	pexpect(TOK_OPAR);
 
 	// c(...) = 0
 	//   ^^^
-	
-	proc_t proc = {};
-
-	// TODO: creating a function type that is incomplete, will possibly cause incorrect interning
-	//       create the type afterwards and fill in later from args
-	//
-	//       after setting return value, perform type_renew() or type_reintern()
 
 	type_t *arg_types = NULL;
 
@@ -68,7 +52,7 @@ void pfn2(void) {
 
 	ppush_scope();
 	while (p.token.kind != TOK_CPAR) {
-		type_t type = pfn_arg(&proc.desc);
+		type_t type = pfn_arg(&proc->desc);
 		arrpush(arg_types, type);
 
 		if (p.token.kind == TOK_COMMA) {
@@ -78,7 +62,7 @@ void pfn2(void) {
 		}
 
 		// push rlocal_t
-		arrpush(proc.arguments, (rlocal_t)args);
+		arrpush(proc->arguments, (rlocal_t)args);
 		args++;
 	}
 	pnext();
@@ -94,7 +78,11 @@ void pfn2(void) {
 		ret_type = ptype();
 	}
 
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+	proc->desc.next_blk_id++; // save pos for later
+	p.blks[p.blks_len++] = (pblk_t){
+		.kind = BLK_FN,
+	};
+
 	// construct type late
 
 	// add(a: i32, b: i32) = a + b
@@ -102,14 +90,8 @@ void pfn2(void) {
 
 	pexpect(TOK_ASSIGN);
 
-	proc.desc.next_blk_id++; // save pos for later
-	p.blks[p.blks_len++] = (pblk_t){
-		.kind = BLK_FN,
-		.loc = name_loc,
-	};
-
 	ppush_scope();
-	hir_expr_t expr = pexpr(&proc.desc, 0);
+	hir_expr_t expr = pexpr(&proc->desc, 0);
 	ppop_scope();
 	ppop_scope();
 	p.blks_len--;
@@ -126,13 +108,71 @@ void pfn2(void) {
 		});
 	}
 
-	proc.desc.hir = expr;
-	proc.type = type;
-	proc.ret_type = ret_type;
-	proc.ret_type_loc = ret_type_loc;
+	proc->desc.hir = expr;
+	proc->type = type;
+	proc->ret_type = ret_type;
+	proc->ret_type_loc = ret_type_loc;
+}
+
+// TODO: in pident and ( after it, make that illegal
+//       can't define a function inside an expression
+
+// c() = 0
+void pfn(void) {
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
+	pnext();
+	pcheck(TOK_OPAR);
+
+	proc_t proc = {};
+	pfn_shared(&proc);
+
+	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
 
 	table_register((sym_t){
 		.key = qualified_name,
+		.mod = p.mod,
+		.short_name = name,
+		.loc = name_loc,
+		.kind = SYMBOL_PROC,
+		.d_proc = proc,
+	});
+}
+
+// TODO: inside hir reorder sanity passes, check that the struct
+//       doesn't have any conflicting methods as fields
+// TODO: allow i32.function()
+void pmethod(void) {
+	pcheck(TOK_IDENT);
+	
+	istr_t sym = p.token.lit;
+	loc_t sym_loc = p.token.loc;
+
+	// Foo.function() = ...
+
+	pnext();
+	pexpect(TOK_DOT);
+
+	pcheck(TOK_IDENT);
+	istr_t name = p.token.lit;
+	loc_t name_loc = p.token.loc;
+
+	pnext();
+	pcheck(TOK_OPAR);
+
+	proc_t proc = {};
+	pfn_shared(&proc);
+
+	// main.Foo
+	istr_t qualified_name = fs_module_symbol_sv(p.mod, sym);
+
+	// main.Foo:function
+	istr_t selector = fs_module_symbol_selector(qualified_name, name);
+
+	table_register((sym_t){
+		.key = selector,
 		.mod = p.mod,
 		.short_name = name,
 		.loc = name_loc,
@@ -209,7 +249,10 @@ void pstruct(void) {
 	// TODO: unexpected `...`, expected `{` to start struct body
 	//                                      ^^^^^^^^^^^^^^^^^^^^ `to` clause in unexpected
 
-	tsymbol_sf_t *fields = NULL;
+	// TODO: error out on empty struct, tell them to define ZST alias instead
+
+	tinfo_sf_t *fields = NULL;
+	typesymbol_debug_sf_t *loc_fields = NULL;
 
 	while (p.token.kind != TOK_CCBR) {
 		istr_t field = p.token.lit;
@@ -223,24 +266,33 @@ void pstruct(void) {
 		loc_t type_loc = p.token.loc;
 		type_t type = ptype();
 
-		tsymbol_sf_t sf = {
+		tinfo_sf_t sf = {
 			.field = field,
 			.type = type,
+		};
+
+		typesymbol_debug_sf_t loc_sf = {
 			.field_loc = field_loc,
 			.type_loc = type_loc,
 		};
 
 		arrpush(fields, sf);
+		arrpush(loc_fields, loc_sf);
 	}
 	// }
 	// ^
 	pnext();
 
-	tsymbol_t typeinfo = {
-		.kind = TYPESYMBOL_STRUCT,
+	tinfo_t struc = {
+		.kind = TYPE_STRUCT,
 		.d_struct = {
 			.fields = fields,
 		},
+	};
+
+	typesymbol_debug_t struc_loc = {
+		.kind = TYPESYMBOL_STRUCT,
+		.d_struct = loc_fields,
 	};
 
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
@@ -251,7 +303,10 @@ void pstruct(void) {
 		.short_name = name,
 		.loc = name_loc,
 		.kind = SYMBOL_TYPE,
-		.d_type = typeinfo,
+		.d_type = {
+			.type = type_new(struc),
+			.debug = struc_loc,
+		},
 	});
 }
 
@@ -273,15 +328,12 @@ void palias() {
 	loc_t type_loc = p.token.loc;
 	type_t type = ptype();
 
-	tsymbol_t typeinfo = {
-		.kind = TYPESYMBOL_ALIAS,
-		.d_alias = {
-			.type = type,
-			.type_loc = type_loc,
-		},
-	};
-
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+
+	typesymbol_debug_t alias_loc = {
+		.kind = TYPESYMBOL_ALIAS,
+		.d_alias = type_loc,
+	};
 
 	table_register((sym_t){
 		.key = qualified_name,
@@ -289,7 +341,10 @@ void palias() {
 		.short_name = name,
 		.loc = name_loc,
 		.kind = SYMBOL_TYPE,
-		.d_type = typeinfo,
+		.d_type = {
+			.type = type,
+			.debug = alias_loc,
+		},
 	});
 }
 
@@ -315,8 +370,12 @@ void ptop_stmt(void) {
 		}
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_OPAR) {
-				// fn
-				pfn2();
+				pfn();
+				break;
+			}
+
+			if (p.peek.kind == TOK_DOT) {
+				pmethod();
 				break;
 			}
 

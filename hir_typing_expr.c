@@ -189,81 +189,6 @@ void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	}
 }
 
-/* void cinfix(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
-	hir_expr_t *lhs = expr->d_infix.lhs;
-	hir_expr_t *rhs = expr->d_infix.rhs;
-	tok_t kind = expr->d_infix.kind;
-
-	bool is_bool_op = kind == TOK_AND || kind == TOK_OR;
-	bool is_cmp_op = kind == TOK_EQ || kind == TOK_NE || kind == TOK_LT || kind == TOK_GT || kind == TOK_LE || kind == TOK_GE;
-	bool is_ptr_arith = false;
-
-	type_t lhs_t = cexpr(desc, upvalue, lhs, BM_RVALUE);
-	type_t rhs_t = cexpr(desc, lhs_t, rhs, BM_RVALUE);
-
-	ti_kind lhs_kind = type_kind(lhs_t);
-
-	// TODO: will need to add in *opaque pointers, no arith on these
-	// TODO: introduce proper bounded ptr types for such too
-	// TODO: better errors and proper semantics, look at real compilers
-
-	if (lhs_kind == TYPE_PTR && (kind == TOK_ADD || kind == TOK_SUB)) {
-		is_ptr_arith = true;
-	} else if (lhs_kind == TYPE_PTR) {
-		err_with_pos(expr->loc, "invalid operation `%s` on pointer type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
-	}
-
-	// TODO: ! && _ -> !
-	// TODO: ! || _ -> !
-
-	if (is_bool_op) {
-		(void)ctype_unify(TYPE_BOOL, lhs);
-		(void)ctype_unify(TYPE_BOOL, rhs);
-
-		expr->type = TYPE_BOOL;
-	} else {
-		type_t type = ctype_unify(lhs_t, rhs);
-
-		if (is_cmp_op) {
-			expr->type = TYPE_BOOL;
-		} else {
-			if (!(type_is_number(lhs_t) || lhs_t == TYPE_BOTTOM)) {
-				err_with_pos(expr->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(lhs_t));
-			}
-			if (!(type_is_number(rhs_t) || rhs_t == TYPE_BOTTOM)) {
-				err_with_pos(expr->loc, "invalid operation `%s` on non numeric type `%s`", tok_op_str(kind), type_dbg_str(rhs_t));
-			}
-			expr->type = type;
-		}
-	}
-} */
-
-void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
-	// f x
-	// f = x
-	// do nothing, a call isn't applicable here
-	if (cfg & BM_LVALUE || cfg & BM_CALL) {
-		return;
-	}
-
-	// k = f     (call f)
-
-	// convert to call and recheck
-	if (type_kind(expr->type) == TYPE_FUNCTION) {
-		hir_expr_t call = (hir_expr_t){
-			.kind = EXPR_CALL,
-			.loc = expr->loc,
-			.type = TYPE_INFER,
-			.d_call = {
-				.f = hir_dup(*expr),
-				.args = NULL,
-			},
-		};
-		*expr = call;
-		cexpr(desc, TYPE_INFER, expr, BM_RECALL);
-	}
-}
-
 // TODO: doesn't support `immutable` properly
 //       let g; g = 50 should work, but it doesn't
 void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
@@ -726,53 +651,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;	
 		}
 		case EXPR_CALL: {
-			// we don't use a curried form internally to not waste analysis checking
-			// for partial application. most function calls are complete calls anyway.
-			//
-			// `f x g` will compile into a merged call, you'll need to separate them.
-			//
-			//     f(x: T): T -> ()          (TODO: update fn type syntax, functions can be 0 arity now)
-			//
-			//     f(x, g) -> f(x)(g)
-			//
-
-			// TODO: separate calls
-
-			type_t f_type;
-			if (!(cfg & BM_RECALL)) {
-				f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, BM_RVALUE | BM_CALL);
-				if (type_kind(f_type) != TYPE_FUNCTION) {
-					err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
-				}
-			} else {
-				f_type = expr->d_call.f->type;
-			}
-
-			// iterate one by one over the args
-			// for every arg, if it exhausts the current arguments of a function type
-			// set that return value to the list of argument types, and so on.
-
-			tinfo_t *fn_info = type_get(f_type);
-			
-			type_t *args = fn_info->d_fn.args;
-			u32 cursor = 0;
-			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++, cursor++) {
-				if (cursor >= arrlenu(args)) {
-					// extract the return value, using the type as a function itself
-					assert_not_reached();
-				}
-
-				hir_expr_t *arg_expr = &expr->d_call.args[i];
-				type_t arg_upvalue = args[cursor];
-
-				(void)cexpr(desc, arg_upvalue, arg_expr, BM_RVALUE);
-				(void)ctype_unify(arg_upvalue, arg_expr);
-			}
-
-			u32 papp = arrlenu(expr->d_call.args) - cursor;
-			assert(papp == 0); // TODO: partial apply
-
-			expr->type = fn_info->d_fn.ret;
+			ccall(desc, upvalue, expr, cfg);
 			break;
 		}
 		case EXPR_BREAK: {
@@ -833,37 +712,16 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 		}
 		case EXPR_FIELD: {
 			type_t type = cexpr(desc, TYPE_INFER, expr->d_field.expr, BM_RVALUE);
-			ti_kind kind = type_kind(type);
-
+			
 			// x.field       (field: "field", field_idx: -1)
 			// x.0           (field: ISTR_NONE, field_idx: 0)
 
 			if (expr->d_field.field != ISTR_NONE) {
-				// TODO: better way for the double unpack on typesymbols
-
-				if (kind != TYPE_SYMBOL) {
-					err_with_pos(expr->loc, "type mismatch: expected struct type, got `%s`", type_dbg_str(type));
-				}
-				
-				tsymbol_t *struc_type = &symbols[type_get(type)->d_symbol].d_type;
-
-				if (struc_type->kind != TYPESYMBOL_STRUCT) {
-					err_with_pos(expr->loc, "type mismatch: expected struct type, got `%s`", type_dbg_str(type));
-				}
-
-				for (u32 i = 0, c = arrlenu(struc_type->d_struct.fields); i < c; i++) {
-					tsymbol_sf_t *field = &struc_type->d_struct.fields[i];
-					if (field->field == expr->d_field.field) {
-						expr->d_field.field_idx = i;
-						expr->type = field->type;
-						break;
-					}
-				}
-
-				if (expr->d_field.field_idx == (u16)-1) {
-					err_with_pos(expr->loc, "field `%s` not found in struct `%s`", sv_from(expr->d_field.field), type_dbg_str(type));
-				}
+				cnamed_field(desc, type, expr);
 			} else {
+				type_t type_use = type_underlying(type);
+				ti_kind kind = type_kind(type_use);
+
 				if (kind != TYPE_TUPLE) {
 					err_with_pos(expr->loc, "type mismatch: expected tuple type, got `%s`", type_dbg_str(type));
 				}
@@ -882,15 +740,18 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			assert(expr->d_struct.expr->kind == EXPR_SYM);
 			assert(symbols[expr->d_struct.expr->d_sym].kind == SYMBOL_TYPE);
 
-			// assume no duplicate fields, parser has checked that
+			type_t underlying = type_underlying(expr->type);
+			assert(type_kind(underlying) == TYPE_STRUCT);
 
-			// type_get(type_t type)
-			tsymbol_t *struc = &symbols[expr->d_struct.expr->d_sym].d_type;
-			tsymbol_sf_t *fields = struc->d_struct.fields;
+			// assume no duplicate fields, parser has checked that
+			// TODO: they haven't...
+
+			tinfo_t *info = type_get(underlying);
+			tinfo_sf_t *fields = info->d_struct.fields;
 
 			// O(n^2) but n is small
 			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
-				tsymbol_sf_t *field = NULL;
+				tinfo_sf_t *field = NULL;
 				hir_sf_t *expr_field = &expr->d_struct.fields[i];
 
 				for (u32 j = 0, c = arrlenu(fields); j < c; j++) {

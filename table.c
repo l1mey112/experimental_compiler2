@@ -38,6 +38,16 @@ rsym_t table_resolve(rmod_t mod, istr_t short_name) {
 	return (rsym_t)hmlenu(symbols) - 1;
 }
 
+rsym_t table_resolve_qualified_opt(istr_t qualified_name) {
+	ptrdiff_t sym = hmgeti(symbols, qualified_name);
+
+	if (sym != -1) {
+		return sym;
+	}
+
+	return RSYM_NONE;
+}
+
 rsym_t table_register(sym_t desc) {
 	ptrdiff_t sym = hmgeti(symbols, desc.key);
 
@@ -112,8 +122,8 @@ void table_dump_all(void) {
 	}
 }
 
-static void _dump_type(sym_t *sym) {
-	tsymbol_t *typeinfo = &sym->d_type;
+
+	/* tsymbol_t *typeinfo = &sym->d_type;
 
 	switch (typeinfo->kind) {
 		case TYPESYMBOL_STRUCT: {
@@ -131,7 +141,6 @@ static void _dump_type(sym_t *sym) {
 			break;
 		}
 		case TYPESYMBOL_ALIAS: {
-			printf("type %s = %s\n", sv_from(sym->key), type_dbg_str(typeinfo->d_alias.type));
 			break;
 		}
 		default: {
@@ -139,14 +148,16 @@ static void _dump_type(sym_t *sym) {
 		}
 	}
 	
-	//printf(" = %s\n", type_dbg_str(sym->type));
+	//printf(" = %s\n", type_dbg_str(sym->type)); */
+static void _dump_type(sym_t *sym) {
+	printf("type %s = %s\n", sv_from(sym->key), type_dbg_str(sym->d_type.type));
 }
 
 static void _print_local(ir_desc_t *desc, rlocal_t local) {
 	local_t *localp = &desc->locals[local];
 
 	if (localp->name != ISTR_NONE) {
-		printf("%s.", sv_from(localp->name));
+		printf("%s_", sv_from(localp->name));
 	} else {
 		printf("_");
 	}

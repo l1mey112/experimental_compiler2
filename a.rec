@@ -394,4 +394,19 @@
 ; 
 ; ret_alias(): Alias = 20:Alias
 
-type Sum = u32 | i32
+; type Sum = u32 | i32
+
+struct Foo {
+    x: i32
+}
+
+; main.Foo:incr
+
+Foo.incr(a: Foo) = 20 ; Foo{x: a.x + 1}
+
+main() = do
+    let a = Foo{x: 20}
+
+    a.incr
+
+; field(a: Foo) = a.y.x
