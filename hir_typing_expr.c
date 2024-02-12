@@ -690,7 +690,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;	
 		}
 		case EXPR_CALL: {
-			ccall(desc, upvalue, expr, cfg);
+			ccall(desc, upvalue, expr);
 			break;
 		}
 		case EXPR_BREAK: {
@@ -756,7 +756,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			// x.0           (field: ISTR_NONE, field_idx: 0)
 
 			if (expr->d_field.field != ISTR_NONE) {
-				cnamed_field(desc, type, expr, NULL);
+				cnamed_field(desc, type, expr, NULL, cfg);
 			} else {
 				type_t type_use = type_underlying(type);
 				ti_kind kind = type_kind(type_use);

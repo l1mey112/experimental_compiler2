@@ -77,13 +77,15 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	expr->type = fn_info->d_fn.ret;
 }
 
-void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
+void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+	u8 cfg = BM_RVALUE | BM_CALL;
+	
 	printf("HERE\n");
 	if (expr->d_call.f->kind == EXPR_FIELD && expr->d_call.f->d_field.field != ISTR_NONE) {
 		printf("INNER\n");
-		cnamed_field(desc, TYPE_INFER, expr->d_call.f, expr);
+		cnamed_field(desc, TYPE_INFER, expr->d_call.f, expr, cfg);
 	} else {
-		type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, BM_RVALUE | BM_CALL);
+		type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, cfg);
 		if (type_kind(f_type) != TYPE_FUNCTION) {
 			err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
 		}
@@ -96,7 +98,8 @@ void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 // TODO: field access properly into call
 
 // named field access, unwrap to method/access. perform auto deref
-void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t *call) {
+// cfg only used on field access or when call == NULL
+void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t *call, u8 cfg) {
 
 	// TODO: hmm
 	//
@@ -123,7 +126,7 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 	rsym_t method;
 
 	if ((method = table_resolve_method(bare, field)) == RSYM_NONE) {
-		goto skip_field;
+		goto field_access;
 	}
 
 	sym_t *symbol = &symbols[method];
@@ -142,7 +145,7 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 	// if dref(type) != dref(method.0) then this is a sort of
 	// static method and we need to skip it outright.
 	if (arrlenu(fn_args) == 0 || type_strip_muls(type0) != bare) {
-		goto skip_field;
+		goto field_access;
 	}
 
 	// auto deref/ref `type` to match `method.0`
@@ -153,7 +156,7 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 
 	// no work
 	if (type == type0) {
-		goto skip_expr0;
+		goto skip_expr;
 	}
 
 	// try single ref
@@ -168,7 +171,7 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 				.is_mut = false,
 			},
 		};
-		goto skip_expr0;
+		goto skip_expr;
 	}
 
 	if (type_new_inc_mul(type, true) == type0) {
@@ -182,7 +185,7 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 				.is_mut = true,
 			},
 		};
-		goto skip_expr0;
+		goto skip_expr;
 	}
 
 	// try derefs
@@ -200,11 +203,11 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 				.d_deref = hir_dup(*field_expr),
 			};
 		}
-		goto skip_expr0;
+		goto skip_expr;
 	}
 
 	// failure
-skip_expr0:;
+skip_expr:;
 	// expr has been transformed. splice in a call that may fail to unify
 
 	// expr = field_expr.field
@@ -220,13 +223,8 @@ skip_expr0:;
 	// convert into:
 	//   call = T:method field_expr a b c
 	if (call) {
-		printf("HERE!\n");
 		*call->d_call.f = method_sym;
-
 		arrins(call->d_call.args, 0, *field_expr);
-
-		// TODO: remove, this should be in call expr
-		// ccall_args(desc, TYPE_INFER, call);
 	} else {
 		// call = T:method field_expr
 
@@ -244,26 +242,31 @@ skip_expr0:;
 	}
 
 	return;
-skip_field:
-	assert_not_reached();
-	return;
-	// type_t type_use = type_underlying(type);
-	/* tinfo_t *struc_info = type_get(type_use);
+field_access:;
 
-	if (struc_info->kind != TYPE_STRUCT) {
-		err_with_pos(expr->loc, "type mismatch: expected struct type, got `%s`", type_dbg_str(type));
+	// field accesses
+	type_t type_use = type_underlying(type);
+
+	if (type_kind(type_use) != TYPE_STRUCT) {
+		goto err;
 	}
+
+	tinfo_t *struc_info = type_get(type_use);
 
 	for (u32 i = 0, c = arrlenu(struc_info->d_struct.fields); i < c; i++) {
 		tinfo_sf_t *field = &struc_info->d_struct.fields[i];
 		if (field->field == expr->d_field.field) {
 			expr->d_field.field_idx = i;
 			expr->type = field->type;
-			break;
 		}
 	}
 
 	if (expr->d_field.field_idx == (u16)-1) {
-		err_with_pos(expr->loc, "field `%s` not found in struct `%s`", sv_from(expr->d_field.field), type_dbg_str(type));
-	} */
+		goto err;
+	}
+
+	cufcs_autocall(desc,expr, cfg);
+	return;
+err:
+	err_with_pos(expr->loc, "not a struct field or method");
 }
