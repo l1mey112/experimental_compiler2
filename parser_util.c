@@ -249,7 +249,7 @@ enum : u8 {
 
 u8 ptype_prec(void) {
 	switch (p.token.kind) {
-		case TOK_ARROW: return PREC_CALL;
+		case TOK_COLON: return PREC_CALL;
 		case TOK_PIPE: return PREC_CALL; // TODO: same prec?
 		default: return PREC_UNKNOWN;
 	}
@@ -419,34 +419,28 @@ type_t ptype_expr(u8 prec) {
 
 	while (prec < ptype_prec()) {
 		switch (p.token.kind) {
-			case TOK_ARROW: {
-				// no merging as that would break type equivalence/immutability
-				//
-				// TODO: we alloc + copy every single damn time, this is very bad,
-				//       however, i don't care at the moment.
-				//       in the future, extract this code out so that it doesn't
-				//       waste any memory to constant duplications. O(n^2) roughly
-				//
-				//       on second thought, this is really really weird code
-				//       refactor ASAP, but leave for later honestly
-				//
-				//       will get even weirder with regions assigned to each ptr arg
-				//
-				// i32 -> i32           (parse into single fn call)
-				// i32 -> i32 -> i32    (merge into single fn call)
+			case TOK_COLON: {
 				pnext();
-				type_t *args = NULL;
 				type_t ret = ptype_expr(PREC_CALL);
 
+				// args: ret
+				// (i32, i32): i32
+
+				// TODO: syntax ambiguity
+				//
+				// (i32, i32): (i32)                 (two arguments)
+				// ((i32, i32)): (i32)               (one argument)
+				// ((((i32, i32)))): (i32)           (one argument)
+
+				type_t *args;
+
 				tinfo_t *info;
-				if (TI_GUARD(type, TYPE_FUNCTION, info)) {
-					u32 len = arrlenu(info->d_fn.args);
-					type_t *nptr = arraddnptr(args, len); // TODO: 1+ on cap
-					memcpy(nptr, info->d_fn.args, len * sizeof(type_t));
-					arrpush(nptr, info->d_fn.ret);
-					args = nptr;
+				if (TI_GUARD(type, TYPE_TUPLE, info)) {
+					args = info->d_tuple;
+				} else if (type == TYPE_UNIT) {
+					args = NULL;
 				} else {
-					arrpush(args, type);
+					args = arr(type_t, type);
 				}
 
 				type = type_new((tinfo_t){
@@ -457,6 +451,23 @@ type_t ptype_expr(u8 prec) {
 				continue;
 			}
 			case TOK_PIPE: {
+				// case TOK_ARROW: {
+				//     no merging as that would break type equivalence/immutability
+				//
+				//     TODO: we alloc + copy every single damn time, this is very bad,
+				//           however, i don't care at the moment.
+				//           in the future, extract this code out so that it doesn't
+				//           waste any memory to constant duplications. O(n^2) roughly
+				//
+				//           on second thought, this is really really weird code
+				//           refactor ASAP, but leave for later honestly
+				//
+				//           will get even weirder with regions assigned to each ptr arg
+				//
+				//     i32 -> i32           (parse into single fn call)
+				//     i32 -> i32 -> i32    (merge into single fn call)
+				// }
+				//
 				// TODO: same todo as above
 
 				pnext();

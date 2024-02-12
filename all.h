@@ -23,14 +23,14 @@ typedef float f32;
 typedef double f64;
 
 // there is no robust workaround, must pass type
-#define arr(type, ...) ({                              \
-		type *ret = NULL;                              \
-		type v[] = {__VA_ARGS__};                      \
-		if (sizeof(v)) {                               \
-			arraddnptr(ret, sizeof(v) / sizeof(type)); \
-			memcpy(ret, v, sizeof(v));                 \
-		}                                              \
-		ret;                                           \
+#define arr(type, ...) ({                                  \
+		type *__ret = NULL;                                \
+		type __v[] = {__VA_ARGS__};                        \
+		if (sizeof(__v)) {                                 \
+			arraddnptr(__ret, sizeof(__v) / sizeof(type)); \
+			memcpy(__ret, __v, sizeof(__v));               \
+		}                                                  \
+		__ret;                                             \
 	})
 
 typedef struct loc_t loc_t;

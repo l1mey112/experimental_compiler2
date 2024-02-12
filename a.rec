@@ -428,15 +428,21 @@
 ; ; curries: i32: i32: i32: ()
 ; taker(b: Taker) = b.a ()
 
-struct Foo {
-    x: i32
+; struct Foo {
+;     x: i32
+; }
+; 
+; main() = do
+;     ; let f = Foo{230}
+;     let f = Foo{x: 230}
+;     let k = f.x
+;     k
+; 
+; ; globl0 = Foo{230}
+; globl1 = Foo{x: 230}
+
+struct T {
+    v: (): i32
 }
 
-main() = do
-    ; let f = Foo{230}
-    let f = Foo{x: 230}
-    let k = f.x
-    k
-
-; globl0 = Foo{230}
-globl1 = Foo{x: 230}
+taker(b: T) = b.v
