@@ -1061,7 +1061,19 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 					hir_expr_t *exprs = NULL;
 					
 					hir_expr_t situ_expr;
-					while (p.token.loc.line_nr == line_nr && pexpr_fallable(desc, PREC_CALL, &situ_expr)) {
+					while (p.token.loc.line_nr == line_nr) {
+						// don't allow `main()` in expressions
+						//                 ^^ next to eachother!
+
+						if (p.token.kind == TOK_OPAR && pprev_next_to()) {
+							// a decent enough error message to discourage the user from doing this
+							err_with_pos(p.token.loc, "must contain whitespace between argument and function");
+						}
+
+						if (!pexpr_fallable(desc, PREC_CALL, &situ_expr)) {
+							break;
+						}
+
 						arrpush(exprs, situ_expr);
 					}
 
