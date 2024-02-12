@@ -932,7 +932,22 @@ static void nproc(proc_t *proc) {
 }
 
 static void nglobal(global_t *global) {
-	assert_not_reached();
+	// globals don't contain `ret`
+	// for consteval after normalisation, we'll have to add a `ret` to the end of the block
+
+	hir_expr_t *stmts = NULL;
+	hir_expr_t *hir = hir_dup(global->desc.hir);
+
+	nhir_expr_target(&global->desc, &stmts, hir, TARGET_RETURN);
+
+	global->desc.hir = (hir_expr_t){
+		.kind = EXPR_DO_BLOCK,
+		.type = TYPE_BOTTOM,
+		.d_do_block = {
+			.exprs = stmts,
+			.blk_id = BLK_ID_NONE,
+		},
+	};
 }
 
 void hir_normalisation(void) {

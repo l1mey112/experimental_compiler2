@@ -433,9 +433,10 @@ struct Foo {
 }
 
 main() = do
-    let f = Foo{230}
+    ; let f = Foo{230}
+    let f = Foo{x: 230}
     let k = f.x
     k
 
 ; globl0 = Foo{230}
-; globl1 = Foo{x: 230}
+globl1 = Foo{x: 230}

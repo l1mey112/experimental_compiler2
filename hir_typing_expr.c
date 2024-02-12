@@ -571,8 +571,8 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 
 			// TODO: taking address of functions should only be possible on locals and symbols
 			//       fuck this is complicated.. what about &structfield.function ??
-
 			// TODO: &&v -> will be parsed as boolean && not ref-ref
+			// TODO: is_literal() to check if it's fine
 
 			bool is_mut_ref = expr->d_addr_of.is_mut;
 			hir_expr_t *ref = expr->d_addr_of.ref;
