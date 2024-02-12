@@ -38,6 +38,18 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			}
 			return true;
 		}
+		case TYPE_STRUCT: {
+			// in reality, comparing these only makes sense for anon structs
+			if (arrlenu(a->d_struct.fields) != arrlenu(b->d_struct.fields)) {
+				return false;
+			}
+			for (u32 i = 0, c = arrlenu(a->d_struct.fields); i < c; i++) {
+				if (a->d_struct.fields[i].field != b->d_struct.fields[i].field || a->d_struct.fields[i].type != b->d_struct.fields[i].type) {
+					return false;
+				}
+			}
+			return true;
+		}
 		case TYPE_PTR: {
 			return a->d_ptr.ref == b->d_ptr.ref && a->d_ptr.is_mut == b->d_ptr.is_mut;
 		}
@@ -51,6 +63,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			return a->d_symbol == b->d_symbol;
 		}
 		default: {
+			printf("kind: %d\n", a_type);
 			assert_not_reached();
 		}
 	}

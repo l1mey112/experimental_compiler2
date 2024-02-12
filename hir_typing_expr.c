@@ -203,18 +203,28 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 			}
 			break;
 		}
-		// TODO: EXPR_SYM - how to do global functions taking address of
-		/* case EXPR_SYM: {
+		case EXPR_SYM: {
 			sym_t *symbol = &symbols[expr->d_sym];
-			if (symbol->kind == SYMBOL_GLOBAL) {
-				if (is_mutable && symbol->d_global.kind != GLOBAL_MUT) {
-					err_with_pos(expr->loc, "cannot mutate immutable global variable `%s`", sv_from(symbol->d_global.name));
+
+			switch (symbol->kind) {
+				case SYMBOL_PROC: {
+					if (is_mutable) {
+						err_with_pos(expr->loc, "cannot mutate function `%s`", sv_from(symbol->short_name));
+					}
+					break;
 				}
-			} else {
-				err_with_pos(expr->loc, "cannot mutate non-local variable");
+				case SYMBOL_GLOBAL: {
+					if (is_mutable && !symbol->d_global.is_mut) {
+						err_with_pos(expr->loc, "cannot mutate immutable global variable `%s`", sv_from(symbol->short_name));
+					}
+					break;
+				}
+				default: {
+					assert_not_reached();
+				}
 			}
 			break;
-		} */
+		}
 		case EXPR_DEREF: {
 			type_t ptr_type = expr->d_deref->type;
 			assert(type_kind(ptr_type) == TYPE_PTR);
@@ -228,6 +238,7 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 		case EXPR_INDEX: {
 			// TODO: mutability of slices and so on...
 			// TODO: really need to standardise pointer types
+			assert_not_reached();
 			break;
 		}
 		// TODO: field accesses since we already support them
@@ -551,9 +562,37 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			expr->type = type_get(type)->d_ptr.ref;
 			break;
 		}
-		/* case EXPR_ADDR_OF: {
+		case EXPR_ADDR_OF: {
+			// possibly below.
+			
+			// ??? allowed to take the address of absolutely ANYTHING
+			// normalisation pass will desugar into explicit seperate locals
+			// cannot &'temporary. no point.
 
-		} */
+			// TODO: taking address of functions should only be possible on locals and symbols
+			//       fuck this is complicated.. what about &structfield.function ??
+
+			// TODO: &&v -> will be parsed as boolean && not ref-ref
+
+			bool is_mut_ref = expr->d_addr_of.is_mut;
+			hir_expr_t *ref = expr->d_addr_of.ref;
+
+			type_t type = cexpr(desc, TYPE_INFER, ref, BM_LVALUE);
+			clvalue(desc, ref, is_mut_ref);
+
+			// &function -> function
+			if (type_kind(type) == TYPE_FUNCTION) {
+				if (is_mut_ref) {
+					err_with_pos(expr->loc, "can't take mutable address of function");
+				}
+				*expr = *expr->d_addr_of.ref;
+			} else {
+				type = type_new_inc_mul(type, is_mut_ref);
+			}
+
+			expr->type = type;
+			break;
+		}
 		case EXPR_INDEX: {
 			// lvalue needs to propagate cfg
 			type_t type = cexpr(desc, TYPE_INFER, expr->d_index.expr, cfg);

@@ -20,7 +20,6 @@ void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 
 	// convert to call and recheck
 	if (type_kind(expr->type) == TYPE_FUNCTION) {
-		print_hint_with_pos(expr->loc, "here");
 		hir_expr_t call = (hir_expr_t){
 			.kind = EXPR_CALL,
 			.loc = expr->loc,

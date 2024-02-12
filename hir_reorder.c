@@ -23,7 +23,11 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 				if (succ->d_proc.ret_type == TYPE_INFER) {
 					if (rsucc == rsym) {
 						// cycle self -> self
-						err_with_pos(succ->loc, "self recursive function `%s` needs return type annotation", sv_from(succ->short_name));
+						if (indirect) {
+							err_with_pos(onerror, "self ref to function `%s` needs type annotation", sv_from(succ->short_name));
+						} else {
+							err_with_pos(succ->loc, "self recursive function `%s` needs return type annotation", sv_from(succ->short_name));
+						}
 					} else {
 						// cycle self -> ... -> self
 						err_with_pos(onerror, "mutually recursive function `%s` needs return type annotation", sv_from(succ->short_name));
