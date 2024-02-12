@@ -455,13 +455,29 @@
 ;     20
 ; }
 
-struct T {
-    a: bool
-    b: i32
-    c: u8
-}
+; struct T {
+;     a: bool
+;     b: i32
+;     c: u8
+; }
+; 
+; main() = {
+;     let t = T{a: true, b: 20, c: 50}
+;     t
+; }
 
-main() = {
-    let t = T{a: true, b: 20, c: 50}
-    t
+; factorial = {
+;     let i' = 6
+;     let f' = 1
+;     let take = loop {
+;         if (i < 1) brk f
+;         f = f * i
+;         i--
+;     }
+;     take
+; }
+
+global = {
+    let a = 35
+    a + 50
 }

@@ -374,7 +374,45 @@ u32 type_sizeof(type_t type) {
 		// TYPE_SYMBOL
 		default: {
 			// TODO: please fix this
-			return 1;
+			assert_not_reached();
+		}
+	}
+}
+
+u32 type_alignof(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	// TODO: 32 bit systems and below
+	
+	switch (kind) {
+		case TYPE_I8: return 1;
+		case TYPE_I16: return 2;
+		case TYPE_I32: return 4;
+		case TYPE_I64: return 8;
+		case TYPE_ISIZE: return target.arch.ptr_size;
+		case TYPE_U8: return 1;
+		case TYPE_U16: return 2;
+		case TYPE_U32: return 4;
+		case TYPE_U64: return 8;
+		case TYPE_USIZE: return target.arch.ptr_size;
+		case TYPE_F32: return 4;
+		case TYPE_F64: return 8;
+		case TYPE_BOOL: return 1;
+		//
+		// TYPE_TUPLE
+		// TYPE_FUNCTION
+		// TYPE_CLOSURE
+		// TYPE_CLOSURE_UNION
+		// TYPE_PTR
+		// TYPE_SLICE
+		// TYPE_ARRAY
+		// TYPE_SYMBOL
+		case TYPE_UNIT:
+		case TYPE_BOTTOM: {
+			assert_not_reached();
+		}
+		default: {
+			// TODO: please fix this
 			assert_not_reached();
 		}
 	}

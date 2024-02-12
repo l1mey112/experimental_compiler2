@@ -368,6 +368,10 @@ bool type_is_unsigned(type_t type);
 #define TYPE_SIZE_DIVERGING ((u32)-1)
 u32 type_sizeof(type_t type);
 
+// alignment throws on types where `TYPE_SIZE_DIVERGING` would be returned
+// also throws for ZSTs
+u32 type_alignof(type_t type);
+
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
 

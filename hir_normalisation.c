@@ -947,6 +947,11 @@ static void nglobal(global_t *global) {
 			.blk_id = BLK_ID_NONE,
 		},
 	};
+
+	// eval
+	extern void hir_eval_global(global_t *global);
+
+	hir_eval_global(global);
 }
 
 void hir_normalisation(void) {
