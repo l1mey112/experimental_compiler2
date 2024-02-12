@@ -67,35 +67,52 @@ void pfn_shared(proc_t *proc) {
 	}
 	pnext();
 
-	// ) -> ...
-	//   ^^
+	// ) {
+	//   ^
 
 	type_t ret_type = TYPE_INFER;
 	loc_t ret_type_loc = {};
-	if (p.token.kind == TOK_COLON) {
-		pnext();
-		ret_type_loc = p.token.loc;
-		ret_type = ptype();
-	}
+	hir_expr_t expr;
 
 	proc->desc.next_blk_id++; // save pos for later
 	p.blks[p.blks_len++] = (pblk_t){
 		.kind = BLK_FN,
 	};
 
-	// construct type late
-
-	// add(a: i32, b: i32) = a + b
-	//                     ^
-
-	pexpect(TOK_ASSIGN);
-
 	ppush_scope();
-	hir_expr_t expr = pexpr(&proc->desc, 0);
+	if (p.token.kind == TOK_OCBR || p.token.kind == TOK_DO) {
+		// func() {} -> func() = void do ...
+		ret_type = TYPE_UNIT;
+		
+		// will jmp to `{}` or `do`
+		expr = pexpr(&proc->desc, 0);
+		expr = (hir_expr_t){
+			.kind = EXPR_VOIDING,
+			.loc = expr.loc,
+			.type = TYPE_UNIT,
+			.d_voiding = hir_dup(expr),
+		};
+	} else {
+		// ): ...
+		//  ^
+		if (p.token.kind == TOK_COLON) {
+			pnext();
+			ret_type_loc = p.token.loc;
+			ret_type = ptype();
+		}
+
+		// add(a: i32, b: i32) = a + b
+		//                     ^
+
+		pexpect(TOK_ASSIGN);
+
+		expr = pexpr(&proc->desc, 0);
+	}
 	ppop_scope();
 	ppop_scope();
 	p.blks_len--;
 
+	// construct type late
 	// create function type if return is annotated
 	type_t type = TYPE_INFER;
 	if (ret_type != TYPE_INFER) {

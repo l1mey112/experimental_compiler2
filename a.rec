@@ -441,8 +441,16 @@
 ; ; globl0 = Foo{230}
 ; globl1 = Foo{x: 230}
 
-struct T {
-    v: (): i32
+; struct T {
+;     v: (): i32
+; }
+; 
+; taker(b: T) = b.v
+
+main0() = {
+    20
 }
 
-taker(b: T) = b.v
+main1() {
+    20
+}

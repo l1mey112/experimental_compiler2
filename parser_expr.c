@@ -402,7 +402,7 @@ bool pstmt(ir_desc_t *desc, hir_expr_t *expr_out) {
 // do
 //     ...
 //     ...
-hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
+hir_expr_t *pdo_block_impl(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 	//
@@ -411,21 +411,8 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	if (p.token.kind == TOK_EOF || p.token.loc.line_nr == oloc.line_nr) {
 		err_with_pos(oloc, "expected newline after `do`");
 	}
-
-	// TODO: implement `:do` syntax
-
-	u8 blk_id = desc->next_blk_id++;
-	p.blks[p.blks_len++] = (pblk_t){
-		.blk_id = blk_id,
-		.kind = BLK_LABEL,
-		.label = opt_label,
-		.loc = opt_loc,
-		.always_brk = false,
-	};
-
+	
 	hir_expr_t *exprs = NULL;
-
-	bool first = true;
 
 	u32 bcol = p.token.loc.col;
 	ppush_scope();
@@ -443,6 +430,52 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 		}
 	}
 	ppop_scope();
+
+	return exprs;
+}
+
+hir_expr_t *pbrace_block_impl(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
+	pnext();
+	
+	hir_expr_t *exprs = NULL;
+
+	ppush_scope();
+	while (p.token.kind != TOK_CCBR) {
+		hir_expr_t expr;
+		bool set = pstmt(desc, &expr);
+		if (set) {
+			arrpush(exprs, expr);
+		}
+	}
+	ppop_scope();
+	pnext();
+
+	return exprs;
+}
+
+// do exprs and {}
+hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
+	loc_t oloc = p.token.loc;
+	// TODO: implement `:do` syntax
+
+	u8 blk_id = desc->next_blk_id++;
+	p.blks[p.blks_len++] = (pblk_t){
+		.blk_id = blk_id,
+		.kind = BLK_LABEL,
+		.label = opt_label,
+		.loc = opt_loc,
+		.always_brk = false,
+	};
+
+	hir_expr_t *exprs;
+
+	if (p.token.kind == TOK_DO) {
+		exprs = pdo_block_impl(desc, opt_label, opt_loc);
+	} else if (p.token.kind == TOK_OCBR) {
+		exprs = pbrace_block_impl(desc, opt_label, opt_loc);
+	} else {
+		assert_not_reached();
+	}
 	p.blks_len--;
 
 	if (exprs == NULL) {
@@ -595,6 +628,7 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 			}
 			goto retry;
 		}
+		case TOK_OCBR:
 		case TOK_DO: {
 			expr = pdo(desc, label.name, label.name_loc);
 			label.name = ISTR_NONE;

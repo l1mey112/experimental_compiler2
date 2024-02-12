@@ -19,7 +19,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			if (a_args_len != b_args_len) {
 				return false;
 			}
-			if (memcmp(a->d_fn.args, b->d_fn.args, a_args_len * sizeof(type_t)) != 0) {
+			if (a->d_fn.args && b->d_fn.args && memcmp(a->d_fn.args, b->d_fn.args, a_args_len * sizeof(type_t)) != 0) {
 				return false;
 			}
 			if (a->d_fn.ret != b->d_fn.ret) {
