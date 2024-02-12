@@ -78,6 +78,7 @@ static void visit_sanity_value_sym(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 }
 
 // Foo{} -> create type from `Foo`
+// TODO: remove this...
 static type_t visit_struct_expr(rsym_t **po, hir_expr_t *expr) {
 	type_t type;
 	rsym_t symbol;
@@ -243,7 +244,36 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 			break;
 		}
 		case EXPR_FIELD: {
-			visit_successors_hir_impl(po, rsym, expr->d_field.expr, direct);
+			// type symbols can't be in the HIR tree. we need make an exception for this here
+			// it's messy as hell, and shouldn't be done here, but it's fine i guess.
+
+			// convert this: Foo.static -> Foo:static
+			sym_t *symp;
+			rsym_t sym;
+			if (expr->d_field.field != ISTR_NONE && expr->d_field.expr->kind == EXPR_SYM && (symp = &symbols[sym = expr->d_field.expr->d_sym])->kind == SYMBOL_TYPE) {
+				type_t symbol_type = type_new((tinfo_t){
+					.kind = TYPE_SYMBOL,
+					.d_symbol = sym,
+				});
+				
+				// TODO: perform type sanity without wrapping sym into type
+				visit_sanity_type(po, symbol_type, expr->d_field.expr->loc);
+
+				rsym_t method;
+				if ((method = table_resolve_method(symbol_type, expr->d_field.field)) == RSYM_NONE) {
+					err_with_pos(expr->loc, "unknown method `%s`", sv_from(expr->d_field.field));
+				}
+
+				// sym.field -> Sym:method
+				*expr = (hir_expr_t){
+					.kind = EXPR_SYM,
+					.type = TYPE_INFER,
+					.loc = expr->loc,
+					.d_sym = method,
+				};
+			} else {
+				visit_successors_hir_impl(po, rsym, expr->d_field.expr, direct);
+			}
 			break;
 		}
 		case EXPR_ADDR_OF: {

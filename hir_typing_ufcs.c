@@ -20,6 +20,7 @@ void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 
 	// convert to call and recheck
 	if (type_kind(expr->type) == TYPE_FUNCTION) {
+		print_hint_with_pos(expr->loc, "here");
 		hir_expr_t call = (hir_expr_t){
 			.kind = EXPR_CALL,
 			.loc = expr->loc,
@@ -57,10 +58,11 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 
 	type_t *args = fn_info->d_fn.args;
 	u32 cursor = 0;
-	for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++, cursor++) {
-		if (cursor >= arrlenu(args)) {
-			// extract the return value, using the type as a function itself
-			assert_not_reached();
+	for (u32 i = 0, c = arrlenu(args); i < c; i++, cursor++) {
+		if (cursor >= arrlenu(expr->d_call.args)) {
+			// TODO: possible papp
+			// TODO: extract the return value, using the type as a function itself
+			err_with_pos(expr->loc, "not enough arguments, expected %u", c);
 		}
 
 		hir_expr_t *arg_expr = &expr->d_call.args[i];
@@ -91,27 +93,6 @@ void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 	ccall_args(desc, TYPE_INFER, expr);
 }
 
-
-// i8..! and symbols get qualified names
-istr_t ctype_qualified_name(type_t type) {
-	ti_kind kind = type_kind(type);
-
-	istr_t ret;
-
-	switch (kind) {
-		#define X(name, lit) \
-			case name: return sv_move(lit);
-		TYPE_X_CONCRETE_LIST
-		#undef X
-		case TYPE_SYMBOL: {
-			return symbols[type_get(type)->d_symbol].key;
-		}
-		default: {
-			return ISTR_NONE;
-		}
-	}
-}
-
 // TODO: extract cnamed_field into UFCS autocall
 // TODO: field access properly into call
 
@@ -140,20 +121,9 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t 
 
 	// i32
 	type_t bare = type_strip_muls(type);
-
-	istr_t qualified_name;
 	rsym_t method;
 
-	// qualified_name = i32:method
-	if ((qualified_name = ctype_qualified_name(bare)) == ISTR_NONE) {
-		goto skip_field;
-	}
-
-	istr_t selector = fs_module_symbol_selector(qualified_name, field);
-
-	printf("selector: %s\n", sv_from(selector));
-
-	if ((method = table_resolve_qualified_opt(selector)) == RSYM_NONE) {
+	if ((method = table_resolve_method(bare, field)) == RSYM_NONE) {
 		goto skip_field;
 	}
 

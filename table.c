@@ -67,6 +67,42 @@ rsym_t table_register(sym_t desc) {
 	return (rsym_t)hmlenu(symbols) - 1;
 }
 
+// i8..! and symbols get qualified names
+istr_t table_type_qualified_name(type_t type) {
+	ti_kind kind = type_kind(type);
+
+	istr_t ret;
+
+	switch (kind) {
+		#define X(name, lit) \
+			case name: return sv_move(lit);
+		TYPE_X_CONCRETE_LIST
+		#undef X
+		case TYPE_SYMBOL: {
+			return symbols[type_get(type)->d_symbol].key;
+		}
+		default: {
+			return ISTR_NONE;
+		}
+	}
+}
+
+rsym_t table_resolve_method(type_t bare_type, istr_t field) {
+	assert(bare_type == type_strip_muls(bare_type));
+
+	istr_t qualified_name;
+	rsym_t method;
+
+	// qualified_name = i32:method
+	if ((qualified_name = table_type_qualified_name(bare_type)) == ISTR_NONE) {
+		return RSYM_NONE;
+	}
+
+	istr_t selector = fs_module_symbol_selector(qualified_name, field);
+
+	return table_resolve_qualified_opt(selector);
+}
+
 rlocal_t ir_local_new(ir_desc_t *desc, local_t local) {
 	u32 idx = arrlenu(desc->locals);
 	arrpush(desc->locals, local);

@@ -400,13 +400,17 @@ struct Foo {
     x: i32
 }
 
-; main.Foo:incr
-
-Foo.incr(a: Foo, b: i32, c: i32) = b ; Foo{x: a.x + 1}
+Foo.incr(a: Foo, b: i32, c: i32) = b
 Foo.voider(a: Foo) = ()
+Foo.static(a: i32) = a
 
 main() = do
     let a = Foo{x: 20}
-
+    
     a.incr 20 50
+    Foo.incr a 20 50
+    
     a.voider
+    Foo.voider a
+
+    Foo.static 20
