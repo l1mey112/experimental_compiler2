@@ -454,3 +454,14 @@
 ; main1() {
 ;     20
 ; }
+
+struct T {
+    a: bool
+    b: i32
+    c: u8
+}
+
+main() = {
+    let t = T{a: true, b: 20, c: 50}
+    t
+}

@@ -782,15 +782,15 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			}
 
 			// assume no duplicate fields, parser has checked that
-			// TODO: they haven't...
 
 			tinfo_t *info = type_get(underlying);
 			tinfo_sf_t *fields = info->d_struct.fields;
+			hir_sf_t *expr_fields = expr->d_struct.fields;
 
 			// O(n^2) but n is small
-			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
+			for (u32 i = 0, c = arrlenu(expr_fields); i < c; i++) {
 				tinfo_sf_t *field = NULL;
-				hir_sf_t *expr_field = &expr->d_struct.fields[i];
+				hir_sf_t *expr_field = &expr_fields[i];
 
 				for (u32 j = 0, c = arrlenu(fields); j < c; j++) {
 					if (fields[j].field == expr_field->field) {

@@ -226,6 +226,7 @@ struc:
 		//   ^
 
 		hir_sf_t *sfs = NULL;
+
 			
 		while (p.token.kind != TOK_CCBR) {
 			istr_t field = p.token.lit;
@@ -234,8 +235,17 @@ struc:
 			pexpect(TOK_COLON);
 			// x: ...
 			//    ^^^
-			
+
 			hir_expr_t expr = pexpr(desc, 0);
+	
+			// ensure no duplicate fields
+			for (u32 i = 0; i < arrlenu(sfs); i++) {
+				if (sfs[i].field == field) {
+					print_err_with_pos(field_loc, "duplicate field `%s`", sv_from(field));
+					print_hint_with_pos(sfs[i].field_loc, "previous field `%s`", sv_from(sfs[i].field));
+					err_unwind();
+				}
+			}
 
 			hir_sf_t sf = {
 				.field = field,
@@ -244,7 +254,7 @@ struc:
 			};
 
 			arrpush(sfs, sf);
-			
+
 			if (p.token.kind == TOK_COMMA) {
 				pnext();
 			} else if (p.token.kind != TOK_CCBR) {

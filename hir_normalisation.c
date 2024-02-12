@@ -38,7 +38,6 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 static u8 nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
 
 static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, rlocal_t target) {
-	// TODO: duplicate below deletions
 	nblk_t* blk = &blks[expr->d_do_block.blk_id];
 	*blk = (nblk_t){
 		.dest = target,
