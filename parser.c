@@ -114,7 +114,7 @@ void pfn_shared(proc_t *proc) {
 	proc->ret_type_loc = ret_type_loc;
 }
 
-// TODO: in pident and ( after it, make that illegal
+// TODO: in pident_wstruc and ( after it, make that illegal
 //       can't define a function inside an expression
 
 // c() = 0

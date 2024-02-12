@@ -81,51 +81,6 @@ static void visit_sanity_value_sym(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 	// check `test = &test` without `: T`
 }
 
-// Foo{} -> create type from `Foo`
-// TODO: remove this...
-static type_t visit_struct_expr(rsym_t **po, hir_expr_t *expr) {
-	type_t type;
-	rsym_t symbol;
-
-	switch (expr->kind) {
-		case EXPR_LOCAL: {
-			// convert local name to symbol
-
-			istr_t name = r_desc->locals[expr->d_local].name;
-			// mod.name
-
-			symbol = table_resolve(r_mod, name);
-			type = type_new((tinfo_t){
-				.kind = TYPE_SYMBOL,
-				.d_symbol = symbol,
-			});
-
-			*expr = (hir_expr_t){
-				.kind = EXPR_SYM,
-				.loc = expr->loc,
-				.d_sym = symbol, // symbol
-				.type = type,
-			};
-			break;
-		}
-		case EXPR_SYM: {
-			symbol = expr->d_sym;
-			type = type_new((tinfo_t){
-				.kind = TYPE_SYMBOL,
-				.d_symbol = symbol,
-			});
-			break;
-		}
-		default: {
-			err_with_pos(expr->loc, "expected type, got value");
-		}
-	}
-
-	visit_sanity_type(po, type, expr->d_cast.type_loc);
-
-	return type;
-}
-
 // &expr -> direct = true
 static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr, bool direct) {
 	switch (expr->kind) {
@@ -187,11 +142,27 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 			visit_successors_hir_impl(po, rsym, expr->d_deref->d_deref, true);
 			break;
 		}
+		//
 		case EXPR_CAST: {
-			visit_successors_hir_impl(po, rsym, expr->d_cast.expr, false);
 			visit_sanity_type(po, expr->type, expr->d_cast.type_loc);
+			visit_successors_hir_impl(po, rsym, expr->d_cast.expr, false);
 			break;
 		}
+		case EXPR_STRUCT: {
+			visit_sanity_type(po, expr->type, expr->loc);			
+			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
+				visit_successors_hir_impl(po, rsym, expr->d_struct.fields[i].expr, true);
+			}
+			break;
+		}
+		case EXPR_STRUCT_POSITIONAL: {
+			visit_sanity_type(po, expr->type, expr->loc);			
+			for (u32 i = 0, c = arrlenu(expr->d_struct_positional.exprs); i < c; i++) {
+				visit_successors_hir_impl(po, rsym, &expr->d_struct_positional.exprs[i], true);
+			}
+			break;
+		}
+		//
 		case EXPR_CALL: {
 			visit_successors_hir_impl(po, rsym, expr->d_call.f, true);
 			for (u32 i = 0, c = arrlenu(expr->d_call.args); i < c; i++) {
@@ -230,20 +201,6 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 			}
 			if (expr->d_slice.hi) {
 				visit_successors_hir_impl(po, rsym, expr->d_slice.hi, true);
-			}
-			break;
-		}
-		case EXPR_STRUCT: {
-			expr->type = visit_struct_expr(po, expr->d_struct.expr);
-			for (u32 i = 0, c = arrlenu(expr->d_struct.fields); i < c; i++) {
-				visit_successors_hir_impl(po, rsym, expr->d_struct.fields[i].expr, true);
-			}
-			break;
-		}
-		case EXPR_STRUCT_POSITIONAL: {
-			expr->type = visit_struct_expr(po, expr->d_struct_positional.expr);
-			for (u32 i = 0, c = arrlenu(expr->d_struct_positional.exprs); i < c; i++) {
-				visit_successors_hir_impl(po, rsym, &expr->d_struct_positional.exprs[i], true);
 			}
 			break;
 		}

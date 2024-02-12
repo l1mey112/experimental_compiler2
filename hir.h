@@ -169,11 +169,10 @@ struct hir_expr_t {
 			} kind;
 		} d_unreachable;
 		struct {
-			hir_expr_t *expr;
-			hir_sf_t *fields;
+			hir_sf_t *fields; // type is expr->type
 		} d_struct;
 		struct {
-			hir_expr_t *expr;
+			type_t struc;
 			hir_expr_t *exprs;
 		} d_struct_positional;
 	};

@@ -414,17 +414,28 @@
 ;     Foo.voider a
 ; 
 ;     Foo.static 20
+; 
+; main(): () = do
+;     let k = &main
+;     k
+; 
+; ; TODO: normalisation remove `()` in `(): i32`
+; ; TODO: ambiguity `(i32, i32): i32` going to args = `(i32, i32)` not 1 argument tuple
+; struct Taker {
+;     a: () -> i32
+; }
+; 
+; ; curries: i32: i32: i32: ()
+; taker(b: Taker) = b.a ()
 
-main(): () = do
-    let k = &main
-    k
-
-; TODO: normalisation remove `()` in `(): i32`
-; TODO: ambiguity `(i32, i32): i32` going to args = `(i32, i32)` not 1 argument tuple
-struct Taker {
-    a: () -> i32
+struct Foo {
+    x: i32
 }
 
-; curries: i32: i32: i32: ()
+main() = do
+    let f = Foo{230}
+    let k = f.x
+    k
 
-taker(b: Taker) = b.a ()
+; globl0 = Foo{230}
+; globl1 = Foo{x: 230}

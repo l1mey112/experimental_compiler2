@@ -15,7 +15,7 @@ enum : u8 {
 	PREC_CALL,    // a b       (determined elsewhere)
 	PREC_CAST,    // :
 	PREC_PREFIX,  // - * ! &
-	PREC_POSTFIX, // ++ -- struct{}
+	PREC_POSTFIX, // ++ --
 	PREC_DOT,     // .x
 	PREC_INDEX,   // x[]
 };
@@ -30,7 +30,6 @@ u8 ptok_prec(tok_t kind) {
 			return PREC_DOT;
 		case TOK_INC:
 		case TOK_DEC:
-		case TOK_OCBR:
 			return PREC_POSTFIX;
 		case TOK_COLON:
 			return PREC_CAST;
@@ -101,8 +100,12 @@ u8 ptok_prec_ambiguities(void) {
 }
 
 // load ident ptr, set lvalue
-hir_expr_t pident() {
+// check for struct{}
+hir_expr_t pident_wstruc(ir_desc_t *desc) {
 	pcheck(TOK_IDENT);
+
+	// used on struct decl
+	rsym_t symbol;
 
 	istr_t lit = p.token.lit;
 	loc_t loc = p.token.loc;
@@ -121,11 +124,28 @@ hir_expr_t pident() {
 		istr_t lit = p.token.lit;
 		pnext();
 
-		istr_t qualified_name = fs_module_symbol_sv(p.is[id].mod, lit);
+		symbol = table_resolve(p.is[id].mod, lit);
 
-		assert(0 && "TODO: implement import symbols");
+		// is struct decl
+		if (p.token.kind == TOK_OCBR) {
+			goto struc;
+		}
+
+		return (hir_expr_t){
+			.kind = EXPR_SYM,
+			.type = TYPE_INFER,
+			.loc = loc,
+			.d_sym = symbol,
+		};
 	}
 
+	pnext();
+
+	if (p.token.kind == TOK_OCBR) {
+		symbol = table_resolve(p.mod, lit);
+		goto struc;
+	}
+	
 	// 1. for each scope entry, search for the local `lit`
 
 	for (u32 s = p.scope_len; s-- > 0;) {
@@ -145,7 +165,6 @@ hir_expr_t pident() {
 			}
 			
 			if (entry->kind == PS_LOCAL && entry->name == lit) {
-				pnext();
 
 				return (hir_expr_t){
 					.kind = EXPR_LOCAL,
@@ -161,7 +180,6 @@ hir_expr_t pident() {
 	//    insert a `PS_DEBUG_REFERENCE` to let further references know that
 	//    this variable is unresolved
 
-	pnext();
 	// used to solve below:
 	//
 	// let g = x      (error: use before declaration in same scope)
@@ -173,7 +191,7 @@ hir_expr_t pident() {
 		.name = lit,
 	});
 
-	rsym_t symbol = table_resolve(p.mod, lit);
+	symbol = table_resolve(p.mod, lit);
 
 	return (hir_expr_t){
 		.kind = EXPR_SYM,
@@ -181,6 +199,95 @@ hir_expr_t pident() {
 		.loc = loc,
 		.d_sym = symbol,
 	};
+struc:
+	// Ident{...}
+	//      ^
+	pnext();
+
+	// TODO: later, allow: &struct{}
+	// TODO: duplicate field init, check for this
+
+	// compile to two different kinds of exprs, later on perform fully qualified kind
+	//   T{1, 2}
+	//   T{a: 1, b: 2, ...xs}
+
+	type_t type = type_new((tinfo_t){
+		.kind = TYPE_SYMBOL,
+		.d_symbol = symbol,
+	});
+
+	// Ident{} -> EXPR_STRUCT
+	// not positional
+	// assume all EXPR_STRUCT_POSITIONAL has > 1 expr
+
+	// designated initialisers
+	if (p.peek.kind == TOK_COLON || p.token.kind == TOK_CCBR) {
+		// T{a: 1, b: 1}
+		//   ^
+
+		hir_sf_t *sfs = NULL;
+			
+		while (p.token.kind != TOK_CCBR) {
+			istr_t field = p.token.lit;
+			loc_t field_loc = p.token.loc;
+			pnext();
+			pexpect(TOK_COLON);
+			// x: ...
+			//    ^^^
+			
+			hir_expr_t expr = pexpr(desc, 0);
+
+			hir_sf_t sf = {
+				.field = field,
+				.field_loc = field_loc,
+				.expr = hir_dup(expr),
+			};
+
+			arrpush(sfs, sf);
+			
+			if (p.token.kind == TOK_COMMA) {
+				pnext();
+			} else if (p.token.kind != TOK_CCBR) {
+				punexpected("expected `,` or `}`");
+			}
+		}
+		pnext();
+
+		return (hir_expr_t){
+			.kind = EXPR_STRUCT,
+			.loc = loc, // TODO: should be on `expr` not `{`
+			.type = type, // EXPR_STRUCT* must have type
+			.d_struct = {
+				.fields = sfs,
+			},
+		};
+	} else {
+		// T{1, 2}
+		//   ^
+
+		hir_expr_t *exprs = NULL;
+
+		while (p.token.kind != TOK_CCBR) {
+			hir_expr_t expr = pexpr(desc, 0);
+			arrpush(exprs, expr);
+
+			if (p.token.kind == TOK_COMMA) {
+				pnext();
+			} else if (p.token.kind != TOK_CCBR) {
+				punexpected("expected `,` or `}`");
+			}
+		}
+		pnext();
+
+		return (hir_expr_t){
+			.kind = EXPR_STRUCT_POSITIONAL,
+			.loc = loc,
+			.type = type,
+			.d_struct_positional = {
+				.exprs = exprs,
+			},
+		};
+	}
 }
 
 // let without an initialiser won't generate an expr
@@ -560,7 +667,7 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 			break;
 		}
 		case TOK_IDENT: {
-			expr = pident();
+			expr = pident_wstruc(desc);
 			break;
 		}
 		case TOK_OPAR: {
@@ -747,89 +854,6 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 					.d_postfix.expr = hir_dup(expr),
 					.d_postfix.op = k,
 				};
-				continue;
-			}
-			case TOK_OCBR: {
-				// TODO: later, allow: &struct{}
-				// TODO: duplicate field init, check for this
-
-				// compile to two different kinds of exprs, later on perform fully qualified kind
-				//   T{1, 2}
-				//   T{a: 1, b: 2, ...xs}
-
-				pnext();
-				// T{1, 2}
-				//   ^
-
-				// designated initialisers
-				if (p.peek.kind == TOK_COLON) {
-					// hir_expr_t init = 
-
-					hir_sf_t *sfs = NULL;
-					
-					while (p.token.kind != TOK_CCBR) {
-						istr_t field = p.token.lit;
-						loc_t field_loc = p.token.loc;
-						pnext();
-						pexpect(TOK_COLON);
-						// x: ...
-						//    ^^^
-						
-						hir_expr_t expr = pexpr(desc, 0);
-
-						hir_sf_t sf = {
-							.field = field,
-							.field_loc = field_loc,
-							.expr = hir_dup(expr),
-						};
-
-						arrpush(sfs, sf);
-						
-						if (p.token.kind == TOK_COMMA) {
-							pnext();
-						} else if (p.token.kind != TOK_CCBR) {
-							punexpected("expected `,` or `}`");
-						}
-					}
-					pnext();
-					
-					expr = (hir_expr_t){
-						.kind = EXPR_STRUCT,
-						.loc = token.loc, // TODO: should be on `expr` not `{`
-						.type = TYPE_INFER,
-						.d_struct = {
-							.expr = hir_dup(expr),
-							.fields = sfs,
-						},
-					};
-				} else {
-					// T{1, 2}
-					//   ^
-
-					hir_expr_t *exprs = NULL;
-
-					while (p.token.kind != TOK_CCBR) {
-						hir_expr_t expr = pexpr(desc, 0);
-						arrpush(exprs, expr);
-
-						if (p.token.kind == TOK_COMMA) {
-							pnext();
-						} else if (p.token.kind != TOK_CCBR) {
-							punexpected("expected `,` or `}`");
-						}
-					}
-
-					expr = (hir_expr_t){
-						.kind = EXPR_STRUCT_POSITIONAL,
-						.loc = token.loc,
-						.type = TYPE_INFER,
-						.d_struct_positional = {
-							.expr = hir_dup(expr),
-							.exprs = exprs,
-						},
-					};
-					pnext();
-				}
 				continue;
 			}
 			case TOK_OSQ: {

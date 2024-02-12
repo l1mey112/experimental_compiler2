@@ -375,8 +375,8 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_STRUCT: {
-			_print_expr(desc, expr->d_struct.expr);
-			printf("{");
+			//_print_expr(desc, expr->d_struct.expr);
+			printf("%s{", type_dbg_str(expr->type));
 			for (int i = 0, c = arrlen(expr->d_struct.fields); i < c; i++) {
 				printf("%s: ", sv_from(expr->d_struct.fields[i].field));
 				_print_expr(desc, expr->d_struct.fields[i].expr);
@@ -388,8 +388,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_STRUCT_POSITIONAL: {
-			_print_expr(desc, expr->d_struct_positional.expr);
-			printf("{");
+			printf("%s{", type_dbg_str(expr->type));
 			for (int i = 0, c = arrlen(expr->d_struct_positional.exprs); i < c; i++) {
 				_print_expr(desc, &expr->d_struct_positional.exprs[i]);
 				if (i != c - 1) {

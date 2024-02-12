@@ -776,11 +776,10 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;
 		}
 		case EXPR_STRUCT: {
-			assert(expr->d_struct.expr->kind == EXPR_SYM);
-			assert(symbols[expr->d_struct.expr->d_sym].kind == SYMBOL_TYPE);
-
 			type_t underlying = type_underlying(expr->type);
-			assert(type_kind(underlying) == TYPE_STRUCT);
+			if (type_kind(underlying) != TYPE_STRUCT) {
+				err_with_pos(expr->loc, "not a struct type");
+			}
 
 			// assume no duplicate fields, parser has checked that
 			// TODO: they haven't...
@@ -808,7 +807,41 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 				(void)ctype_unify(field->type, expr_field->expr);
 			}
 
-			// expr->type is already set inside the reorder pass
+			// expr->type is already set in parser, validated in reorder pass
+			break;
+		}
+		case EXPR_STRUCT_POSITIONAL: {
+			type_t underlying = type_underlying(expr->type);
+			if (type_kind(underlying) != TYPE_STRUCT) {
+				err_with_pos(expr->loc, "not a struct type");
+			}
+
+			tinfo_t *info = type_get(underlying);
+			tinfo_sf_t *fields = info->d_struct.fields;
+
+			u32 c = arrlenu(fields);
+			u32 k = arrlenu(expr->d_struct_positional.exprs);
+
+			if (k > c) {
+				err_with_pos(expr->loc, "more positional fields than fields in struct");
+			}
+			if (k < c) {
+				err_with_pos(expr->loc, "less positional fields than fields in struct");
+			}
+			// just right
+
+			for (u32 i = 0; i < c; i++) {
+				tinfo_sf_t *field = &fields[i];
+				hir_expr_t *expr_field = &expr->d_struct_positional.exprs[i];
+
+				(void)cexpr(desc, field->type, expr_field, BM_RVALUE);
+				(void)ctype_unify(field->type, expr_field);
+			}
+
+			// TODO: empty structs? assert that
+			// TODO: conversion to EXPR_STRUCT ?
+
+			// expr->type is already set in parser, validated in reorder pass
 			break;
 		}
 		case EXPR_LET: {
