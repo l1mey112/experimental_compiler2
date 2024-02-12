@@ -36,4 +36,4 @@ type_t ctype_unify(type_t lhs_t, hir_expr_t *rhs);
 // auto insert UFCS calls
 void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg);
 void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg);
-void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr);
+void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t *call);

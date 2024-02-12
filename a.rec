@@ -402,11 +402,11 @@ struct Foo {
 
 ; main.Foo:incr
 
-Foo.incr(a: Foo) = 20 ; Foo{x: a.x + 1}
+Foo.incr(a: Foo, b: i32, c: i32) = b ; Foo{x: a.x + 1}
+Foo.voider(a: Foo) = ()
 
 main() = do
     let a = Foo{x: 20}
 
-    a.incr
-
-; field(a: Foo) = a.y.x
+    a.incr 20 50
+    a.voider

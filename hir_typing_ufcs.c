@@ -1,7 +1,11 @@
 #include "all.h"
 #include "check.h"
+#include "hir.h"
 
 void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr);
+
+// TODO: remove `cufcs_autocall` and make specialised functions
+//       for expressions that take a `*call` parameter
 
 // auto insert UFCS
 void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
@@ -48,6 +52,7 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	// for every arg, if it exhausts the current arguments of a function type
 	// set that return value to the list of argument types, and so on.
 
+	printf("type: %s\n", type_dbg_str(expr->d_call.f->type));
 	tinfo_t *fn_info = type_get(expr->d_call.f->type);
 
 	type_t *args = fn_info->d_fn.args;
@@ -72,12 +77,18 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 }
 
 void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
-	type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, BM_RVALUE | BM_CALL);
-	if (type_kind(f_type) != TYPE_FUNCTION) {
-		err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
+	printf("HERE\n");
+	if (expr->d_call.f->kind == EXPR_FIELD && expr->d_call.f->d_field.field != ISTR_NONE) {
+		printf("INNER\n");
+		cnamed_field(desc, TYPE_INFER, expr->d_call.f, expr);
+	} else {
+		type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, BM_RVALUE | BM_CALL);
+		if (type_kind(f_type) != TYPE_FUNCTION) {
+			err_with_pos(expr->loc, "type mismatch: expected function type, got `%s`", type_dbg_str(f_type));
+		}
 	}
 
-	ccall_args(desc, f_type, expr);
+	ccall_args(desc, TYPE_INFER, expr);
 }
 
 
@@ -105,7 +116,7 @@ istr_t ctype_qualified_name(type_t type) {
 // TODO: field access properly into call
 
 // named field access, unwrap to method/access. perform auto deref
-void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, hir_expr_t *call) {
 
 	// TODO: hmm
 	//
@@ -222,11 +233,48 @@ void cnamed_field(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		}
 		goto skip_expr0;
 	}
-skip_expr0:
 
+	// failure
+skip_expr0:;
 	// expr has been transformed. splice in a call that may fail to unify
 
-	printf("END field\n");
+	// expr = field_expr.field
+	// call = expr a b c
+
+	hir_expr_t method_sym = {
+		.kind = EXPR_SYM,
+		.type = symbol->d_proc.type,
+		.loc = field_expr->loc,
+		.d_sym = method,
+	};
+
+	// convert into:
+	//   call = T:method field_expr a b c
+	if (call) {
+		printf("HERE!\n");
+		*call->d_call.f = method_sym;
+
+		arrins(call->d_call.args, 0, *field_expr);
+
+		// TODO: remove, this should be in call expr
+		// ccall_args(desc, TYPE_INFER, call);
+	} else {
+		// call = T:method field_expr
+
+		*expr = (hir_expr_t){
+			.kind = EXPR_CALL,
+			.loc = expr->loc,
+			.type = TYPE_INFER,
+			.d_call = {
+				.f = hir_dup(method_sym),
+				.args = arr(hir_expr_t, *field_expr),
+			}
+		};
+
+		ccall_args(desc, TYPE_INFER, expr);
+	}
+
+	return;
 skip_field:
 	assert_not_reached();
 	return;
