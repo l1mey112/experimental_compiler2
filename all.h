@@ -510,10 +510,14 @@ struct sym_t {
 	// nothing else is stored here, it's just an entry with a key
 	//
 	// TODO: remove this and put inside `kind` ??
-	bool is_placeholder;
+	// bool is_placeholder;
 	
 	// TODO: also mark dead symbols that are apart of different roots
-	
+
+	// error if `mod != current mod`
+	bool is_pub;
+	bool is_extern;
+
 	enum : u8 {
 		SYM_SORT_WHITE,
 		SYM_SORT_GREY,
@@ -521,6 +525,7 @@ struct sym_t {
 	} sort_colour;
 
 	enum : u8 {
+		_SYMBOL_PLACEHOLDER, // zero init
 		SYMBOL_PROC,
 		SYMBOL_GLOBAL,
 		SYMBOL_TYPE,

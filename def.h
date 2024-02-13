@@ -53,6 +53,7 @@
 	X(TOK_IO, "io") \
 	X(TOK_IMPORT, "import") \
 	X(TOK_PUB, "pub") \
+	X(TOK_EXTERN, "extern") \
 	X(TOK_BREAK, "brk") \
 	X(TOK_CONTINUE, "rep") \
 	X(TOK_RETURN, "ret") \

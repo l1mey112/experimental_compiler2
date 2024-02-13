@@ -30,7 +30,7 @@ rsym_t table_resolve(rmod_t mod, istr_t short_name) {
 	sym_t desc = {
 		.key = qualified_name,
 		.short_name = short_name,
-		.is_placeholder = true,
+		.kind = _SYMBOL_PLACEHOLDER,
 	};
 
 	hmputs(symbols, desc);
@@ -51,7 +51,7 @@ rsym_t table_resolve_qualified_opt(istr_t qualified_name) {
 rsym_t table_register(sym_t desc) {
 	ptrdiff_t sym = hmgeti(symbols, desc.key);
 
-	if (sym != -1 && !symbols[sym].is_placeholder) {
+	if (sym != -1 && symbols[sym].kind != _SYMBOL_PLACEHOLDER) {
 		// TODO: better error message, probably module local/context
 		//       no need to print the whole qualified name
 		err_with_pos(desc.loc, "symbol `%s` already defined", sv_from(desc.key));
@@ -114,9 +114,15 @@ static void _dump_global(sym_t *sym);
 static void _dump_type(sym_t *sym);
 
 void table_dump(sym_t *sym) {
-	assert(!sym->is_placeholder);
-
 	void *_ = alloc_scratch(0);
+
+	if (sym->is_extern) {
+		printf("extern ");
+	}
+
+	if (sym->is_pub) {
+		printf("pub ");
+	}
 
 	switch (sym->kind) {
 		case SYMBOL_PROC: {
@@ -150,7 +156,7 @@ void table_dump_po(void) {
 	for (u32 i = 0, c = arrlenu(symbols_po); i < c; i++) {
 		sym_t *sym = &symbols[i];
 
-		if (sym->is_placeholder) {
+		if (sym->kind == _SYMBOL_PLACEHOLDER) {
 			continue;
 		}
 		

@@ -3,6 +3,21 @@
 
 pctx_t p;
 
+typedef struct pattrib_t pattrib_t;
+
+struct pattrib_t {
+	bool is_pub;
+	bool is_extern;
+	//istr_t export_name; // != ISTR_NONE is extern
+	//loc_t export_loc;
+};
+
+#define POP_ATTRIB(attrib, field) ({ \
+		bool field = attrib->field;  \
+		attrib->field = false;       \
+		field;                       \
+	})
+
 type_t pfn_arg(ir_desc_t *desc) {
 	bool is_mut = false;
 	
@@ -135,7 +150,7 @@ void pfn_shared(proc_t *proc) {
 //       can't define a function inside an expression
 
 // c() = 0
-void pfn(void) {
+void pfn(pattrib_t *attrib) {
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
@@ -155,13 +170,15 @@ void pfn(void) {
 		.loc = name_loc,
 		.kind = SYMBOL_PROC,
 		.d_proc = proc,
+		.is_pub = POP_ATTRIB(attrib, is_pub),
+		.is_extern = POP_ATTRIB(attrib, is_extern),
 	});
 }
 
 // TODO: inside hir reorder sanity passes, check that the struct
 //       doesn't have any conflicting methods as fields
 // TODO: allow i32.function()
-void pmethod(void) {
+void pmethod(pattrib_t *attrib) {
 	pcheck(TOK_IDENT);
 	
 	istr_t sym = p.token.lit;
@@ -195,10 +212,12 @@ void pmethod(void) {
 		.loc = name_loc,
 		.kind = SYMBOL_PROC,
 		.d_proc = proc,
+		.is_pub = POP_ATTRIB(attrib, is_pub),
+		.is_extern = POP_ATTRIB(attrib, is_extern),
 	});
 }
 
-void ptop_global(void) {
+void ptop_global(pattrib_t *attrib) {
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
@@ -248,10 +267,12 @@ void ptop_global(void) {
 			.is_mut = is_mut,
 			.type_loc = type_loc,
 		},
+		.is_pub = POP_ATTRIB(attrib, is_pub),
+		.is_extern = POP_ATTRIB(attrib, is_extern),
 	});
 }
 
-void pstruct(void) {
+void pstruct(pattrib_t *attrib) {
 	pnext();
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
@@ -324,11 +345,12 @@ void pstruct(void) {
 			.type = type_new(struc),
 			.debug = struc_loc,
 		},
+		.is_pub = POP_ATTRIB(attrib, is_pub),
 	});
 }
 
 // semantically these are "newtype"
-void palias() {
+void palias(pattrib_t *attrib) {
 	pnext();
 	pcheck(TOK_IDENT);
 	istr_t name = p.token.lit;
@@ -362,6 +384,7 @@ void palias() {
 			.type = type,
 			.debug = alias_loc,
 		},
+		.is_pub = POP_ATTRIB(attrib, is_pub),
 	});
 }
 
@@ -374,43 +397,68 @@ void ptop_stmt(void) {
 	loc_t oloc = p.token.loc;
 	bool is_pub = false;
 
+	pattrib_t attrib = {};
+
+	// extern extern  (no duplicates)
+	// pub pub        (no duplicates)
+	// pub extern     (wrong order)
+	// extern pub ... (just right)
+
 	retry: switch (p.token.kind) {
 		case TOK_IMPORT: {
 			pimport();
 			break;
 		}
 		case TOK_PUB: {
-			// TODO: `pub pub pub pub` works...
-			is_pub = true;
+			if (attrib.is_pub) {
+				err_with_pos(p.token.loc, "duplicate `pub`");
+			}
+			attrib.is_pub = true;
 			pnext();
+			goto retry;
+		}
+		case TOK_EXTERN: {
+			if (attrib.is_extern) {
+				err_with_pos(p.token.loc, "duplicate `extern`");
+			}
+			attrib.is_extern = true;
+			if (attrib.is_pub) {
+				err_with_pos(p.token.loc, "wrong order, `extern` should be applied to `pub`");
+			}
+			pnext();
+			// TODO: string literals and extern "something"
 			goto retry;
 		}
 		case TOK_IDENT: {
 			if (p.peek.kind == TOK_OPAR) {
-				pfn();
+				pfn(&attrib);
 				break;
 			}
 
 			if (p.peek.kind == TOK_DOT) {
-				pmethod();
+				pmethod(&attrib);
 				break;
 			}
 
-			ptop_global();
+			ptop_global(&attrib);
 			break;	
 		}
 		// todo make this just a normal decl statement and not restricted to toplevel
 		case TOK_STRUCT: {
-			pstruct();
+			pstruct(&attrib);
 			break;
 		}
 		case TOK_TYPE: {
-			palias();
+			palias(&attrib);
 			break;
 		}
 		default: {
 			punexpected("expected top-level statement");
 		}
+	}
+
+	if (attrib.is_pub || attrib.is_extern) {
+		err_with_pos(oloc, "attribute unused");
 	}
 }
 

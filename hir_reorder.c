@@ -1,17 +1,25 @@
 #include "all.h"
 #include "hir.h"
 
-// TODO: move to arguments (or just ctx struct)
-static rmod_t r_mod;
-static ir_desc_t *r_desc;
-
 static void visit_po(rsym_t **po, rsym_t rsym);
 static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror);
+
+static rmod_t r_mod;
+
+static void check_pub(loc_t onerror, rsym_t rsym) {
+	sym_t *sym = &symbols[rsym];
+
+	if (!sym->is_pub && sym->mod != r_mod) {
+		err_with_pos(onerror, "symbol `%s` is not public", sv_from(sym->key));
+	}
+}
 
 // all sym that have referents will go through here
 static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc_t onerror, bool indirect) {
 	sym_t *sym = &symbols[rsym];
 	sym_t *succ = &symbols[rsucc];
+
+	check_pub(onerror, rsucc);
 
 	if (succ->sort_colour == SYM_SORT_GREY) {
 		// global = &global      (not allowed, need annotation)
@@ -70,7 +78,7 @@ static void visit_sanity_value_sym(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
 	// sanity, can't be type
 	sym_t *sym = &symbols[expr->d_sym];
 
-	if (sym->is_placeholder) {
+	if (sym->kind == _SYMBOL_PLACEHOLDER) {
 		err_with_pos(expr->loc, "unknown ident `%s`", sv_from(sym->short_name));
 	}
 
@@ -329,7 +337,9 @@ static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror) {
 		}
 		case TYPE_SYMBOL: {
 			sym_t *sym = &symbols[info->d_symbol];
-			if (sym->is_placeholder) {
+			check_pub(onerror, info->d_symbol);
+			
+			if (sym->kind == _SYMBOL_PLACEHOLDER) {
 				err_with_pos(onerror, "unknown type `%s`", sv_from(sym->short_name));
 			}
 			if (sym->kind != SYMBOL_TYPE) {
@@ -409,6 +419,8 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 
 	sym->sort_colour = SYM_SORT_GREY;
 
+	r_mod = sym->mod;
+
 	// typesymbols are self referencial types, we only need to check for
 	// cycles in the symbol table
 
@@ -417,9 +429,13 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 		case SYMBOL_PROC: {
 			proc_t *proc = &sym->d_proc;
 
-			r_mod = sym->mod;
-			r_desc = &proc->desc;
-			
+			for (u32 i = 0, c = arrlenu(proc->desc.locals); i < c; i++) {
+				local_t *local = &proc->desc.locals[i];
+				if (local->type != TYPE_INFER) {
+					visit_sanity_type(po, local->type, local->type_loc);
+				}
+			}
+
 			visit_successors_hir(po, rsym, &proc->desc.hir);
 			if (proc->ret_type != TYPE_INFER) {
 				visit_sanity_type(po, proc->ret_type, proc->ret_type_loc);
@@ -429,9 +445,6 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 		}
 		case SYMBOL_GLOBAL: {
 			global_t *global = &sym->d_global;
-
-			r_mod = sym->mod;
-			r_desc = &global->desc;
 			
 			visit_successors_hir(po, rsym, &sym->d_global.desc.hir);
 			visit_desc_locals(po, global->desc.locals);
@@ -510,7 +523,7 @@ void hir_reorder(void) {
 		sym_t *sym = &symbols[rsym];
 
 		// ignore
-		if (sym->is_placeholder) {
+		if (sym->kind == _SYMBOL_PLACEHOLDER) {
 			continue;
 		}
 
