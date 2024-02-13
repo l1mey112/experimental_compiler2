@@ -287,7 +287,11 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_INTEGER_LIT: {
-			printf("%s", sv_from(expr->d_integer_lit));
+			if (type_is_signed(expr->type)) {
+				printf("%ld", expr->d_integer);
+			} else {
+				printf("%lu", expr->d_integer);
+			}
 			break;
 		}
 		case EXPR_BOOL_LIT: {

@@ -354,6 +354,44 @@ const char *type_dbg_str(type_t type);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);
 
+typedef struct arch_t arch_t;
+typedef struct platform_t platform_t;
+typedef struct target_t target_t;
+
+#define X_ARCHS \
+	X(ARCH_AMD64, "amd64")
+
+#define X_PLATFORMS \
+	X(PLATFORM_C, "c")
+
+struct arch_t {
+	enum : u8 {
+		#define X(arch, name) arch,
+			X_ARCHS
+		#undef X
+	} kind;
+
+	u8 ptr_size;
+};
+
+struct platform_t {
+	enum : u8 {
+		#define X(platform, name) platform,
+			X_PLATFORMS
+		#undef X
+	} kind;
+};
+
+struct target_t {
+	arch_t arch;
+	platform_t platform;
+};
+
+extern target_t target;
+
+const char *target_string(target_t target);
+target_t target_host(void);
+
 // only checks for literals
 bool type_is_literal_number(type_t type);
 // checks for literals
@@ -365,12 +403,17 @@ bool type_is_float(type_t type);
 bool type_is_signed(type_t type);
 bool type_is_unsigned(type_t type);
 
-#define TYPE_SIZE_DIVERGING ((u32)-1)
-u32 type_sizeof(type_t type);
+// for ZSTs, regardless of ABI it returns the same 0
+
+bool type_is_diverging(type_t type);
+
+u32 type_sizeof(arch_t *abi, type_t type);
 
 // alignment throws on types where `TYPE_SIZE_DIVERGING` would be returned
 // also throws for ZSTs
-u32 type_alignof(type_t type);
+u32 type_alignof(arch_t *abi, type_t type);
+
+bool type_integer_fits_in(arch_t *arch, u64 lit, type_t type);
 
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
@@ -503,41 +546,3 @@ istr_t table_type_qualified_name(type_t type);
 rsym_t table_register(sym_t desc);
 void table_dump(sym_t *sym);
 void table_dump_all(void);
-
-typedef struct arch_t arch_t;
-typedef struct platform_t platform_t;
-typedef struct target_t target_t;
-
-#define X_ARCHS \
-	X(ARCH_AMD64, "amd64")
-
-#define X_PLATFORMS \
-	X(PLATFORM_C, "c")
-
-struct arch_t {
-	enum : u8 {
-		#define X(arch, name) arch,
-			X_ARCHS
-		#undef X
-	} kind;
-
-	u8 ptr_size;
-};
-
-struct platform_t {
-	enum : u8 {
-		#define X(platform, name) platform,
-			X_PLATFORMS
-		#undef X
-	} kind;
-};
-
-struct target_t {
-	arch_t arch;
-	platform_t platform;
-};
-
-extern target_t target;
-
-const char *target_string(target_t target);
-target_t target_host(void);

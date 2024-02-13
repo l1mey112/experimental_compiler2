@@ -340,8 +340,14 @@ const char *type_dbg_str(type_t type) {
 	return (const char *)oldp;
 }
 
-// relies on target arch
-u32 type_sizeof(type_t type) {
+bool type_is_diverging(type_t type) {
+	// TODO: search through structs etc
+	
+	return type == TYPE_BOTTOM;
+}
+
+// relies on ABI
+u32 type_sizeof(arch_t *arch, type_t type) {
 	ti_kind kind = type_kind(type);
 
 	// TODO: store type size on typeinfo
@@ -352,18 +358,20 @@ u32 type_sizeof(type_t type) {
 		case TYPE_I16: return 2;
 		case TYPE_I32: return 4;
 		case TYPE_I64: return 8;
-		case TYPE_ISIZE: return target.arch.ptr_size;
+		case TYPE_ISIZE: return arch->ptr_size;
 		case TYPE_U8: return 1;
 		case TYPE_U16: return 2;
 		case TYPE_U32: return 4;
 		case TYPE_U64: return 8;
-		case TYPE_USIZE: return target.arch.ptr_size;
+		case TYPE_USIZE: return arch->ptr_size;
 		case TYPE_F32: return 4;
 		case TYPE_F64: return 8;
 		case TYPE_BOOL: return 1;
 		//
 		case TYPE_UNIT: return 0;
-		case TYPE_BOTTOM: return TYPE_SIZE_DIVERGING;
+		case TYPE_BOTTOM: {
+			assert_not_reached();
+		}
 		// TYPE_TUPLE
 		// TYPE_FUNCTION
 		// TYPE_CLOSURE
@@ -379,7 +387,8 @@ u32 type_sizeof(type_t type) {
 	}
 }
 
-u32 type_alignof(type_t type) {
+// relies on ABI
+u32 type_alignof(arch_t *arch, type_t type) {
 	ti_kind kind = type_kind(type);
 
 	// TODO: 32 bit systems and below
@@ -389,12 +398,12 @@ u32 type_alignof(type_t type) {
 		case TYPE_I16: return 2;
 		case TYPE_I32: return 4;
 		case TYPE_I64: return 8;
-		case TYPE_ISIZE: return target.arch.ptr_size;
+		case TYPE_ISIZE: return arch->ptr_size;
 		case TYPE_U8: return 1;
 		case TYPE_U16: return 2;
 		case TYPE_U32: return 4;
 		case TYPE_U64: return 8;
-		case TYPE_USIZE: return target.arch.ptr_size;
+		case TYPE_USIZE: return arch->ptr_size;
 		case TYPE_F32: return 4;
 		case TYPE_F64: return 8;
 		case TYPE_BOOL: return 1;
@@ -407,7 +416,7 @@ u32 type_alignof(type_t type) {
 		// TYPE_SLICE
 		// TYPE_ARRAY
 		// TYPE_SYMBOL
-		case TYPE_UNIT:
+		case TYPE_UNIT: return 1;
 		case TYPE_BOTTOM: {
 			assert_not_reached();
 		}
@@ -416,4 +425,47 @@ u32 type_alignof(type_t type) {
 			assert_not_reached();
 		}
 	}
+}
+
+// taken from rustc ABI/consteval overflow errors
+
+static u64 truncate(arch_t *arch, type_t type, u64 lit) {
+	u32 bits = type_sizeof(arch, type) * 8;
+
+	if (bits == 0) {
+		return 0;
+	}
+
+	u32 shift = 64 - bits;
+
+	return (lit << shift) >> shift;
+}
+
+static u64 sign_extend(arch_t *arch, type_t type, u64 lit) {
+	u32 bits = type_sizeof(arch, type) * 8;
+
+	if (bits == 0) {
+		return 0;
+	}
+
+	u32 shift = 64 - bits;
+
+	return (u64)(((i64)(lit << shift)) >> shift);
+}
+
+// checks integer size
+// ensure type is numeric
+bool type_integer_fits_in(arch_t *arch, u64 lit, type_t type) {
+	assert(type_is_integer(type));
+
+	u64 trunc = truncate(arch, type, lit);
+
+	bool fits_in;
+	if (type_is_signed(type)) {
+		fits_in = sign_extend(arch, type, trunc) == lit;
+	} else {
+		fits_in = trunc == lit;
+	}
+
+	return fits_in;
 }

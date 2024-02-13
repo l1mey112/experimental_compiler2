@@ -376,14 +376,25 @@ void cpattern(ir_desc_t *desc, pattern_t *pattern, type_t type) {
 	}
 }
 
+static void integer_fits_in(loc_t onerror, type_t type, u64 lit) {
+	if (!type_integer_fits_in(&target.arch, lit, type)) {
+		err_with_pos(onerror, "integer literal cannot fit inside type `%s`", type_dbg_str(type));
+	}
+}
+
+static void cinteger_lit(type_t upvalue, hir_expr_t *expr) {
+	if (upvalue != TYPE_INFER && type_is_integer(upvalue)) {
+		expr->type = upvalue;
+	} else {
+		expr->type = TYPE_I32;
+	}
+}
+
 type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 	switch (expr->kind) {
 		case EXPR_INTEGER_LIT: {
-			if (upvalue != TYPE_INFER && type_is_integer(upvalue)) {
-				expr->type = upvalue;
-			} else {
-				expr->type = TYPE_I32;
-			}
+			cinteger_lit(upvalue, expr);
+			integer_fits_in(expr->loc, expr->type, expr->d_integer);
 			break;
 		}
 		case EXPR_BOOL_LIT: {
@@ -532,7 +543,16 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;
 		}
 		case EXPR_PREFIX: {
-			type_t type = cexpr(desc, upvalue, expr->d_prefix.expr, BM_RVALUE);
+			// don't raise error on (-128):i8 through it recursing and
+			// checking (128):i8 without the negation. check seperately
+			type_t type;
+			if (expr->d_prefix.op == EXPR_K_SUB && expr->d_prefix.expr->kind == EXPR_INTEGER_LIT) {
+				cinteger_lit(upvalue, expr->d_prefix.expr);				
+				type = expr->d_prefix.expr->type;
+				integer_fits_in(expr->loc, type, -expr->d_prefix.expr->d_integer);
+			} else {
+				type = cexpr(desc, upvalue, expr->d_prefix.expr, BM_RVALUE);
+			}
 
 			switch (expr->d_prefix.op) {
 				case EXPR_K_NOT: {

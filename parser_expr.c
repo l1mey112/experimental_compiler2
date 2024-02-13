@@ -1,6 +1,7 @@
 #include "all.h"
 #include "hir.h"
 #include "parser.h"
+#include <errno.h>
 
 enum : u8 {
 	PREC_UNKNOWN, // default
@@ -788,11 +789,18 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 			break;
 		}
 		case TOK_INTEGER: {
+			u64 lit = strtoull(sv_from(token.lit), NULL, 10);
+
+			// we won't get any other error
+			if (errno == ERANGE) {
+				err_with_pos(token.loc, "integer literal too large to fit in 64 bits");
+			}
+
 			expr = (hir_expr_t){
 				.kind = EXPR_INTEGER_LIT,
 				.loc = token.loc,
 				.type = TYPE_INFER,
-				.d_integer_lit = token.lit,
+				.d_integer = lit,
 			};
 			pnext();
 			break;

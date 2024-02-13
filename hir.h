@@ -65,7 +65,7 @@ struct hir_expr_t {
 			hir_expr_t *expr;
 			loc_t type_loc; // type is stored inside `type`
 		} d_cast;
-		istr_t d_integer_lit;
+		u64 d_integer;
 		bool d_bool_lit;
 		struct {
 			hir_expr_t *expr;

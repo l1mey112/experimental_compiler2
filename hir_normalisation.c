@@ -26,9 +26,12 @@ nblk_t blks[128];
 // after normalisation, all mentions of ZSTs are removed.
 // no shuffling, no construction, no nothing
 static bool is_trivial_zst(type_t type) {
-	u32 s = type_sizeof(type);
+	if (type_is_diverging(type)) {
+		return true;
+	}
 
-	return s == 0 || s == TYPE_SIZE_DIVERGING;
+	u32 s = type_sizeof(&target.arch, type);
+	return s == 0;
 }
 
 #define DIVERGING(expr) if ((expr) == ST_DIVERGING) { return ST_DIVERGING; }
@@ -701,7 +704,7 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 						.kind = EXPR_INTEGER_LIT,
 						.type = expr->type,
 						.loc = expr->loc,
-						.d_integer_lit = sv_move("1"),
+						.d_integer = 1,
 					}),
 				},
 			};
@@ -888,13 +891,16 @@ static void nproc(proc_t *proc) {
 	for (u32 i = 0, c = arrlenu(proc->arguments); i < c; i++) {
 		local_t *local = &proc->desc.locals[proc->arguments[i]];
 
-		u32 s = type_sizeof(local->type);
-
-		if (s == TYPE_SIZE_DIVERGING) {
+		if (type_is_diverging(local->type)) {
 			diverging = true;
+			local->kind = _LOCAL_ZST_DELETED;
+			continue;
 		}
 
-		if (s == TYPE_SIZE_DIVERGING || s == 0) {
+		// can't call sizeof on diverging types
+		u32 s = type_sizeof(&target.arch, local->type);
+
+		if (s == 0) {
 			local->kind = _LOCAL_ZST_DELETED;
 		} else {
 			arrpush(narguments, proc->arguments[i]);
@@ -948,10 +954,10 @@ static void nglobal(global_t *global) {
 		},
 	};
 
-	// eval
+	/* // eval
 	extern void hir_eval_global(global_t *global);
 
-	hir_eval_global(global);
+	hir_eval_global(global); */
 }
 
 void hir_normalisation(void) {
