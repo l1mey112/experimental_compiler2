@@ -113,7 +113,7 @@ ret:;
 			break;
 		}
 
-		table_dump_all();
+		table_dump_po();
 	}
 
 	return err;

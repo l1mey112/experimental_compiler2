@@ -146,8 +146,8 @@ void _print_tabs(void) {
 	}
 }
 
-void table_dump_all(void) {
-	for (u32 i = 0, c = hmlenu(symbols); i < c; i++) {
+void table_dump_po(void) {
+	for (u32 i = 0, c = arrlenu(symbols_po); i < c; i++) {
 		sym_t *sym = &symbols[i];
 
 		if (sym->is_placeholder) {
@@ -158,33 +158,6 @@ void table_dump_all(void) {
 	}
 }
 
-
-	/* tsymbol_t *typeinfo = &sym->d_type;
-
-	switch (typeinfo->kind) {
-		case TYPESYMBOL_STRUCT: {
-			if (arrlenu(typeinfo->d_struct.fields) == 0) {
-				printf("struct %s {}\n", sv_from(sym->key));
-				break;
-			}
-			
-			printf("struct %s {\n", sv_from(sym->key));
-			for (u32 i = 0, c = arrlenu(typeinfo->d_struct.fields); i < c; i++) {
-				tsymbol_sf_t *f = &typeinfo->d_struct.fields[i];
-				printf("  %s: %s\n", sv_from(f->field), type_dbg_str(f->type));
-			}
-			printf("}\n");
-			break;
-		}
-		case TYPESYMBOL_ALIAS: {
-			break;
-		}
-		default: {
-			assert_not_reached();
-		}
-	}
-	
-	//printf(" = %s\n", type_dbg_str(sym->type)); */
 static void _dump_type(sym_t *sym) {
 	printf("type %s = %s\n", sv_from(sym->key), type_dbg_str(sym->d_type.type));
 }
@@ -287,11 +260,7 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_INTEGER_LIT: {
-			if (type_is_signed(expr->type)) {
-				printf("%ld", expr->d_integer);
-			} else {
-				printf("%lu", expr->d_integer);
-			}
+			printf("%lu", expr->d_integer);
 			break;
 		}
 		case EXPR_BOOL_LIT: {

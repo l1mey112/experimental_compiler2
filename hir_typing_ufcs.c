@@ -52,7 +52,6 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	// for every arg, if it exhausts the current arguments of a function type
 	// set that return value to the list of argument types, and so on.
 
-	printf("type: %s\n", type_dbg_str(expr->d_call.f->type));
 	tinfo_t *fn_info = type_get(expr->d_call.f->type);
 
 	type_t *args = fn_info->d_fn.args;
@@ -80,9 +79,7 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	u8 cfg = BM_RVALUE | BM_CALL;
 	
-	printf("HERE\n");
 	if (expr->d_call.f->kind == EXPR_FIELD && expr->d_call.f->d_field.field != ISTR_NONE) {
-		printf("INNER\n");
 		cnamed_field(desc, TYPE_INFER, expr->d_call.f, expr, cfg);
 	} else {
 		type_t f_type = cexpr(desc, TYPE_INFER, expr->d_call.f, cfg);

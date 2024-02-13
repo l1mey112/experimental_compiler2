@@ -450,7 +450,7 @@ static u64 sign_extend(arch_t *arch, type_t type, u64 lit) {
 
 	u32 shift = 64 - bits;
 
-	return (u64)(((i64)(lit << shift)) >> shift);
+	return (i64)(lit << shift) >> shift;
 }
 
 // checks integer size

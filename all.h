@@ -545,4 +545,4 @@ rsym_t table_resolve_method(type_t bare_type, istr_t method);
 istr_t table_type_qualified_name(type_t type);
 rsym_t table_register(sym_t desc);
 void table_dump(sym_t *sym);
-void table_dump_all(void);
+void table_dump_po(void);
