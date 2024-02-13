@@ -175,5 +175,6 @@
 	X(TOK_EOF, "EOF") \
 	X(TOK_IDENT, "identifier") \
 	X(TOK_INTEGER, "integer") \
+	X(TOK_STRING, "string") \
 	TOK_X_KEYWORDS_LIST \
 	TOK_X_OPERATOR_LIST

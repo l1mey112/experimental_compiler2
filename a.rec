@@ -500,9 +500,15 @@
 ; u64min: u64 = 0
 ; u64max: u64 = 18446744073709551615
 
-import mod
+; import mod
+; 
+; main() {
+;     let k = mod.factacc 0
+;     ; let v: mod.Test
+; }
 
-main() {
-    let k = mod.factacc 0
-    ; let v: mod.Test
-}
+; TODO: C type for `*c_int` instead of `*i32`
+
+extern "__errno_location" errno_ptr(): *i32
+extern global: i32
+extern "_start" mystart() = 20

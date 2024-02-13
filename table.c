@@ -118,6 +118,10 @@ void table_dump(sym_t *sym) {
 
 	if (sym->is_extern) {
 		printf("extern ");
+
+		if (sym->extern_symbol != sym->key) {
+			printf("\"%s\" ", sv_from(sym->extern_symbol));
+		}
 	}
 
 	if (sym->is_pub) {
@@ -551,16 +555,19 @@ static void _dump_function(sym_t *sym) {
 		}
 	}
 
-	printf(") -> %s hir = ", type_dbg_str(proc->ret_type));
+	printf("): %s", type_dbg_str(proc->ret_type));
 
-	if (proc->desc.hir.kind == EXPR_DO_BLOCK) {
-		_print_expr(desc, &desc->hir);
-	} else {
-		printf("\n");
-		_tabs++;
-		_print_tabs();
-		_print_expr(desc, &desc->hir);
-		_tabs--;
+	if (desc->hir) {
+		printf(" hir = ");
+		if (desc->hir->kind == EXPR_DO_BLOCK) {
+			_print_expr(desc, desc->hir);
+		} else {
+			printf("\n");
+			_tabs++;
+			_print_tabs();
+			_print_expr(desc, desc->hir);
+			_tabs--;
+		}
 	}
 	printf("\n\n");
 }
@@ -575,7 +582,12 @@ static void _dump_global(sym_t *sym) {
 		printf("'");
 	}
 
-	printf(" hir = ");
-	_print_expr(desc, &desc->hir);
+	printf(": %s", type_dbg_str(global->type));
+
+	if (desc->hir) {
+		printf(" hir");
+		_print_expr(desc, desc->hir);
+	}
+
 	printf("\n");
 }

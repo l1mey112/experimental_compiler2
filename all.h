@@ -460,7 +460,7 @@ rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 
 struct ir_desc_t {
 	local_t *locals; // variables
-	hir_expr_t hir;
+	hir_expr_t *hir; // possible NULL
 	u32 next_blk_id; // each block id must be unique
 };
 
@@ -516,7 +516,8 @@ struct sym_t {
 
 	// error if `mod != current mod`
 	bool is_pub;
-	bool is_extern;
+	bool is_extern; // exposed to the outside world. for globals and procs
+	istr_t extern_symbol; // always set. either supplied by user or `key`
 
 	enum : u8 {
 		SYM_SORT_WHITE,

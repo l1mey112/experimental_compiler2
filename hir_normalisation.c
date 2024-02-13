@@ -882,7 +882,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 static void nproc(proc_t *proc) {
 	hir_expr_t *stmts = NULL;
-	hir_expr_t *hir = hir_dup(proc->desc.hir);
+	hir_expr_t *hir = proc->desc.hir;
 
 	bool diverging = false;
 
@@ -926,14 +926,14 @@ static void nproc(proc_t *proc) {
 		arrpush(stmts, unreachable);
 	}
 
-	proc->desc.hir = (hir_expr_t){
+	proc->desc.hir = hir_dup((hir_expr_t){
 		.kind = EXPR_DO_BLOCK,
 		.type = TYPE_BOTTOM,
 		.d_do_block = {
 			.exprs = stmts,
 			.blk_id = BLK_ID_NONE,
 		},
-	};
+	});
 }
 
 static void nglobal(global_t *global) {
@@ -941,18 +941,18 @@ static void nglobal(global_t *global) {
 	// for consteval after normalisation, we'll have to add a `ret` to the end of the block
 
 	hir_expr_t *stmts = NULL;
-	hir_expr_t *hir = hir_dup(global->desc.hir);
+	hir_expr_t *hir = global->desc.hir;
 
 	nhir_expr_target(&global->desc, &stmts, hir, TARGET_RETURN);
 
-	global->desc.hir = (hir_expr_t){
+	global->desc.hir = hir_dup((hir_expr_t){
 		.kind = EXPR_DO_BLOCK,
 		.type = TYPE_BOTTOM,
 		.d_do_block = {
 			.exprs = stmts,
 			.blk_id = BLK_ID_NONE,
 		},
-	};
+	});
 
 	/* // eval
 	extern void hir_eval_global(global_t *global);
@@ -965,12 +965,20 @@ void hir_normalisation(void) {
 		rsym_t rsym = symbols_po[i];
 		sym_t *sym = &symbols[rsym];
 
+		// after checking, it's assumed that only extern symbols can have no body
+
 		switch (sym->kind) {
 			case SYMBOL_PROC: {
+				if (sym->d_proc.desc.hir == NULL) {
+					continue;
+				}
 				nproc(&sym->d_proc);
 				break;
 			}
 			case SYMBOL_GLOBAL: {
+				if (sym->d_global.desc.hir == NULL) {
+					continue;
+				}
 				nglobal(&sym->d_global);
 				break;
 			} 

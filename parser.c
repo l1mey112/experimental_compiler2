@@ -8,8 +8,7 @@ typedef struct pattrib_t pattrib_t;
 struct pattrib_t {
 	bool is_pub;
 	bool is_extern;
-	//istr_t export_name; // != ISTR_NONE is extern
-	//loc_t export_loc;
+	istr_t export_symbol;
 };
 
 #define POP_ATTRIB(attrib, field) ({ \
@@ -87,7 +86,7 @@ void pfn_shared(proc_t *proc) {
 
 	type_t ret_type = TYPE_INFER;
 	loc_t ret_type_loc = {};
-	hir_expr_t expr;
+	hir_expr_t *expr = NULL;
 
 	proc->desc.next_blk_id++; // save pos for later
 	p.blks[p.blks_len++] = (pblk_t){
@@ -100,13 +99,13 @@ void pfn_shared(proc_t *proc) {
 		ret_type = TYPE_UNIT;
 		
 		// will jmp to `{}` or `do`
-		expr = pexpr(&proc->desc, 0);
-		expr = (hir_expr_t){
+		expr = hir_dup(pexpr(&proc->desc, 0));
+		expr = hir_dup((hir_expr_t){
 			.kind = EXPR_VOIDING,
-			.loc = expr.loc,
+			.loc = expr->loc,
 			.type = TYPE_UNIT,
-			.d_voiding = hir_dup(expr),
-		};
+			.d_voiding = expr,
+		});
 	} else {
 		// ): ...
 		//  ^
@@ -119,9 +118,10 @@ void pfn_shared(proc_t *proc) {
 		// add(a: i32, b: i32) = a + b
 		//                     ^
 
-		pexpect(TOK_ASSIGN);
-
-		expr = pexpr(&proc->desc, 0);
+		if (p.token.kind == TOK_ASSIGN) {
+			pnext();
+			expr = hir_dup(pexpr(&proc->desc, 0));
+		}
 	}
 	ppop_scope();
 	ppop_scope();
@@ -163,6 +163,12 @@ void pfn(pattrib_t *attrib) {
 
 	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
 
+	istr_t extern_symbol = qualified_name;
+
+	if (attrib->is_extern && attrib->export_symbol != ISTR_NONE) {
+		extern_symbol = attrib->export_symbol;
+	}
+
 	table_register((sym_t){
 		.key = qualified_name,
 		.mod = p.mod,
@@ -172,6 +178,7 @@ void pfn(pattrib_t *attrib) {
 		.d_proc = proc,
 		.is_pub = POP_ATTRIB(attrib, is_pub),
 		.is_extern = POP_ATTRIB(attrib, is_extern),
+		.extern_symbol = extern_symbol,
 	});
 }
 
@@ -205,6 +212,12 @@ void pmethod(pattrib_t *attrib) {
 	// main.Foo:function
 	istr_t selector = fs_module_symbol_selector(qualified_name, name);
 
+	istr_t extern_symbol = selector;
+
+	if (attrib->is_extern && attrib->export_symbol != ISTR_NONE) {
+		extern_symbol = attrib->export_symbol;
+	}
+
 	table_register((sym_t){
 		.key = selector,
 		.mod = p.mod,
@@ -214,6 +227,7 @@ void pmethod(pattrib_t *attrib) {
 		.d_proc = proc,
 		.is_pub = POP_ATTRIB(attrib, is_pub),
 		.is_extern = POP_ATTRIB(attrib, is_extern),
+		.extern_symbol = extern_symbol,
 	});
 }
 
@@ -250,10 +264,19 @@ void ptop_global(pattrib_t *attrib) {
 	// v = 
 	//   ^
 
-	pexpect(TOK_ASSIGN);
-
 	ir_desc_t desc = {};
-	desc.hir = pexpr(&desc, 0);
+	// parser will check this
+
+	if (p.token.kind == TOK_ASSIGN) {
+		pnext();
+		desc.hir = hir_dup(pexpr(&desc, 0));
+	}
+
+	istr_t extern_symbol = qualified_name;
+
+	if (attrib->is_extern && attrib->export_symbol != ISTR_NONE) {
+		extern_symbol = attrib->export_symbol;
+	}
 
 	table_register((sym_t){
 		.key = qualified_name,
@@ -269,6 +292,7 @@ void ptop_global(pattrib_t *attrib) {
 		},
 		.is_pub = POP_ATTRIB(attrib, is_pub),
 		.is_extern = POP_ATTRIB(attrib, is_extern),
+		.extern_symbol = extern_symbol,
 	});
 }
 
@@ -346,6 +370,7 @@ void pstruct(pattrib_t *attrib) {
 			.debug = struc_loc,
 		},
 		.is_pub = POP_ATTRIB(attrib, is_pub),
+		.extern_symbol = ISTR_NONE,
 	});
 }
 
@@ -385,6 +410,7 @@ void palias(pattrib_t *attrib) {
 			.debug = alias_loc,
 		},
 		.is_pub = POP_ATTRIB(attrib, is_pub),
+		.extern_symbol = ISTR_NONE,
 	});
 }
 
@@ -426,7 +452,11 @@ void ptop_stmt(void) {
 				err_with_pos(p.token.loc, "wrong order, `extern` should be applied to `pub`");
 			}
 			pnext();
-			// TODO: string literals and extern "something"
+			attrib.export_symbol = ISTR_NONE;
+			if (p.token.kind == TOK_STRING) {
+				attrib.export_symbol = p.token.lit;
+				pnext();
+			}
 			goto retry;
 		}
 		case TOK_IDENT: {

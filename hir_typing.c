@@ -3,7 +3,7 @@
 
 cctx_t c;
 
-void cproc(proc_t *proc) {
+void cproc(sym_t *sym, proc_t *proc) {
 	c = (cctx_t){};
 
 	cblk_t *blk = &c.blocks[0]; // we saved space for this in parser.c
@@ -29,48 +29,59 @@ void cproc(proc_t *proc) {
 		}
 	}
 
-	type_t expr_type = cexpr(&proc->desc, proc->ret_type, &proc->desc.hir, BM_RVALUE);
+	// it's possible for these to have no body
+	// no body is okay only if it's extern
 
-	type_t ret_type;
+	if (sym->is_extern && proc->desc.hir == NULL && !ret_annotated) {
+		err_with_pos(sym->loc, "extern proc with no body must have a type annotation");
+	} else if (proc->desc.hir) {
+		type_t expr_type = cexpr(&proc->desc, proc->ret_type, proc->desc.hir, BM_RVALUE);
 
-	// unify the types of all `ret` and the resulting expression
-	// if the proc is annotated, the `brk_type` will be the exact
-	// same as the return type.
+		// unify the types of all `ret` and the resulting expression
+		// if the proc is annotated, the `brk_type` will be the exact
+		// same as the return type.
 
-	if (ret_annotated) {
-		(void)ctype_unify(proc->ret_type, &proc->desc.hir);
-		ret_type = proc->ret_type;
-	} else {
-		if (blk->brk_type == TYPE_INFER) {
-			ret_type = expr_type;
+		if (ret_annotated) {
+			(void)ctype_unify(proc->ret_type, proc->desc.hir);
 		} else {
-			(void)ctype_unify(blk->brk_type, &proc->desc.hir);
-			ret_type = blk->brk_type;
+			if (blk->brk_type == TYPE_INFER) {
+				proc->ret_type = expr_type;
+			} else {
+				(void)ctype_unify(blk->brk_type, proc->desc.hir);
+				proc->ret_type = blk->brk_type;
+			}
+		}
+
+		if (!ret_annotated) {
+			proc->type = type_new((tinfo_t){
+				.kind = TYPE_FUNCTION,
+				.d_fn = {
+					.args = args_types,
+					.ret = proc->ret_type,
+				},
+			});
 		}
 	}
-
-	if (!ret_annotated) {
-		proc->type = type_new((tinfo_t){
-			.kind = TYPE_FUNCTION,
-			.d_fn = {
-				.args = args_types,
-				.ret = ret_type,
-			},
-		});
-	}
-
-	proc->ret_type = ret_type;
 }
 
-void cglobal(global_t *global) {
+void cglobal(sym_t *sym, global_t *global) {
 	c = (cctx_t){};
 
-	type_t ret = cexpr(&global->desc, global->type, &global->desc.hir, BM_RVALUE);
+	// it's possible for these to have no body
+	// no body is okay only if it's extern
 
-	if (global->type == TYPE_INFER) {
-		global->type = ret;
-	} else {
-		ctype_unify(global->type, &global->desc.hir);
+	bool ret_annotated = global->type != TYPE_INFER;
+
+	if (sym->is_extern && global->desc.hir == NULL && !ret_annotated) {
+		err_with_pos(sym->loc, "extern global with no initialiser must have a type annotation");
+	} else if (global->desc.hir) {
+		type_t ret = cexpr(&global->desc, global->type, global->desc.hir, BM_RVALUE);
+
+		if (global->type == TYPE_INFER) {
+			global->type = ret;
+		} else {
+			ctype_unify(global->type, global->desc.hir);
+		}
 	}
 }
 
@@ -81,11 +92,11 @@ void hir_typing(void) {
 
 		switch (sym->kind) {
 			case SYMBOL_PROC: {
-				cproc(&sym->d_proc);
+				cproc(sym, &sym->d_proc);
 				break;
 			}
 			case SYMBOL_GLOBAL: {
-				cglobal(&sym->d_global);
+				cglobal(sym, &sym->d_global);
 				break;
 			} 
 			case SYMBOL_TYPE: {

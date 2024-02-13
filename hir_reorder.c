@@ -429,14 +429,9 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 		case SYMBOL_PROC: {
 			proc_t *proc = &sym->d_proc;
 
-			for (u32 i = 0, c = arrlenu(proc->desc.locals); i < c; i++) {
-				local_t *local = &proc->desc.locals[i];
-				if (local->type != TYPE_INFER) {
-					visit_sanity_type(po, local->type, local->type_loc);
-				}
+			if (proc->desc.hir) {
+				visit_successors_hir(po, rsym, proc->desc.hir);
 			}
-
-			visit_successors_hir(po, rsym, &proc->desc.hir);
 			if (proc->ret_type != TYPE_INFER) {
 				visit_sanity_type(po, proc->ret_type, proc->ret_type_loc);
 			}
@@ -446,11 +441,13 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 		case SYMBOL_GLOBAL: {
 			global_t *global = &sym->d_global;
 			
-			visit_successors_hir(po, rsym, &sym->d_global.desc.hir);
-			visit_desc_locals(po, global->desc.locals);
+			if (global->desc.hir) {
+				visit_successors_hir(po, rsym, global->desc.hir);
+			}
 			if (global->type != TYPE_INFER) {
 				visit_sanity_type(po, global->type, global->type_loc);
 			}
+			visit_desc_locals(po, global->desc.locals);
 			break;
 		}
 		case SYMBOL_TYPE: {
