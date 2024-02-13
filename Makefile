@@ -16,12 +16,13 @@ ifeq ($(shell lsb_release -si 2>/dev/null),Debian)
 	CC := clang
 endif
 
+_ := $(shell mkdir -p $(BUILD_DIR))
+
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(CFLAGS)
 
 $(BUILD_DIR)/%.c.o: %.c
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 .PHONY: clean
 clean:

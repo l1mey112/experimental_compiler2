@@ -31,11 +31,11 @@ const char *target_string(target_t target) {
 target_t target_host(void) {
 	target_t target = {
 		.arch = {
-			.kind = ARCH_AMD64,
+			.kind = ARCH_C64,
 			.ptr_size = 8,
 		},
 		.platform = {
-			.kind = PLATFORM_C,
+			.kind = PLATFORM_LIBC,
 		},
 	};
 	return target;

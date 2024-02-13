@@ -359,10 +359,10 @@ typedef struct platform_t platform_t;
 typedef struct target_t target_t;
 
 #define X_ARCHS \
-	X(ARCH_AMD64, "amd64")
+	X(ARCH_C64, "c64")
 
 #define X_PLATFORMS \
-	X(PLATFORM_C, "c")
+	X(PLATFORM_LIBC, "libc")
 
 struct arch_t {
 	enum : u8 {
