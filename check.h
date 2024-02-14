@@ -15,8 +15,8 @@ struct cblk_t {
 };
 
 struct cctx_t {
-	rmod_t mod;
-	mod_t *modp;
+	fs_rmod_t mod;
+	fs_mod_t *modp;
 	cblk_t blocks[128]; // overkill, index by blk_id
 };
 

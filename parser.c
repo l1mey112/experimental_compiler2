@@ -492,8 +492,8 @@ void ptop_stmt(void) {
 	}
 }
 
-void compiler_process_file(rfile_t file) {
-	file_t *f = FILE_PTR(file);
+void compiler_process_file(fs_rfile_t file) {
+	fs_file_t *f = FILE_PTR(file);
 	
 	p = (pctx_t){
 		.pstart = f->data,

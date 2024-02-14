@@ -37,15 +37,15 @@ typedef struct loc_t loc_t;
 typedef struct err_diag_t err_diag_t;
 typedef struct token_t token_t;
 typedef u16 type_t;
-typedef u16 rmod_t;
-typedef u16 rfile_t;
-typedef struct mod_t mod_t;
-typedef struct file_t file_t;
+typedef u16 fs_rmod_t;
+typedef u16 fs_rfile_t;
+typedef struct fs_mod_t fs_mod_t;
+typedef struct fs_file_t fs_file_t;
 
 // a handle to an interned string
 typedef u32 istr_t;
 
-#define RMOD_NONE ((rmod_t)-1)
+#define RMOD_NONE ((fs_rmod_t)-1)
 #define RSYM_NONE ((rsym_t)-1)
 #define ISTR_NONE ((istr_t)-1)
 
@@ -154,7 +154,7 @@ struct loc_t {
 	u32 col;
 	u32 pos;
 	u16 len;
-	rfile_t file;
+	fs_rfile_t file;
 };
 
 struct token_t {
@@ -281,42 +281,35 @@ struct tinfo_t {
 // TODO: fancy arena allocators? fuck that!
 //       we're going for a quick and dirty bootstrap
 
-struct mod_t {
-	struct disk_t {
-		bool is_stub;
-		bool is_files_read;
+struct fs_mod_t {
+	enum : u8 {
+		MOD_STUB,    // unclassified
+		MOD_CHILD,   // contains files
+		MOD_INCLUDE, // doesn't include files, include path
+		MOD_RT,      // runtime module
+		MOD_MAIN,    // main module
+	} kind;
 
-		
-		enum : u8 {
-			MOD_INCLUDE = 1 << 0,
-			MOD_MAIN = 1 << 1,
-			MOD_RT = 1 << 2,
-		} flags;
+	istr_t key;  // fully qualified name (memoised)
+	istr_t name; // short
 
-		const char *path;
-		//
-		rmod_t parent;
-		rmod_t *children;
-		u32 children_len;
-		istr_t name; // shortname
-		u32 files_count;
-	} on_disk;
+	const char *path;
 
-	/* hir_scope_t toplevel;
-	hir_node_t *exprs; */
+	fs_rmod_t parent;
+	fs_rmod_t *children;
 };
 
-struct file_t {
+struct fs_file_t {
 	const char *fp;
 	u8 *data;
 	size_t len;
-	rmod_t mod;
+	fs_rmod_t mod;
 };
 
 extern u32 fs_files_queue_len;
-extern file_t fs_files_queue[512];
+extern fs_file_t fs_files_queue[512];
 extern u32 fs_mod_arena_len;
-extern mod_t fs_mod_arena[128];
+extern fs_mod_t fs_mod_arena[128];
 extern tinfo_t types[1024];
 extern u32 type_len;
 
@@ -324,16 +317,16 @@ extern u32 type_len;
 #define FILE_PTR(file) (&fs_files_queue[file])
 
 void fs_set_entry_argp(const char *argp);
-rfile_t fs_set_entry_repl(void); // will register current directory
-rmod_t fs_register_root(const char *dp);
-rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
-istr_t fs_module_symbol_sv(rmod_t mod, istr_t symbol);
+fs_rfile_t fs_set_entry_repl(void); // will register current directory
+fs_rmod_t fs_register_root(const char *dp);
+fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
+istr_t fs_module_symbol_sv(fs_rmod_t mod, istr_t symbol);
 // return qualified_name:selector
 istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector);
-const char *fs_module_symbol_str(rmod_t mod, istr_t symbol);
+const char *fs_module_symbol_str(fs_rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
 
-void compiler_process_file(rfile_t f);
+void compiler_process_file(fs_rfile_t f);
 void compiler_pass_all(void);
 
 type_t type_array_or_slice_to_slice(type_t type);
@@ -510,7 +503,7 @@ struct local_t {
 struct sym_t {
 	istr_t key; // key into hashmap, fully qualified name
 	//
-	rmod_t mod;
+	fs_rmod_t mod;
 	istr_t short_name;
 	loc_t loc;
 
@@ -551,7 +544,7 @@ struct sym_t {
 extern sym_t *symbols;
 extern rsym_t *symbols_po;
 
-rsym_t table_resolve(rmod_t mod, istr_t short_name);
+rsym_t table_resolve(fs_rmod_t mod, istr_t short_name);
 // returns RSYM_NONE if not found
 rsym_t table_resolve_qualified_opt(istr_t qualified_name);
 // returns RSYM_NONE if not found

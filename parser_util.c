@@ -337,7 +337,7 @@ void pimport(void) {
 
 	// TODO: import k as v
 
-	rmod_t mod = fs_register_import(p.mod, fields, fields_len, oloc);
+	fs_rmod_t mod = fs_register_import(p.mod, fields, fields_len, oloc);
 	istr_t module_ident = fields[fields_len - 1];
 
 	for (u32 i = 0; i < p.is_len; i++) {

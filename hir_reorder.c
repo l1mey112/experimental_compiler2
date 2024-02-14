@@ -4,7 +4,7 @@
 static void visit_po(rsym_t **po, rsym_t rsym);
 static void visit_sanity_type(rsym_t **po, type_t type, loc_t onerror);
 
-static rmod_t r_mod;
+static fs_rmod_t r_mod;
 
 static void check_pub(loc_t onerror, rsym_t rsym) {
 	sym_t *sym = &symbols[rsym];

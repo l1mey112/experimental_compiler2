@@ -21,7 +21,7 @@ struct pblk_t {
 };
 
 struct pimport_t {
-	rmod_t mod;
+	fs_rmod_t mod;
 	istr_t name;
 	loc_t loc;
 };
@@ -70,9 +70,9 @@ struct pctx_t {
 	pblk_t blks[256]; // not a stack, shared throughout the entire function. index by blocks len
 	u32 blks_len;
 	//
-	rfile_t file;
-	rmod_t mod;
-	mod_t *modp;
+	fs_rfile_t file;
+	fs_rmod_t mod;
+	fs_mod_t *modp;
 	bool has_done_imports;
 };
 

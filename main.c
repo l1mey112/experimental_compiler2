@@ -23,7 +23,7 @@ void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
 	vsnprintf(err_string, sizeof(err_string), fmt, args);
 	va_end(args);
 
-	file_t *file = FILE_PTR(loc.file);
+	fs_file_t *file = FILE_PTR(loc.file);
 
 	if (isatty(fileno(stdout))) {
 		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, file->fp, loc.line_nr + 1, loc.col + 1, err_string);	
@@ -67,7 +67,7 @@ int main(int argc, const char *argv[]) {
 		fs_set_entry_argp(argv[1]);
 		
 		// queue can grow
-		for (rfile_t i = 0; i < fs_files_queue_len; i++) {
+		for (fs_rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
 			printf("parsing file '%s'\n", fs_files_queue[i].fp);
 			compiler_process_file(i);
