@@ -285,6 +285,14 @@ struct mod_t {
 	struct disk_t {
 		bool is_stub;
 		bool is_files_read;
+
+		
+		enum : u8 {
+			MOD_INCLUDE = 1 << 0,
+			MOD_MAIN = 1 << 1,
+			MOD_RT = 1 << 2,
+		} flags;
+
 		const char *path;
 		//
 		rmod_t parent;

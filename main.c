@@ -56,6 +56,8 @@ int main(int argc, const char *argv[]) {
 
 	target = target_host();
 
+	// fs_register_root(const char *dp)
+
 	if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
 			err = true;

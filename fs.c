@@ -11,7 +11,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-
 // TODO: find name and extension
 #define FILE_EXTENSION "rec"
 
@@ -19,6 +18,7 @@ static const char *last_path(const char* path);
 static const char *base_path(const char* path);
 static const char *make_relative(const char *cwd, const char *path);
 static bool is_our_ext(const char *fp);
+static const char *relative_path_of_exe(void);
 
 // TODO: i don't want to make this public just expose a single function to handle file or directory inputs
 
@@ -177,12 +177,25 @@ static rmod_t _fs_set_entry_file(const char *fp) {
 	return mod;
 }
 
+/* void _fs_import_lib(void) {
+	const char *exe_path = relative_path_of_exe();
+	char *lib_path;
+	if (*exe_path == '\0') {
+		lib_path = "lib";
+	} else {
+		asprintf(&lib_path, "%s/lib", exe_path);
+	}
+	printf("test: %s\n", lib_path);
+} */
+
 void fs_set_entry_argp(const char *argp) {
 	if (is_our_ext(argp)) {
 		_fs_set_entry_file(argp);
 	} else {
 		_fs_set_entry_root(argp);
 	}
+
+	// _fs_import_lib();
 }
 
 // roots are searched left to right, for their enclosing directories
@@ -284,7 +297,7 @@ static const char *_fs_path_to_str(istr_t *path, u32 path_len) {
 }
 
 // the final path is the target module
-static rmod_t _fs_locate_node(rmod_t mod, istr_t *path, u32 path_len, loc_t onerror) {
+static rmod_t _fs_locate_node(rmod_t mod, istr_t *path, u32 path_len) {
 	for (u32 i = 0; i < path_len; i++) {
 		istr_t name = path[i];
 		mod_t *modp = MOD_PTR(mod);
@@ -322,7 +335,7 @@ rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror)
 	assert(path_len > 0);
 
 	// case 1:
-	rmod_t found = _fs_locate_node(src, path, path_len, onerror);
+	rmod_t found = _fs_locate_node(src, path, path_len);
 
 	assert(found != src); // i don't know how this could happen
 	if (found != RMOD_NONE) {
@@ -331,7 +344,7 @@ rmod_t fs_register_import(rmod_t src, istr_t *path, u32 path_len, loc_t onerror)
 
 	// case 2:
 	for (u32 i = 0; i < fs_roots_len; i++) {
-		found = _fs_locate_node(fs_roots[i], path, path_len, onerror);
+		found = _fs_locate_node(fs_roots[i], path, path_len);
 		if (found != RMOD_NONE) {
 			goto found;
 		}
@@ -422,4 +435,22 @@ bool is_our_ext(const char *fp) {
         return false;
     }
     return strcmp(fp + len - strlen(FILE_EXTENSION), FILE_EXTENSION) == 0;
+}
+
+const char *relative_path_of_exe(void) {
+	#ifndef __linux__ 
+		#error "not portable to places other than linux"
+	#endif
+
+	char *scratch = (char *)alloc_scratch(0);
+	ssize_t len = readlink("/proc/self/exe", scratch, PATH_MAX);
+	if (len < 0) {
+		err_without_pos("could not read `/proc/self/exe`");
+	}
+	scratch[len] = '\0';
+	const char *exe_path = base_path(scratch); // will dup
+	if (!getcwd(scratch, PATH_MAX)) {
+		err_without_pos("could not get current working directory");
+	}
+	return strdup(make_relative(scratch, exe_path));
 }
