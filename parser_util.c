@@ -343,7 +343,7 @@ void pimport(void) {
 	for (u32 i = 0; i < p.is_len; i++) {
 		pimport_t *is = &p.is[i];
 		if (is->mod == mod) {
-			err_with_pos(oloc, "import `%s` already imported", fs_module_symbol_str(is->mod, module_ident));
+			err_with_pos(oloc, "import `%s` already imported", sv_from(fs_module_symbol(is->mod, module_ident)));
 		} else if (is->name == module_ident) {
 			err_with_pos(oloc, "import name `%s` already used", sv_from(module_ident));
 		}

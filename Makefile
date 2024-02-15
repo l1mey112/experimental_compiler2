@@ -9,7 +9,7 @@ SRCS := $(shell find . -maxdepth 1 -name '*.c')
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 
 DEPS := $(OBJS:.o=.d)
-CFLAGS := -MMD -MP -O0 -ggdb -fsanitize=undefined,address
+CFLAGS := -MMD -MP -O0 -ggdb -std=gnu2x -fsanitize=undefined,address
 
 # debian as usual ships an extremely old version of GCC
 ifeq ($(shell lsb_release -si 2>/dev/null),Debian)

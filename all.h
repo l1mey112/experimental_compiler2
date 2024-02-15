@@ -284,14 +284,14 @@ struct tinfo_t {
 struct fs_mod_t {
 	enum : u8 {
 		MOD_STUB,    // unclassified
-		MOD_CHILD,   // contains files
+		MOD_CHILD,   // child module, possibly contains files
 		MOD_INCLUDE, // doesn't include files, include path
 		MOD_RT,      // runtime module
 		MOD_MAIN,    // main module
 	} kind;
 
 	istr_t key;  // fully qualified name (memoised)
-	istr_t name; // short
+	istr_t short_name; // short
 
 	const char *path;
 
@@ -316,15 +316,13 @@ extern u32 type_len;
 #define MOD_PTR(mod) (&fs_mod_arena[mod])
 #define FILE_PTR(file) (&fs_files_queue[file])
 
-void fs_set_entry_argp(const char *argp);
-fs_rfile_t fs_set_entry_repl(void); // will register current directory
 fs_rmod_t fs_register_root(const char *dp);
 fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
-istr_t fs_module_symbol_sv(fs_rmod_t mod, istr_t symbol);
+istr_t fs_module_symbol(fs_rmod_t mod, istr_t symbol);
 // return qualified_name:selector
 istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector);
-const char *fs_module_symbol_str(fs_rmod_t mod, istr_t symbol);
 void fs_dump_tree(void);
+void fs_entrypoint(const char *argv);
 
 void compiler_process_file(fs_rfile_t f);
 void compiler_pass_all(void);

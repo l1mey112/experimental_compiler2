@@ -20,7 +20,7 @@ sym_t *symbols;
 rsym_t *symbols_po;
 
 rsym_t table_resolve(fs_rmod_t mod, istr_t short_name) {
-	istr_t qualified_name = fs_module_symbol_sv(mod, short_name);
+	istr_t qualified_name = fs_module_symbol(mod, short_name);
 	ptrdiff_t sym = hmgeti(symbols, qualified_name);
 	
 	if (sym != -1) {

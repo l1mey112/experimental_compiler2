@@ -18,7 +18,7 @@ static const char *last_path(const char* path);
 static const char *base_path(const char* path);
 static const char *make_relative(const char *cwd, const char *path);
 static bool is_our_ext(const char *fp);
-static const char *relative_path_of_exe(void);
+static const char *relative_directory_of_exe(void);
 
 // TODO: i don't want to make this public just expose a single function to handle file or directory inputs
 
@@ -437,7 +437,7 @@ bool is_our_ext(const char *fp) {
     return strcmp(fp + len - strlen(FILE_EXTENSION), FILE_EXTENSION) == 0;
 }
 
-const char *relative_path_of_exe(void) {
+const char *relative_directory_of_exe(void) {
 	#ifndef __linux__ 
 		#error "not portable to places other than linux"
 	#endif

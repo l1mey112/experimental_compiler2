@@ -161,7 +161,7 @@ void pfn(pattrib_t *attrib) {
 	proc_t proc = {};
 	pfn_shared(&proc);
 
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+	istr_t qualified_name = fs_module_symbol(p.mod, name);
 
 	istr_t extern_symbol = qualified_name;
 
@@ -207,7 +207,7 @@ void pmethod(pattrib_t *attrib) {
 	pfn_shared(&proc);
 
 	// main.Foo
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, sym);
+	istr_t qualified_name = fs_module_symbol(p.mod, sym);
 
 	// main.Foo:function
 	istr_t selector = fs_module_symbol_selector(qualified_name, name);
@@ -236,7 +236,7 @@ void ptop_global(pattrib_t *attrib) {
 	istr_t name = p.token.lit;
 	loc_t name_loc = p.token.loc;
 
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+	istr_t qualified_name = fs_module_symbol(p.mod, name);
 
 	bool is_mut = false;
 
@@ -357,7 +357,7 @@ void pstruct(pattrib_t *attrib) {
 		.d_struct = loc_fields,
 	};
 
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+	istr_t qualified_name = fs_module_symbol(p.mod, name);
 
 	table_register((sym_t){
 		.key = qualified_name,
@@ -392,7 +392,7 @@ void palias(pattrib_t *attrib) {
 	loc_t type_loc = p.token.loc;
 	type_t type = ptype();
 
-	istr_t qualified_name = fs_module_symbol_sv(p.mod, name);
+	istr_t qualified_name = fs_module_symbol(p.mod, name);
 
 	typesymbol_debug_t alias_loc = {
 		.kind = TYPESYMBOL_ALIAS,

@@ -64,7 +64,7 @@ int main(int argc, const char *argv[]) {
 			goto ret;
 		}
 
-		fs_set_entry_argp(argv[1]);
+		fs_entrypoint(argv[1]);
 		
 		// queue can grow
 		for (fs_rfile_t i = 0; i < fs_files_queue_len; i++) {
