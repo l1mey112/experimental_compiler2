@@ -14,11 +14,14 @@
 // TODO: find name and extension
 #define FILE_EXTENSION "rec"
 
+static const char *global_cwd;
+static u32 global_cwd_len;
+
 static const char *last_path(const char* path);
-static const char *base_path(const char* path);
-static const char *make_relative(const char *cwd, const char *path);
+static void base_path_in_place(char* path);
+static const char *make_relative(const char *path);
 static bool is_our_ext(const char *fp);
-static const char *relative_directory_of_exe(void);
+static const char *absolute_directory_of_exe(void);
 
 // TODO: delete MOD_PTR
 // TODO: delete repl mode
@@ -220,13 +223,20 @@ void fs_register_include(const char *dp) {
 // TODO: pretty_path() reads in absolute path and cwd 
 // TODO: with the above path comparisons become easy
 
+// only call this once
 void fs_entrypoint(const char *argv) {
 	const char *bp;
 	bool is_single_file = is_our_ext(argv);
-	
+
+	argv = realpath(argv, NULL);
+	if (argv == NULL) {
+		err_without_pos("failed to resolve path '%s' (errno: %s)", argv, strerror(errno));
+	}
+
 	if (is_single_file) {
 		// slurp file into the main module
-		bp = base_path(argv);
+		bp = strdup(argv);
+		base_path_in_place((char *)bp);
 	} else {
 		// slurp all files into main module
 		bp = argv;
@@ -240,28 +250,29 @@ void fs_entrypoint(const char *argv) {
 		.parent = RMOD_NONE,
 	});
 
+	// single files create a single module, then read
+	// everything else in as supporting modules
 	if (is_single_file) {
-		// read in singular fiile at `argv`
+		// read in singular file at `argv`
 		_fs_read_file(argv, main);
+		fs_register_include(bp);
+	} else {
+		_fs_populate(main, true);
 	}
-
-	_fs_populate(main, !is_single_file);
 
 	// create lib
 
 	char *lib_path;
 
-	const char *exe_path = relative_directory_of_exe();
-
-	if (*exe_path == '\0') {
-		lib_path = "lib";
-	} else {
-		asprintf(&lib_path, "%s/lib/", exe_path);
-	}
+	const char *exe_path = absolute_directory_of_exe();
+	asprintf(&lib_path, "%s/lib", exe_path);
 
 	// roots are searched in order
 	_fs_nroot(main);
 	fs_register_include(lib_path);
+
+	global_cwd = get_current_dir_name();
+	global_cwd_len = strlen(global_cwd);
 }
 
 // the final path is the target module
@@ -363,7 +374,7 @@ bool is_our_ext(const char *fp) {
 	return strdup(sp + 1);
 }
 
-const char *base_path(const char* path) {
+/* const char *base_path(const char* path) {
 	const char* sp = strrchr(path, '/');
 
 	if (sp == NULL) {
@@ -376,13 +387,32 @@ const char *base_path(const char* path) {
 	memcpy(base, path, len);
 	base[len] = '\0';
 
+	printf("base: %s\n", base);
+
 	return base;
+} */
+
+// call with file path
+// assumes no trailing slash
+// /file
+void base_path_in_place(char* path) {
+	char* sp = strrchr(path, '/');
+
+	assert(sp != NULL);
+
+	if (sp == path) {
+		path[1] = '\0';
+	} else {
+		*sp = '\0';
+	}
 }
 
-const char *make_relative(const char *cwd, const char *path) {
-	if (strlen(cwd) > strlen(path)) {
+// walk forward
+const char *make_relative(const char *path) {
+	if (global_cwd_len > strlen(path)) {
 		return path;
 	}
+	char *cwd = (char *)global_cwd;
 	while (*cwd != '\0' && *cwd == *path) {
 		cwd++;
 		path++;
@@ -390,27 +420,22 @@ const char *make_relative(const char *cwd, const char *path) {
 	while (*path != '\0' && *path == '/') {
 		path++;
 	}
+	if (*path == '\0') {
+		return ".";
+	}
 	return path;
 }
 
-const char *relative_directory_of_exe(void) {
+// no trailing slashes: /home/user
+const char *absolute_directory_of_exe(void) {
 	#ifndef __linux__ 
 		#error "not portable to places other than linux"
 	#endif
 
-	char *scratch = (char *)alloc_scratch(0);
-	ssize_t len = readlink("/proc/self/exe", scratch, PATH_MAX);
-	if (len < 0) {
-		err_without_pos("could not read `/proc/self/exe`");
-	}
-	scratch[len] = '\0';
-	const char *exe_path = base_path(scratch); // will dup
-	if (!getcwd(scratch, PATH_MAX)) {
-		err_without_pos("could not get current working directory");
-	}
-	return strdup(make_relative(scratch, exe_path));
+	char *exe = realpath("/proc/self/exe", NULL);
+	base_path_in_place(exe);
+	return exe;
 }
-
 
 u32 _fs_dt_tabs;
 
@@ -440,7 +465,7 @@ static void _fs_dump_tree(fs_rmod_t rmod) {
 		printf("%s", sv_from(mod->key));
 	}
 
-	printf(" [%s] %s\n", kind_str, mod->path);
+	printf(" [%s] %s\n", kind_str, make_relative(mod->path));
 
 	_fs_dt_tabs++;
 	for (u32 i = 0, c = arrlenu(mod->children); i < c; i++) {
