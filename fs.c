@@ -140,6 +140,27 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 		err_without_pos("failed to open directory '%s' (errno: %s)", mod->path, strerror(errno));
 	}
 
+	bool read_dirs;
+
+	switch (mod->kind) {
+		case MOD_LAZY_CHILD: {
+			read_dirs = false;
+			break;
+		}
+		case MOD_STUB:
+		case MOD_MAIN:
+		case MOD_INCLUDE: {
+			read_dirs = true;
+			break;
+		}
+		//
+		case MOD_CHILD:
+		case MOD_RT: {
+			printf("kind: %d\n", mod->kind);
+			assert_not_reached();
+		}
+	}
+
 	struct dirent *entry;
 	struct stat statbuf;
 
@@ -156,12 +177,13 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 			err_without_pos("failed to stat '%s' (errno: %s)", fsp, strerror(errno));
 		}
 
-		if (S_ISDIR(statbuf.st_mode)) {
+		if (read_dirs && S_ISDIR(statbuf.st_mode)) {
 			// lazily load folders and source files
 			fs_rmod_t child = _fs_nstub(fsp, rmod);
 			arrpush(mod->children, child);
-		} else if (S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name) && read_files) {
+		} else if (read_files && S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name)) {
 			_fs_read_file_with_size(fsp, rmod, statbuf.st_size);
+			mod->files_count++;
 		}
 	}
 
@@ -170,6 +192,12 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 	}
 
 	if (mod->kind == MOD_STUB) {
+		if (read_files) {
+			mod->kind = MOD_CHILD;
+		} else if (read_dirs) {
+			mod->kind = MOD_LAZY_CHILD;
+		}
+	} else if (mod->kind == MOD_LAZY_CHILD && read_files) {
 		mod->kind = MOD_CHILD;
 	}
 }
@@ -224,7 +252,6 @@ void fs_entrypoint(const char *argv) {
 	char *lib_path;
 
 	const char *exe_path = relative_directory_of_exe();
-	printf("exe path: %s", exe_path);
 
 	if (*exe_path == '\0') {
 		lib_path = "lib";
@@ -232,18 +259,90 @@ void fs_entrypoint(const char *argv) {
 		asprintf(&lib_path, "%s/lib/", exe_path);
 	}
 
-
-
 	// roots are searched in order
 	_fs_nroot(main);
 	fs_register_include(lib_path);
+}
 
-	// register lib and walk it
-	//assert_not_reached();
+// the final path is the target module
+static fs_rmod_t _fs_locate_node(fs_rmod_t rmod, istr_t *path, u32 path_len) {
+	for (u32 i = 0; i < path_len; i++) {
+		istr_t name = path[i];
+		fs_mod_t *o_mod = &fs_mod_arena[rmod];
+
+		bool found = false;
+		for (u32 j = 0, c = arrlenu(o_mod->children); j < c; j++) {
+			fs_rmod_t child = o_mod->children[j];
+			fs_mod_t *childp = MOD_PTR(child);
+			if (childp->short_name == name) {
+				rmod = child;
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			return RMOD_NONE;
+		}
+
+		bool is_last = i + 1 == path_len;
+		fs_mod_t *mod = &fs_mod_arena[rmod];
+
+		if (mod->kind != MOD_CHILD) {
+			_fs_populate(rmod, is_last);
+		}
+	}
+
+	return rmod;
+}
+
+static const char *_fs_path_to_str(istr_t *path, u32 path_len) {
+	u8 *p = alloc_scratch(0);
+	u8 *po = p;
+	for (u32 i = 0; i < path_len; i++) {
+		const char *sv = sv_from(path[i]);
+		p += ptrcpy(p, (u8 *)sv, strlen(sv));
+		if (i + 1 < path_len) {
+			*p++ = '.';
+		}
+	}
+	*p = '\0';
+	alloc_scratch(p - po + 1);
+	return (const char *)po;
 }
 
 fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t onerror) {
-	assert_not_reached();
+	// case 1:
+	//   find the module relative to `src`
+	// case 2:
+	//   find the module relative to roots
+	// case 3:
+	//   error!
+
+	assert(path_len > 0);
+
+	// case 1:
+	fs_rmod_t found = _fs_locate_node(src, path, path_len);
+
+	if (found != RMOD_NONE) {
+		goto found;
+	}
+
+	// case 2:
+	for (u32 i = 0; i < fs_roots_len; i++) {
+		found = _fs_locate_node(fs_roots[i], path, path_len);
+		if (found != RMOD_NONE) {
+			goto found;
+		}
+	}
+
+	// case 3:
+	err_with_pos(onerror, "could not find module `%s`", _fs_path_to_str(path, path_len));
+found:
+	if (fs_mod_arena[found].files_count == 0) {
+		err_with_pos(onerror, "module `%s` has no files", _fs_path_to_str(path, path_len));
+	}
+	return found;
 }
 
 bool is_our_ext(const char *fp) {
@@ -326,6 +425,7 @@ static void _fs_dump_tree(fs_rmod_t rmod) {
 	switch (mod->kind) {
 		case MOD_STUB: kind_str = "stub"; break;
 		case MOD_CHILD: kind_str = "child"; break;
+		case MOD_LAZY_CHILD: kind_str = "lazy child"; break;
 		case MOD_INCLUDE: kind_str = "include"; break;
 		case MOD_RT: kind_str = "rt"; break;
 		case MOD_MAIN: kind_str = "main"; break;
@@ -340,7 +440,7 @@ static void _fs_dump_tree(fs_rmod_t rmod) {
 		printf("%s", sv_from(mod->key));
 	}
 
-	printf(" [%s]\n", kind_str);
+	printf(" [%s] %s\n", kind_str, mod->path);
 
 	_fs_dt_tabs++;
 	for (u32 i = 0, c = arrlenu(mod->children); i < c; i++) {

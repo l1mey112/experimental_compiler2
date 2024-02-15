@@ -323,7 +323,7 @@ void pimport(void) {
 		punexpected("import declaration must come before code");
 	}
 	
-	loc_t oloc = p.token.loc;
+	loc_t oloc = p.peek.loc;
 	istr_t fields[64]; // no one is gonna do this... right?
 	u32 fields_len = 0;
 
@@ -336,6 +336,9 @@ void pimport(void) {
 	} while(p.token.kind == TOK_DOT);
 
 	// TODO: import k as v
+
+	// TODO: also would be a nice error message if it could
+	//       tell you "up to" where it matched the module path
 
 	fs_rmod_t mod = fs_register_import(p.mod, fields, fields_len, oloc);
 	istr_t module_ident = fields[fields_len - 1];

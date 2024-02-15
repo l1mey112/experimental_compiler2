@@ -283,20 +283,23 @@ struct tinfo_t {
 
 struct fs_mod_t {
 	enum : u8 {
-		MOD_STUB,    // unclassified
-		MOD_CHILD,   // child module, possibly contains files
-		MOD_INCLUDE, // doesn't include files, include path
-		MOD_RT,      // runtime module
-		MOD_MAIN,    // main module
+		MOD_STUB,       // head of the tree
+		MOD_LAZY_CHILD, // path traversed, files are lazy
+		MOD_CHILD,      // child module, fully inspected dirpath and files
+		MOD_INCLUDE,    // doesn't include files, include path
+		MOD_RT,         // runtime module
+		MOD_MAIN,       // main module
 	} kind;
 
-	istr_t key;  // fully qualified name (memoised)
+	istr_t key;  // fully qualified
 	istr_t short_name; // short
 
 	const char *path;
 
-	fs_rmod_t parent;
 	fs_rmod_t *children;
+	fs_rmod_t parent;
+	
+	u32 files_count;
 };
 
 struct fs_file_t {

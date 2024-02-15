@@ -585,7 +585,7 @@ static void _dump_global(sym_t *sym) {
 	printf(": %s", type_dbg_str(global->type));
 
 	if (desc->hir) {
-		printf(" hir");
+		printf(" hir = ");
 		_print_expr(desc, desc->hir);
 	}
 

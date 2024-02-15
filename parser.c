@@ -48,7 +48,7 @@ type_t pfn_arg(ir_desc_t *desc) {
 		.name = name,
 		.loc = name_loc,
 		.kind = PS_LOCAL,
-		.d_local = local,
+		.d_local = { local },
 	});
 
 	return arg_type;
@@ -189,7 +189,6 @@ void pmethod(pattrib_t *attrib) {
 	pcheck(TOK_IDENT);
 	
 	istr_t sym = p.token.lit;
-	loc_t sym_loc = p.token.loc;
 
 	// Foo.function() = ...
 
@@ -421,7 +420,6 @@ void ptop_stmt(void) {
 	}
 
 	loc_t oloc = p.token.loc;
-	bool is_pub = false;
 
 	pattrib_t attrib = {};
 
