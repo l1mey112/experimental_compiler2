@@ -115,7 +115,7 @@ void print_diag_without_pos(const char *type, const char *fmt, ...);
 	} while (0)
 
 
-#define ptr_cmp_literal(a, alen, b) ptr_cmp(a, alen, (u8 *)b, sizeof(b "") - 1)
+#define ptr_cmp_literal(a, alen, b) ptr_cmp(a, alen, (u8*)b, sizeof(b "") - 1)
 static inline bool ptr_cmp(u8 *a, size_t alen, u8 *b, size_t blen) {
 	if (alen != blen) {
 		return false;
@@ -298,6 +298,7 @@ struct fs_mod_t {
 
 	fs_rmod_t *children;
 	fs_rmod_t parent;
+	fs_rmod_t root;
 	
 	u32 files_count;
 };
@@ -315,9 +316,6 @@ extern u32 fs_mod_arena_len;
 extern fs_mod_t fs_mod_arena[128];
 extern tinfo_t types[1024];
 extern u32 type_len;
-
-#define MOD_PTR(mod) (&fs_mod_arena[mod])
-#define FILE_PTR(file) (&fs_files_queue[file])
 
 fs_rmod_t fs_register_root(const char *dp);
 fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t onerror);

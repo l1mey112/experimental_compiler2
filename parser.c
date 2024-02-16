@@ -491,7 +491,7 @@ void ptop_stmt(void) {
 }
 
 void compiler_process_file(fs_rfile_t file) {
-	fs_file_t *f = FILE_PTR(file);
+	fs_file_t *f = &fs_files_queue[file];
 	
 	p = (pctx_t){
 		.pstart = f->data,
@@ -500,7 +500,7 @@ void compiler_process_file(fs_rfile_t file) {
 		.plast_nl = f->data,
 		.file = file,
 		.mod = f->mod,
-		.modp = MOD_PTR(f->mod),
+		.modp = &fs_mod_arena[f->mod],
 	};
 
 	pnext(); // tok

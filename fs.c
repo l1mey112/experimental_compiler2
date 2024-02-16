@@ -4,7 +4,7 @@
 #include "all.h"
 
 #include <dirent.h>
-#include <errno.h>
+#include <errno.h> // IWYU pragma: keep             (im definitely using `errno`, so why clangd, why?)
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/mman.h>
@@ -18,6 +18,7 @@ static const char *global_cwd;
 static u32 global_cwd_len;
 
 static const char *last_path(const char* path);
+static bool path_collides(const char *path, const char *npath);
 static void base_path_in_place(char* path);
 static const char *make_relative(const char *path);
 static bool is_our_ext(const char *fp);
@@ -50,10 +51,10 @@ static void _fs_read_file_with_size(const char *fp, fs_rmod_t mod, size_t size) 
 		}
 	}
 
-	fs_file_t *file = FILE_PTR(fs_files_queue_len++);
+	fs_file_t *file = &fs_files_queue[fs_files_queue_len++];
 
-	file->fp = fp;
-	file->data = (u8 *)ptr;
+	file->fp = make_relative(fp);
+	file->data = (u8*)ptr;
 	file->len = size;
 	file->mod = mod;
 }
@@ -95,6 +96,7 @@ static fs_rmod_t _fs_nstub(const char *dp, fs_rmod_t parent) {
 		.short_name = sv_move(short_name), // ownership
 		.path = dp,
 		.parent = parent,
+		.root = parentp->root == RMOD_NONE ? parent : parentp->root,
 		.children = NULL,
 	});
 }
@@ -167,7 +169,7 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 	struct dirent *entry;
 	struct stat statbuf;
 
-	while ((entry = readdir(dir)) != NULL) {
+	nextstep: while ((entry = readdir(dir)) != NULL) {
 		// . | .. | .git
 		if (entry->d_name[0] == '.') {
 			continue;
@@ -175,6 +177,18 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 
 		char *fsp;
 		asprintf(&fsp, "%s/%s", mod->path, entry->d_name);
+
+		// check for collisions with other roots
+		for (u32 i = 0; i < fs_roots_len; i++) {
+			fs_rmod_t rroot = fs_roots[i];
+			if (rroot == mod->root) {
+				continue;
+			}
+			fs_mod_t *root = &fs_mod_arena[rroot];
+			if (path_collides(fsp, root->path)) {
+				goto nextstep;
+			}
+		}
 
 		if (stat(fsp, &statbuf)) {
 			err_without_pos("failed to stat '%s' (errno: %s)", fsp, strerror(errno));
@@ -184,7 +198,9 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 			// lazily load folders and source files
 			fs_rmod_t child = _fs_nstub(fsp, rmod);
 			arrpush(mod->children, child);
-		} else if (read_files && S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name)) {
+		}
+
+		if (read_files && S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name)) {
 			_fs_read_file_with_size(fsp, rmod, statbuf.st_size);
 			mod->files_count++;
 		}
@@ -212,19 +228,26 @@ void fs_register_include(const char *dp) {
 		.key = ISTR_NONE,
 		.path = dp,
 		.parent = RMOD_NONE,
+		.root = RMOD_NONE,
 	});
 
 	_fs_populate(rmod, false);
 	_fs_nroot(rmod);
 }
 
-// TODO: "make absolute path"
-// TODO: "is path contained within"
-// TODO: pretty_path() reads in absolute path and cwd 
-// TODO: with the above path comparisons become easy
-
 // only call this once
 void fs_entrypoint(const char *argv) {
+	// memoise cwd
+	global_cwd = get_current_dir_name();
+	global_cwd_len = strlen(global_cwd);
+
+	// create lib, roots are searched in order
+	char *lib_path;
+
+	const char *exe_path = absolute_directory_of_exe();
+	asprintf(&lib_path, "%s/lib", exe_path);
+	fs_register_include(lib_path);
+
 	const char *bp;
 	bool is_single_file = is_our_ext(argv);
 
@@ -248,6 +271,7 @@ void fs_entrypoint(const char *argv) {
 		.key = sv_move("main"),
 		.path = bp,
 		.parent = RMOD_NONE,
+		.root = RMOD_NONE,
 	});
 
 	// single files create a single module, then read
@@ -255,27 +279,21 @@ void fs_entrypoint(const char *argv) {
 	if (is_single_file) {
 		// read in singular file at `argv`
 		_fs_read_file(argv, main);
-		fs_register_include(bp);
+		fs_mod_arena[main].files_count = 1;
 	} else {
 		_fs_populate(main, true);
 	}
 
-	// create lib
-
-	char *lib_path;
-
-	const char *exe_path = absolute_directory_of_exe();
-	asprintf(&lib_path, "%s/lib", exe_path);
-
-	// roots are searched in order
+	// register main module
+	if (is_single_file) {
+		fs_register_include(bp);
+	}
 	_fs_nroot(main);
-	fs_register_include(lib_path);
-
-	global_cwd = get_current_dir_name();
-	global_cwd_len = strlen(global_cwd);
 }
 
 // the final path is the target module
+// called on roots, will never resolve to a root
+// cannot `import main`, only on a `import_main {}` stmt
 static fs_rmod_t _fs_locate_node(fs_rmod_t rmod, istr_t *path, u32 path_len) {
 	for (u32 i = 0; i < path_len; i++) {
 		istr_t name = path[i];
@@ -284,7 +302,7 @@ static fs_rmod_t _fs_locate_node(fs_rmod_t rmod, istr_t *path, u32 path_len) {
 		bool found = false;
 		for (u32 j = 0, c = arrlenu(o_mod->children); j < c; j++) {
 			fs_rmod_t child = o_mod->children[j];
-			fs_mod_t *childp = MOD_PTR(child);
+			fs_mod_t *childp = &fs_mod_arena[child];
 			if (childp->short_name == name) {
 				rmod = child;
 				found = true;
@@ -312,7 +330,7 @@ static const char *_fs_path_to_str(istr_t *path, u32 path_len) {
 	u8 *po = p;
 	for (u32 i = 0; i < path_len; i++) {
 		const char *sv = sv_from(path[i]);
-		p += ptrcpy(p, (u8 *)sv, strlen(sv));
+		p += ptrcpy(p, (u8*)sv, strlen(sv));
 		if (i + 1 < path_len) {
 			*p++ = '.';
 		}
@@ -340,7 +358,8 @@ fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t on
 	}
 
 	// case 2:
-	for (u32 i = 0; i < fs_roots_len; i++) {
+	// iterate over all roots in opposite order to what they were registered
+	for (u32 i = fs_roots_len; i--; ) {
 		found = _fs_locate_node(fs_roots[i], path, path_len);
 		if (found != RMOD_NONE) {
 			goto found;
@@ -364,7 +383,7 @@ bool is_our_ext(const char *fp) {
 	return strcmp(fp + len - strlen(FILE_EXTENSION), FILE_EXTENSION) == 0;
 }
 
- const char *last_path(const char* path) {
+const char *last_path(const char* path) {
 	const char* sp = strrchr(path, '/');
 
 	if (sp == NULL) {
@@ -374,23 +393,16 @@ bool is_our_ext(const char *fp) {
 	return strdup(sp + 1);
 }
 
-/* const char *base_path(const char* path) {
-	const char* sp = strrchr(path, '/');
-
-	if (sp == NULL) {
-		return ".";
+// check if `npath` resides within `path` or is equal to `path`
+bool path_collides(const char *path, const char *npath) {
+	size_t len = strlen(path);
+	if (strncmp(path, npath, len) == 0) {
+		if (npath[len] == '\0' || npath[len] == '/') {
+			return true;
+		}
 	}
-
-	size_t len = sp - path;
-	char *base = (char *)malloc(len + 1);
-
-	memcpy(base, path, len);
-	base[len] = '\0';
-
-	printf("base: %s\n", base);
-
-	return base;
-} */
+	return false;
+}
 
 // call with file path
 // assumes no trailing slash
@@ -443,7 +455,7 @@ u32 _fs_dt_tabs;
 
 static void _fs_dump_tree(fs_rmod_t rmod) {
 	TPRINTF("");
-	fs_mod_t *mod = MOD_PTR(rmod);
+	fs_mod_t *mod = &fs_mod_arena[rmod];
 
 	const char *kind_str;
 
@@ -465,7 +477,11 @@ static void _fs_dump_tree(fs_rmod_t rmod) {
 		printf("%s", sv_from(mod->key));
 	}
 
-	printf(" [%s] %s\n", kind_str, make_relative(mod->path));
+	printf(" [%s] %s", kind_str, make_relative(mod->path));
+	if (mod->files_count > 0) {
+		printf(" (%u files)", mod->files_count);
+	}
+	printf("\n");
 
 	_fs_dt_tabs++;
 	for (u32 i = 0, c = arrlenu(mod->children); i < c; i++) {

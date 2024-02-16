@@ -23,7 +23,7 @@ void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
 	vsnprintf(err_string, sizeof(err_string), fmt, args);
 	va_end(args);
 
-	fs_file_t *file = FILE_PTR(loc.file);
+	fs_file_t *file = &fs_files_queue[loc.file];
 
 	if (isatty(fileno(stdout))) {
 		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, file->fp, loc.line_nr + 1, loc.col + 1, err_string);	
