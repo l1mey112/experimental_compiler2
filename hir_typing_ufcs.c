@@ -71,7 +71,10 @@ void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	}
 
 	u32 papp = arrlenu(expr->d_call.args) - cursor;
-	assert(papp == 0); // TODO: partial apply
+	//assert(papp == 0); // TODO: partial apply
+	if (papp > 0) {
+		err_with_pos(expr->loc, "too many arguments, expected %u", cursor);
+	}
 
 	expr->type = fn_info->d_fn.ret;
 }

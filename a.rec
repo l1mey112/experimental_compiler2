@@ -519,10 +519,8 @@
 ;     factorial.factacc 6
 ; }
 
-fort(v: i32) = v
+fort(v: i32, k: i32) = v
 
 pub main() {
-    fort {
-        20
-    }
+    fort 2 { 20 }
 }

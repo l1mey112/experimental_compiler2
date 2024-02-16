@@ -310,10 +310,8 @@ bool plet(ir_desc_t *desc, hir_expr_t *expr_out) {
 	// let y
 
 	u32 scope_olen = p.scope_entries_len;
-	u32 locals_olen = arrlenu(desc->locals);
 	pattern_t pattern = ppattern(desc);
 	u32 scope_rlen = p.scope_entries_len;
-	u32 locals_rlen = arrlenu(desc->locals);
 
 	// let v: i32 = ...
 	if (pattern.kind == PATTERN_LOCAL && p.token.kind == TOK_COLON) {
@@ -1086,6 +1084,15 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 						if (p.token.kind == TOK_OPAR && pprev_next_to()) {
 							// a decent enough error message to discourage the user from doing this
 							err_with_pos(p.token.loc, "must contain whitespace between argument and function");
+						}
+
+						// struct init ambiguity
+						// don't allow `2{}` in expressions
+						// 			    ^^ next to eachother!
+
+						if (p.token.kind == TOK_OCBR && pprev_next_to()) {
+							// a decent enough error message to discourage the user from doing this
+							err_with_pos(p.token.loc, "must contain whitespace to avoid ambiguity with struct initialisation");
 						}
 
 						if (!pexpr_fallable(desc, PREC_CALL, &situ_expr)) {
