@@ -128,7 +128,7 @@ hir_expr_t pident_wstruc(ir_desc_t *desc) {
 		symbol = table_resolve(p.is[id].mod, lit);
 
 		// is struct decl
-		if (p.token.kind == TOK_OCBR) {
+		if (p.token.kind == TOK_OCBR && pprev_next_to()) {
 			goto struc;
 		}
 
@@ -142,7 +142,7 @@ hir_expr_t pident_wstruc(ir_desc_t *desc) {
 
 	pnext();
 
-	if (p.token.kind == TOK_OCBR) {
+	if (p.token.kind == TOK_OCBR && pprev_next_to()) {
 		symbol = table_resolve(p.mod, lit);
 		goto struc;
 	}
