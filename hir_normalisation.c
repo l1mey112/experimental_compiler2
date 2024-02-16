@@ -30,7 +30,7 @@ static bool is_trivial_zst(type_t type) {
 		return true;
 	}
 
-	u32 s = type_sizeof(&target.arch, type);
+	u32 s = type_sizeof(&abi, type);
 	return s == 0;
 }
 
@@ -898,7 +898,7 @@ static void nproc(proc_t *proc) {
 		}
 
 		// can't call sizeof on diverging types
-		u32 s = type_sizeof(&target.arch, local->type);
+		u32 s = type_sizeof(&abi, local->type);
 
 		if (s == 0) {
 			local->kind = _LOCAL_ZST_DELETED;

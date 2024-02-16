@@ -48,15 +48,10 @@ void print_diag_without_pos(const char *type, const char *fmt, ...) {
 }
 
 int main(int argc, const char *argv[]) {
-	char inp[1024];
+	bool err = false;
 
-	// TODO: register `lib/`
-
-	bool err = 0;
-
-	target = target_host();
-
-	// fs_register_root(const char *dp)
+	const char *arch = "c64";
+	const char *platform = "libc";
 
 	if (argc == 2) {
 		if (setjmp(err_diag.unwind)) {
@@ -65,7 +60,8 @@ int main(int argc, const char *argv[]) {
 		}
 
 		fs_entrypoint(argv[1]);
-		
+		fs_target(arch, platform);
+
 		// queue can grow
 		for (fs_rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
@@ -80,8 +76,6 @@ int main(int argc, const char *argv[]) {
 	}
 ret:;
 	// TODO: register_root() etc for module system
-
-	printf("target: %s\n", target_string(target));
 
 	fs_dump_tree();
 

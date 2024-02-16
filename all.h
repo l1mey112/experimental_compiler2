@@ -41,6 +41,7 @@ typedef u16 fs_rmod_t;
 typedef u16 fs_rfile_t;
 typedef struct fs_mod_t fs_mod_t;
 typedef struct fs_file_t fs_file_t;
+typedef struct fs_platform_t fs_platform_t;
 
 // a handle to an interned string
 typedef u32 istr_t;
@@ -287,8 +288,8 @@ struct fs_mod_t {
 		MOD_LAZY_CHILD, // path traversed, files are lazy
 		MOD_CHILD,      // child module, fully inspected dirpath and files
 		MOD_INCLUDE,    // doesn't include files, include path
-		MOD_RT,         // runtime module
-		MOD_MAIN,       // main module
+		MOD_RT,         // runtime module, we only get ONE of these
+		MOD_MAIN,       // main module, we only get ONE of these
 	} kind;
 
 	istr_t key;  // fully qualified
@@ -310,10 +311,19 @@ struct fs_file_t {
 	fs_rmod_t mod;
 };
 
+// registered runtime which can be rematerialised into the MOD_RT
+struct fs_platform_t {
+	const char *name;
+	const char *rt_path;
+};
+
 extern u32 fs_files_queue_len;
 extern fs_file_t fs_files_queue[512];
 extern u32 fs_mod_arena_len;
 extern fs_mod_t fs_mod_arena[128];
+extern u32 fs_platforms_len;
+extern fs_platform_t fs_platforms[32];
+
 extern tinfo_t types[1024];
 extern u32 type_len;
 
@@ -324,6 +334,7 @@ istr_t fs_module_symbol(fs_rmod_t mod, istr_t symbol);
 istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector);
 void fs_dump_tree(void);
 void fs_entrypoint(const char *argv);
+void fs_target(const char *arch, const char *platform);
 
 void compiler_process_file(fs_rfile_t f);
 void compiler_pass_all(void);
@@ -374,23 +385,7 @@ struct arch_t {
 	u8 ptr_size;
 };
 
-struct platform_t {
-	enum : u8 {
-		#define X(platform, name) platform,
-			X_PLATFORMS
-		#undef X
-	} kind;
-};
-
-struct target_t {
-	arch_t arch;
-	platform_t platform;
-};
-
-extern target_t target;
-
-const char *target_string(target_t target);
-target_t target_host(void);
+extern arch_t abi;
 
 // only checks for literals
 bool type_is_literal_number(type_t type);

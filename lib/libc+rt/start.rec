@@ -1,8 +1,10 @@
-import_main {
-    main.main: (): ()
-}
+; import_main {
+;     main.main: (): ()
+; }
+; 
+; extern main(): i32 = {
+;     main.main
+;     ret 0
+; }
 
-extern main(): i32 = {
-    main.main
-    ret 0
-}
+global = 30

@@ -377,7 +377,7 @@ void cpattern(ir_desc_t *desc, pattern_t *pattern, type_t type) {
 }
 
 static void integer_fits_in(loc_t onerror, type_t type, u64 lit) {
-	if (!type_integer_fits_in(&target.arch, lit, type)) {
+	if (!type_integer_fits_in(&abi, lit, type)) {
 		err_with_pos(onerror, "integer literal cannot fit inside type `%s`", type_dbg_str(type));
 	}
 }

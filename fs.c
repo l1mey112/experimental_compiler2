@@ -1,3 +1,4 @@
+#include <string.h>
 #define __USE_GNU
 #define _GNU_SOURCE
 
@@ -31,10 +32,10 @@ u32 fs_files_queue_len;
 fs_file_t fs_files_queue[512];
 u32 fs_mod_arena_len;
 fs_mod_t fs_mod_arena[128];
-
-// order of left to right
 u32 fs_roots_len;
 fs_rmod_t fs_roots[8];
+u32 fs_platforms_len;
+fs_platform_t fs_platforms[32];
 
 // register roots
 // register ways to walk possible roots
@@ -133,7 +134,12 @@ istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector) {
 	return sym;
 }
 
-// slurp all files into a module then register it's root status
+static void _fs_register_runtime(const char *prefix, const char *dp) {
+	fs_platforms[fs_platforms_len++] = (fs_platform_t){
+		.name = prefix,
+		.rt_path = dp,
+	};
+}
 
 // doesn't care about module kind, only performs one iteration depth of walking
 // only call once. you don't want duplicates
@@ -145,62 +151,73 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 		err_without_pos("failed to open directory '%s' (errno: %s)", mod->path, strerror(errno));
 	}
 
-	bool read_dirs;
-
-	switch (mod->kind) {
-		case MOD_LAZY_CHILD: {
-			read_dirs = false;
-			break;
-		}
-		case MOD_STUB:
-		case MOD_MAIN:
-		case MOD_INCLUDE: {
-			read_dirs = true;
-			break;
-		}
-		//
-		case MOD_CHILD:
-		case MOD_RT: {
-			printf("kind: %d\n", mod->kind);
-			assert_not_reached();
-		}
-	}
+	assert(mod->kind != MOD_CHILD);
+	bool read_dirs = mod->kind != MOD_LAZY_CHILD;
 
 	struct dirent *entry;
 	struct stat statbuf;
 
 	nextstep: while ((entry = readdir(dir)) != NULL) {
+		char *file_head = entry->d_name;
+		
 		// . | .. | .git
-		if (entry->d_name[0] == '.') {
+		if (file_head[0] == '.') {
 			continue;
 		}
 
 		char *fsp;
-		asprintf(&fsp, "%s/%s", mod->path, entry->d_name);
+		asprintf(&fsp, "%s/%s", mod->path, file_head);
 
-		// check for collisions with other roots
-		for (u32 i = 0; i < fs_roots_len; i++) {
-			fs_rmod_t rroot = fs_roots[i];
-			if (rroot == mod->root) {
-				continue;
-			}
-			fs_mod_t *root = &fs_mod_arena[rroot];
-			if (path_collides(fsp, root->path)) {
-				goto nextstep;
-			}
-		}
+		// dangling pointer if we keep this around
+		char *plus_p = strrchr(file_head, '+');
 
 		if (stat(fsp, &statbuf)) {
 			err_without_pos("failed to stat '%s' (errno: %s)", fsp, strerror(errno));
 		}
 
-		if (read_dirs && S_ISDIR(statbuf.st_mode)) {
-			// lazily load folders and source files
-			fs_rmod_t child = _fs_nstub(fsp, rmod);
-			arrpush(mod->children, child);
-		}
+		if (S_ISDIR(statbuf.st_mode)) {
+			// check for collisions with other roots
+			for (u32 i = 0; i < fs_roots_len; i++) {
+				fs_rmod_t rroot = fs_roots[i];
+				if (rroot == mod->root) {
+					continue;
+				}
+				fs_mod_t *root = &fs_mod_arena[rroot];
+				if (path_collides(fsp, root->path)) {
+					goto nextstep;
+				}
+			}
 
-		if (read_files && S_ISREG(statbuf.st_mode) && is_our_ext(entry->d_name)) {
+			if (plus_p) {
+				if (mod->root == RMOD_NONE && strcmp(plus_p + 1, "rt") == 0) {
+					const char *prefix = strndup(file_head, plus_p - file_head);
+					if (strlen(prefix) == 0) {
+						err_without_pos("empty runtime platform prefix in directory '%s'", make_relative(fsp));
+					}
+					_fs_register_runtime(prefix, fsp);
+					continue;
+				} else {
+					err_without_pos("unknown postfix '+%s' in directory '%s'", plus_p, make_relative(fsp));
+				}
+			}
+
+			// lazily load folders and source files
+			if (read_dirs) {
+				fs_rmod_t child = _fs_nstub(fsp, rmod);
+				arrpush(mod->children, child);
+			}
+		} else if (read_files && S_ISREG(statbuf.st_mode) && is_our_ext(file_head)) {
+			// trim off the .rec and plus
+			if (plus_p) {
+				plus_p++;
+				plus_p[strlen(plus_p) - 1 - strlen(FILE_EXTENSION)] = '\0';
+			}
+
+			// unknown postfix
+			if (plus_p) {
+				err_without_pos("unknown postfix '+%s' in file '%s'", plus_p, make_relative(fsp));
+			}
+
 			_fs_read_file_with_size(fsp, rmod, statbuf.st_size);
 			mod->files_count++;
 		}
@@ -280,20 +297,67 @@ void fs_entrypoint(const char *argv) {
 		// read in singular file at `argv`
 		_fs_read_file(argv, main);
 		fs_mod_arena[main].files_count = 1;
-	} else {
-		_fs_populate(main, true);
 	}
+	_fs_populate(main, !is_single_file);
 
 	// register main module
-	if (is_single_file) {
-		fs_register_include(bp);
-	}
 	_fs_nroot(main);
+}
+
+void _fs_materialise_platform(u32 i) {
+	fs_platform_t *p = &fs_platforms[i];
+
+	printf("rt_path: %s\n", make_relative(p->rt_path));
+	
+	fs_rmod_t rmod = _fs_nm((fs_mod_t){
+		.kind = MOD_RT,
+		.short_name = sv_move("rt"),
+		.key = sv_move("rt"),
+		.path = p->rt_path,
+		.parent = RMOD_NONE,
+		.root = RMOD_NONE,
+	});
+	_fs_populate(rmod, true);
+	_fs_nroot(rmod);
+	return;
+}
+
+const char *_fs_arch_string(arch_t arch) {
+	switch (arch.kind) {
+		#define X(arch, name) case arch: return name;
+			X_ARCHS
+		#undef X
+	}
+}
+
+arch_t abi;
+
+// only call this once
+void fs_target(const char *arch, const char *platform) {
+	printf("selected target: %s-%s\n", arch, platform);
+
+	if (strcmp(arch, "c64") == 0) {
+		abi = (arch_t){
+			.kind = ARCH_C64,
+			.ptr_size = 8,
+		};
+	} else {
+		err_without_pos("unknown architecture '%s'", arch);
+	}
+
+	// select platform
+	for (u32 i = 0; i < fs_platforms_len; i++) {
+		if (strcmp(fs_platforms[i].name, platform) == 0) {
+			_fs_materialise_platform(i);
+			return;
+		}
+	}
+
+	err_without_pos("unknown platform '%s'", platform);
 }
 
 // the final path is the target module
 // called on roots, will never resolve to a root
-// cannot `import main`, only on a `import_main {}` stmt
 static fs_rmod_t _fs_locate_node(fs_rmod_t rmod, istr_t *path, u32 path_len) {
 	for (u32 i = 0; i < path_len; i++) {
 		istr_t name = path[i];
@@ -357,10 +421,37 @@ fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t on
 		goto found;
 	}
 
+	// ascertain the kind of the module's root
+	u8 kind;
+	if (fs_mod_arena[src].root == RMOD_NONE) {
+		kind = fs_mod_arena[src].kind;
+	} else {
+		kind = fs_mod_arena[fs_mod_arena[src].root].kind;
+	}
+
 	// case 2:
 	// iterate over all roots in opposite order to what they were registered
 	for (u32 i = fs_roots_len; i--; ) {
-		found = _fs_locate_node(fs_roots[i], path, path_len);
+		fs_rmod_t rroot = fs_roots[i];
+		fs_mod_t *root = &fs_mod_arena[rroot];
+		
+		// import directions
+		//  - `include` cannot import from `main`
+		//  - `include` cannot import from `runtime`
+		//  - `main` cannot import from `runtime`
+		//  - `runtime` can import from `main` namespace (local)
+
+		if (kind == MOD_INCLUDE) {
+			if (root->kind == MOD_MAIN || root->kind == MOD_RT) {
+				continue;
+			}
+		} else if (kind == MOD_MAIN) {
+			if (root->kind == MOD_RT) {
+				continue;
+			}
+		}
+
+		found = _fs_locate_node(rroot, path, path_len);
 		if (found != RMOD_NONE) {
 			goto found;
 		}
@@ -494,5 +585,9 @@ void fs_dump_tree(void) {
 	_fs_dt_tabs = 0;
 	for (u32 i = 0; i < fs_roots_len; i++) {
 		_fs_dump_tree(fs_roots[i]);
+	}
+
+	for (u32 i = 0; i < fs_platforms_len; i++) {
+		TPRINTF("runtime %u: %s %s\n", i, fs_platforms[i].name, make_relative(fs_platforms[i].rt_path));
 	}
 }
