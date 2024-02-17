@@ -40,6 +40,8 @@ fs_platform_t fs_platforms[32];
 fs_rmod_t main_module;
 fs_rmod_t rt_module;
 
+char *build_token;
+
 // register roots
 // register ways to walk possible roots
 
@@ -313,10 +315,18 @@ void fs_entrypoint(const char *argv) {
 	main_module = main; // setup global
 }
 
+const char *_fs_arch_string(arch_t arch) {
+	switch (arch.kind) {
+		#define X(arch, name) case arch: return name;
+			X_ARCHS
+		#undef X
+	}
+}
+
 void _fs_materialise_platform(u32 i) {
 	fs_platform_t *p = &fs_platforms[i];
 
-	printf("rt_path: %s\n", make_relative(p->rt_path));
+	eprintf("rt_path: %s\n", make_relative(p->rt_path));
 	
 	fs_rmod_t rmod = _fs_nm((fs_mod_t){
 		.kind = MOD_RT,
@@ -329,22 +339,16 @@ void _fs_materialise_platform(u32 i) {
 	_fs_populate(rmod, true);
 	_fs_nroot(rmod);
 	rt_module = rmod; // setup global
-	return;
-}
 
-const char *_fs_arch_string(arch_t arch) {
-	switch (arch.kind) {
-		#define X(arch, name) case arch: return name;
-			X_ARCHS
-		#undef X
-	}
+	asprintf(&build_token, "target: %s-%s", _fs_arch_string(abi), p->name);
+	return;
 }
 
 arch_t abi;
 
 // only call this once
 void fs_target(const char *arch, const char *platform) {
-	printf("selected target: %s-%s\n", arch, platform);
+	eprintf("selected target: %s-%s\n", arch, platform);
 
 	if (strcmp(arch, "c64") == 0) {
 		abi = (arch_t){
@@ -552,7 +556,7 @@ const char *absolute_directory_of_exe(void) {
 
 u32 _fs_dt_tabs;
 
-#define TPRINTF(...) do { for (u32 i = 0; i < _fs_dt_tabs; i++) { printf("  "); } printf(__VA_ARGS__); } while (0)
+#define TPRINTF(...) do { for (u32 i = 0; i < _fs_dt_tabs; i++) { eprintf("  "); } eprintf(__VA_ARGS__); } while (0)
 
 static void _fs_dump_tree(fs_rmod_t rmod) {
 	TPRINTF("");
@@ -573,16 +577,16 @@ static void _fs_dump_tree(fs_rmod_t rmod) {
 	}
 
 	if (mod->key == ISTR_NONE) {
-		printf("<root>");
+		eprintf("<root>");
 	} else {
-		printf("%s", sv_from(mod->key));
+		eprintf("%s", sv_from(mod->key));
 	}
 
-	printf(" [%s] %s", kind_str, make_relative(mod->path));
+	eprintf(" [%s] %s", kind_str, make_relative(mod->path));
 	if (mod->files_count > 0) {
-		printf(" (%u files)", mod->files_count);
+		eprintf(" (%u files)", mod->files_count);
 	}
-	printf("\n");
+	eprintf("\n");
 
 	_fs_dt_tabs++;
 	for (u32 i = 0, c = arrlenu(mod->children); i < c; i++) {

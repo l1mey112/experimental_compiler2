@@ -44,12 +44,12 @@ static void _estate(edesc_t *desc) {
 		local_t *local = &desc->desc->locals[i];
 
 		if (local->name == ISTR_NONE) {
-			printf("_%u", i);
+			eprintf("_%u", i);
 		} else {
-			printf("%s", sv_from(local->name));
+			eprintf("%s", sv_from(local->name));
 		}
 
-		printf(": %u (%s) init: %u\n", desc->local_offsets[i], type_dbg_str(local->type), desc->local_tags[i]);
+		eprintf(": %u (%s) init: %u\n", desc->local_offsets[i], type_dbg_str(local->type), desc->local_tags[i]);
 	}
 }
 

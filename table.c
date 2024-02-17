@@ -103,7 +103,6 @@ rsym_t table_resolve_method(type_t bare_type, istr_t field) {
 	assert(bare_type == type_strip_muls(bare_type));
 
 	istr_t qualified_name;
-	rsym_t method;
 
 	// qualified_name = i32:method
 	if ((qualified_name = table_type_qualified_name(bare_type)) == ISTR_NONE) {
@@ -133,11 +132,11 @@ void table_dump(sym_t *sym) {
 	void *_ = alloc_scratch(0);
 
 	if (sym->is_extern) {
-		printf("extern \"%s\" ", sv_from(sym->extern_symbol));
+		eprintf("extern \"%s\" ", sv_from(sym->extern_symbol));
 	}
 
 	if (sym->is_pub) {
-		printf("pub ");
+		eprintf("pub ");
 	}
 
 	switch (sym->kind) {
@@ -164,7 +163,7 @@ static u32 _tabs = 0;
 
 void _print_tabs(void) {
 	for (u32 i = 0; i < _tabs; i++) {
-		printf("  ");
+		eprintf("  ");
 	}
 }
 
@@ -181,62 +180,62 @@ void table_dump_po(void) {
 }
 
 static void _dump_type(sym_t *sym) {
-	printf("type %s = %s\n", sv_from(sym->key), type_dbg_str(sym->d_type.type));
+	eprintf("type %s = %s\n", sv_from(sym->key), type_dbg_str(sym->d_type.type));
 }
 
 static void _print_local(ir_desc_t *desc, rlocal_t local) {
 	local_t *localp = &desc->locals[local];
 
 	if (localp->name != ISTR_NONE) {
-		printf("%s_", sv_from(localp->name));
+		eprintf("%s_", sv_from(localp->name));
 	} else {
-		printf("_");
+		eprintf("_");
 	}
-	printf("%u", local);
+	eprintf("%u", local);
 }
 
 // : type
 static void _print_local_type(ir_desc_t *desc, rlocal_t local) {
 	local_t *localp = &desc->locals[local];
-	printf(": %s", type_dbg_str(localp->type));
+	eprintf(": %s", type_dbg_str(localp->type));
 }
 
 static void _print_sym(ir_desc_t *desc, rsym_t sym) {
-	printf("%s", sv_from(symbols[sym].key));
+	eprintf("%s", sv_from(symbols[sym].key));
 }
 
 static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
 	switch (pattern->kind) {
 		case PATTERN_TUPLE: {
-			printf("(");
+			eprintf("(");
 			for (u32 i = 0, c = arrlenu(pattern->d_tuple); i < c; i++) {
 				pattern_t *elem = &pattern->d_tuple[i];
 				_print_pattern(desc, elem);
 				if (i + 1 < c) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
-			printf(")");
+			eprintf(")");
 			break;
 		}
 		case PATTERN_ARRAY: {
-			printf("[");
+			eprintf("[");
 			if (pattern->d_array.match && pattern->d_array.match_lhs) {
 				_print_pattern(desc, pattern->d_array.match);
-				printf("..., ");
+				eprintf("..., ");
 			}
 			for (u32 i = 0, c = arrlenu(pattern->d_array.elems); i < c; i++) {
 				pattern_t *elem = &pattern->d_array.elems[i];
 				_print_pattern(desc, elem);
 				if (i + 1 < c) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
 			if (pattern->d_array.match && !pattern->d_array.match_lhs) {
-				printf(", ...");
+				eprintf(", ...");
 				_print_pattern(desc, pattern->d_array.match);
 			}
-			printf("]");
+			eprintf("]");
 			break;
 		}
 		case PATTERN_LOCAL: {
@@ -244,19 +243,19 @@ static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
 			break;
 		}
 		case PATTERN_TUPLE_UNIT: {
-			printf("()");
+			eprintf("()");
 			break;
 		}
 		case PATTERN_INTEGER_LIT: {
-			printf("%s", sv_from(pattern->d_integer_lit));
+			eprintf("%s", sv_from(pattern->d_integer_lit));
 			break;
 		}
 		case PATTERN_BOOL_LIT: {
-			printf("%s", pattern->d_bool_lit ? "true" : "false");
+			eprintf("%s", pattern->d_bool_lit ? "true" : "false");
 			break;
 		}
 		case PATTERN_UNDERSCORE: {
-			printf("_");
+			eprintf("_");
 			break;
 		}
 		default: {
@@ -267,7 +266,7 @@ static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
 
 static void _print_blk_id_space(u8 blk_id) {
 	if (blk_id != BLK_ID_NONE) {
-		printf(":%u ", blk_id);
+		eprintf(":%u ", blk_id);
 	}
 }
 
@@ -282,170 +281,170 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_INTEGER_LIT: {
-			printf("%lu", expr->d_integer);
+			eprintf("%lu", expr->d_integer);
 			break;
 		}
 		case EXPR_BOOL_LIT: {
-			printf("%s", expr->d_bool_lit ? "true" : "false");
+			eprintf("%s", expr->d_bool_lit ? "true" : "false");
 			break;
 		}
 		case EXPR_POSTFIX: {
 			_print_expr(desc, expr->d_postfix.expr);
-			printf("%s", expr->d_postfix.op == EXPR_K_INC ? "++" : "--");
+			eprintf("%s", expr->d_postfix.op == EXPR_K_INC ? "++" : "--");
 			break;
 		}
 		case EXPR_ASSIGN: {
 			_print_expr(desc, expr->d_assign.lhs);
-			printf(" %s ", tok_op_str(expr->d_assign.kind));
+			eprintf(" %s ", tok_op_str(expr->d_assign.kind));
 			_print_expr(desc, expr->d_assign.rhs);
 			break;
 		}
 		case EXPR_INFIX: {
-			printf("(");
+			eprintf("(");
 			_print_expr(desc, expr->d_infix.lhs);
-			printf(" %s ", tok_op_str(expr->d_infix.kind));
+			eprintf(" %s ", tok_op_str(expr->d_infix.kind));
 			_print_expr(desc, expr->d_infix.rhs);
-			printf(")");
+			eprintf(")");
 			break;
 		}
 		case EXPR_PREFIX: {
-			printf("%s", expr->d_prefix.op == EXPR_K_NOT ? "!" : "-");
+			eprintf("%s", expr->d_prefix.op == EXPR_K_NOT ? "!" : "-");
 			_print_expr(desc, expr->d_prefix.expr);
 			break;
 		}
 		case EXPR_CALL: {
 			_print_expr(desc, expr->d_call.f);
-			printf("(");
+			eprintf("(");
 			for (int i = 0, c = arrlen(expr->d_call.args); i < c; i++) {
 				_print_expr(desc, &expr->d_call.args[i]);
 				if (i != c - 1) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
-			printf(")");
+			eprintf(")");
 			break;
 		}
 		case EXPR_LOOP: {
 			_print_blk_id_space(expr->d_loop.blk_id);
-			printf("loop ");
+			eprintf("loop ");
 			_print_expr(desc, expr->d_loop.expr);
 			break;
 		}
 		case EXPR_DO_BLOCK: {
 			_print_blk_id_space(expr->d_do_block.blk_id);
-			printf("do\n");
+			eprintf("do\n");
 			_tabs++;
 			for (int i = 0, c = arrlen(expr->d_do_block.exprs); i < c; i++) {
 				_print_tabs();
 				_print_expr(desc, &expr->d_do_block.exprs[i]);
 				if (i != c - 1) {
-					printf("\n"); // expr automatically prints newline
+					eprintf("\n"); // expr automatically prints newline
 				}
 			}
 			_tabs--;
 			break;
 		}
 		case EXPR_TUPLE_UNIT: {
-			printf("()");
+			eprintf("()");
 			break;
 		}
 		case EXPR_TUPLE: {
-			printf("(");
+			eprintf("(");
 			for (int i = 0, c = arrlen(expr->d_tuple); i < c; i++) {
 				_print_expr(desc, &expr->d_tuple[i]);
 				if (i != c - 1) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
-			printf(")");
+			eprintf(")");
 			break;
 		}
 		case EXPR_FIELD: {
 			_print_expr(desc, expr->d_field.expr);
 			if (expr->d_field.field != ISTR_NONE) {
-				printf(".%s", sv_from(expr->d_field.field));
+				eprintf(".%s", sv_from(expr->d_field.field));
 			} else {
-				printf(".%u", expr->d_field.field_idx);
+				eprintf(".%u", expr->d_field.field_idx);
 			}
 			break;
 		}
 		case EXPR_STRUCT: {
 			//_print_expr(desc, expr->d_struct.expr);
-			printf("%s{", type_dbg_str(expr->type));
+			eprintf("%s{", type_dbg_str(expr->type));
 			for (int i = 0, c = arrlen(expr->d_struct.fields); i < c; i++) {
-				printf("%s: ", sv_from(expr->d_struct.fields[i].field));
+				eprintf("%s: ", sv_from(expr->d_struct.fields[i].field));
 				_print_expr(desc, expr->d_struct.fields[i].expr);
 				if (i != c - 1) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
-			printf("}");
+			eprintf("}");
 			break;
 		}
 		case EXPR_STRUCT_POSITIONAL: {
-			printf("%s{", type_dbg_str(expr->type));
+			eprintf("%s{", type_dbg_str(expr->type));
 			for (int i = 0, c = arrlen(expr->d_struct_positional.exprs); i < c; i++) {
 				_print_expr(desc, &expr->d_struct_positional.exprs[i]);
 				if (i != c - 1) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
-			printf("}");
+			eprintf("}");
 			break;
 		}
 		case EXPR_BREAK: {
-			printf("brk :%u ", expr->d_break.blk_id);
+			eprintf("brk :%u ", expr->d_break.blk_id);
 			_print_expr(desc, expr->d_break.expr);
 			break;
 		}
 		case EXPR_CONTINUE: {
-			printf("rep :%u", expr->d_continue.blk_id);
+			eprintf("rep :%u", expr->d_continue.blk_id);
 			break;
 		}
 		case EXPR_RETURN: {
-			printf("ret ");
+			eprintf("ret ");
 			_print_expr(desc, expr->d_return.expr);
 			break;
 		}
 		case EXPR_CAST: {
 			_print_expr(desc, expr->d_cast.expr);
-			printf(": %s", type_dbg_str(expr->type));
+			eprintf(": %s", type_dbg_str(expr->type));
 			break;
 		}
 		case EXPR_IF: {
-			printf("if (");
+			eprintf("if (");
 			_print_expr(desc, expr->d_if.cond);
-			printf(") ");
+			eprintf(") ");
 			_print_expr(desc, expr->d_if.then);
 			if (expr->d_if.els) {
-				printf(" else ");
+				eprintf(" else ");
 				_print_expr(desc, expr->d_if.els);
 			}
 			break;
 		}
 		case EXPR_ARRAY: {
-			printf("[");
+			eprintf("[");
 			for (int i = 0, c = arrlen(expr->d_array); i < c; i++) {
 				_print_expr(desc, &expr->d_array[i]);
 				if (i != c - 1) {
-					printf(", ");
+					eprintf(", ");
 				}
 			}
-			printf("]");
+			eprintf("]");
 			break;
 		}
 		/* case EXPR_LAMBDA: {
 			// \x y z -> x + y + z
 
-			printf("\\");
+			eprintf("\\");
 			for (u32 i = 0, c = arrlenu(expr->d_lambda.args); i < c; i++) {
 				_hir_dump_var_w_type(expr->d_lambda.args[i]);
 				if (i != c - 1) {
-					printf(" ");
+					eprintf(" ");
 				}
 			}
 
-			printf(" -> ");
+			eprintf(" -> ");
 
 			_hir_dump_expr(modp, expr->d_lambda.scope, expr->d_lambda.expr);
 			break;
@@ -454,91 +453,91 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			// match expr
 			//    (x, y) -> ...
 
-			printf("match ");
+			eprintf("match ");
 			_print_expr(desc, expr->d_match.expr);
-			printf("\n");
+			eprintf("\n");
 
 			_tabs++;
 			for (u32 i = 0, c = arrlenu(expr->d_match.exprs); i < c; i++) {
 				_print_tabs();
 				_print_pattern(desc, &expr->d_match.patterns[i]);
-				printf(" -> ");
+				eprintf(" -> ");
 				_print_expr(desc, &expr->d_match.exprs[i]);
 				if (i != c - 1) {
-					printf("\n"); // expr automatically prints newline
+					eprintf("\n"); // expr automatically prints newline
 				}
 			}
 			_tabs--;
 			break;
 		} */
 		case EXPR_VOIDING: {
-			printf("void ");
+			eprintf("void ");
 			_print_expr(desc, expr->d_voiding);
 			break;
 		}
 		case EXPR_DEREF: {
 			_print_expr(desc, expr->d_deref);
-			printf(".*");
+			eprintf(".*");
 			break;
 		}
 		case EXPR_ADDR_OF: {
-			printf("&");
+			eprintf("&");
 			if (expr->d_addr_of.is_mut) {
-				printf("'");
+				eprintf("'");
 			}
 			_print_expr(desc, expr->d_addr_of.ref);
 			break;
 		}
 		/* case EXPR_SIZEOF_TYPE: {
-			printf("sizeof(%s)", type_dbg_str(expr->d_sizeof_type));
+			eprintf("sizeof(%s)", type_dbg_str(expr->d_sizeof_type));
 			break;
 		} */
 		case EXPR_INDEX: {
 			_print_expr(desc, expr->d_index.expr);
-			printf("[");
+			eprintf("[");
 			_print_expr(desc, expr->d_index.index);
-			printf("]");
+			eprintf("]");
 			break;
 		}
 		case EXPR_SLICE: {
 			_print_expr(desc, expr->d_slice.expr);
-			printf("[");
+			eprintf("[");
 			if (expr->d_slice.lo) {
 				_print_expr(desc, expr->d_slice.lo);
 			}
-			printf("..");
+			eprintf("..");
 			if (expr->d_slice.hi) {
 				_print_expr(desc, expr->d_slice.hi);
 			}
-			printf("]");
+			eprintf("]");
 			break;
 		}
 		case EXPR_LET: {
-			printf("let ");
+			eprintf("let ");
 			_print_pattern(desc, &expr->d_let.pattern);
-			printf(" = ");
+			eprintf(" = ");
 			_print_expr(desc, expr->d_let.expr);
 			break;
 		}
 		case EXPR_UNREACHABLE: {
 			switch (expr->d_unreachable.kind) {
 				case UNREACHABLE_ASSERTION: {
-					printf("unreachable");
+					eprintf("unreachable");
 					break;
 				}
 				case UNREACHABLE_HEURISTIC: {
-					printf("unreachable(heuristic)");
+					eprintf("unreachable(heuristic)");
 					break;
 				}
 				case UNREACHABLE_UD2: {
-					printf("unreachable(ud2)");
+					eprintf("unreachable(ud2)");
 					break;
 				}
 			}
 			break;
 		}
 		default: {
-			printf("\nunknown expr kind %d\n", expr->kind);
+			eprintf("\nunknown expr kind %d\n", expr->kind);
 			print_hint_with_pos(expr->loc, "LOC HERE");
 			assert_not_reached();
 		}
@@ -549,7 +548,7 @@ static void _dump_function(sym_t *sym) {
 	proc_t *proc = &sym->d_proc;
 	ir_desc_t *desc = &proc->desc;
 
-	printf("%s(", sv_from(sym->key));
+	eprintf("%s(", sv_from(sym->key));
 
 	// print args
 	for (u32 i = 0, c = arrlenu(proc->arguments); i < c; i++) {
@@ -557,54 +556,54 @@ static void _dump_function(sym_t *sym) {
 		local_t *localp = &desc->locals[local];
 
 		if (localp->kind == LOCAL_MUT) {
-			printf("'");
+			eprintf("'");
 		}
 		_print_local(desc, local);
 		_print_local_type(desc, local);
 
 		if (i + 1 < c) {
-			printf(", ");
+			eprintf(", ");
 		}
 	}
 
-	printf("): %s", type_dbg_str(proc->ret_type));
+	eprintf("): %s", type_dbg_str(proc->ret_type));
 
 	if (desc->hir) {
-		printf(" hir = ");
+		eprintf(" hir = ");
 		if (desc->hir->kind == EXPR_DO_BLOCK) {
 			_print_expr(desc, desc->hir);
 		} else {
-			printf("\n");
+			eprintf("\n");
 			_tabs++;
 			_print_tabs();
 			_print_expr(desc, desc->hir);
 			_tabs--;
 		}
 	}
-	printf("\n\n");
+	eprintf("\n\n");
 }
 
 static void _dump_global(sym_t *sym) {
 	global_t *global = &sym->d_global;
 	ir_desc_t *desc = &global->desc;
 
-	printf("%s", sv_from(sym->key));
+	eprintf("%s", sv_from(sym->key));
 
 	if (global->is_mut) {
-		printf("'");
+		eprintf("'");
 	}
 
-	printf(": %s", type_dbg_str(global->type));
+	eprintf(": %s", type_dbg_str(global->type));
 
 	if (desc->hir) {
-		printf(" hir = ");
+		eprintf(" hir = ");
 		_print_expr(desc, desc->hir);
-		printf("\n");
+		eprintf("\n");
 	}
 
 	if (global->constant) {
-		printf("  (const: ");
+		eprintf("  (const: ");
 		_print_expr(desc, global->constant);
-		printf(")\n");
+		eprintf(")\n");
 	}
 }

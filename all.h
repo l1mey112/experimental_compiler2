@@ -330,6 +330,7 @@ extern fs_platform_t fs_platforms[32];
 
 extern fs_rmod_t main_module;
 extern fs_rmod_t rt_module;
+extern char *build_token;
 
 extern tinfo_t types[1024];
 extern u32 type_len;

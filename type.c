@@ -73,7 +73,7 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			return a->d_symbol == b->d_symbol;
 		}
 		default: {
-			printf("kind: %d\n", a_type);
+			eprintf("kind: %d\n", a_type);
 			assert_not_reached();
 		}
 	}
@@ -200,7 +200,7 @@ static const char *ctinfo_str[] = {
 	#undef X
 };
 
-// TODO: proper printf streamer for string dbg output
+// TODO: proper eprintf streamer for string dbg output
 
 static void _type_dbg_str(type_t type, bool inner) {
 	#define COMMIT(expr) \
@@ -402,6 +402,7 @@ u32 type_sizeof(arch_t *arch, type_t type) {
 		}
 		default: {
 			// TODO: please fix this
+			eprintf("type: %s\n", type_dbg_str(type));
 			assert_not_reached();
 		}
 	}

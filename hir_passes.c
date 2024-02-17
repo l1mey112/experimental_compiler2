@@ -8,6 +8,9 @@ void hir_normalise_global(global_t *global);
 void hir_normalise_proc(proc_t *proc);
 void hir_eval_global(sym_t *sym, global_t *global);
 
+// TODO: this is damn hacky, but simple. "hacky" is in the eye of the beholder anyway
+//       though it seems it would be better handled in the checker looking at places
+//       where type annotations could exist, which are casts and let bindings
 void hir_global_constexpr(rsym_t rsym, global_t *global) {
 	// search entire type table for references to this global
 	// assumed that only one unique global exists
@@ -64,11 +67,6 @@ void hir_global_constexpr(rsym_t rsym, global_t *global) {
 	info->d_array.d_length = value;
 }
 
-// reorder
-//
-// symbol -> hir_typing -> hir_normalisation ------------------>
-//                                          ?global -> hir_eval
-//
 void hir_passes(void) {
     hir_reorder();
 
@@ -109,4 +107,17 @@ void hir_passes(void) {
 			}
 		}
 	}
+
+	// remove aggregate fields etc of ()
+	// it's safe to do this after normalisation
+	/* for (u32 i = 0; i < type_len; i++) {
+		tinfo_t *i_info = &types[i];
+
+		if (i_info->kind == TYPE_ARRAY && i_info->d_array.is_symbol) {
+			if (i_info->d_array.d_symbol == rsym) {
+				info = i_info;
+				break;
+			}
+		}
+	} */
 }

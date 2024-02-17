@@ -66,7 +66,7 @@ int main(int argc, const char *argv[]) {
 		// queue can grow
 		for (fs_rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
-			printf("parsing file '%s'\n", fs_files_queue[i].fp);
+			eprintf("parsing file '%s'\n", fs_files_queue[i].fp);
 			compiler_process_file(i);
 			if (old_sz != fs_files_queue_len) {
 				eprintf("  %u new files added\n", fs_files_queue_len - old_sz);
@@ -81,6 +81,7 @@ ret:;
 	fs_dump_tree();
 
 	extern void hir_passes(void);
+	extern void hir_cgen(FILE *file);
 
 	if (!setjmp(err_diag.unwind)) {
 		hir_passes();
@@ -88,8 +89,10 @@ ret:;
 		err = true;
 	}
 
-	printf("\n");
+	eprintf("\n");
 	table_dump_po();
+
+	hir_cgen(stdout);
 
 	return err;
 }

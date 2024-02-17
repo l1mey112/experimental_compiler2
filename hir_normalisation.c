@@ -767,7 +767,7 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			break;
 		}
 		default: {
-			printf("\n\nkind: %u\n\n", expr->kind);
+			eprintf("\n\nkind: %u\n\n", expr->kind);
 			assert_not_reached();
 		}
 	}

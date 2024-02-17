@@ -148,7 +148,7 @@ type_t ptype_expr(u8 prec) {
 
 				// TODO: symbol forwarding
 
-				if (p.token.kind == TOK_INTEGER) {
+				if (p.token.kind == TOK_INTEGER && p.peek.kind == TOK_CSQ) {
 					int_size_val = pparse_int(p.token);
 					pnext();
 				} else {
@@ -595,7 +595,7 @@ pattern_t ppattern(ir_desc_t *desc) {
 				.name = name,
 				.loc = name_loc,
 				.kind = PS_LOCAL,
-				.d_local = local,
+				.d_local = { local },
 			});
 
 			return (pattern_t){
