@@ -30,6 +30,8 @@ enum : u8 {
 
 type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg);
 
+// returns TYPE_INFER on errors
+type_t ctype_unify_innards(type_t lhs_t, type_t rhs_t);
 type_t ctype_unify_type(type_t lhs_t, type_t rhs_t, loc_t onerror);
 type_t ctype_unify(type_t lhs_t, hir_expr_t *rhs);
 

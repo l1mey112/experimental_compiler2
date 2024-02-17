@@ -48,6 +48,18 @@ rsym_t table_resolve_qualified_opt(istr_t qualified_name) {
 	return RSYM_NONE;
 }
 
+// this is annoying, i wish i could insert symbols into the hash
+// table to then have it never be resolvable again.
+// having all the data in the same place is what i want
+istr_t table_anon_symbol(void) {
+	static u32 anon_count = 0;
+
+	char buf[128];
+	u32 v = snprintf(buf, sizeof(buf), "<anon_%u>", anon_count++);
+
+	return sv_intern((u8*)buf, v);
+}
+
 rsym_t table_register(sym_t desc) {
 	ptrdiff_t sym = hmgeti(symbols, desc.key);
 
@@ -114,14 +126,14 @@ static void _dump_global(sym_t *sym);
 static void _dump_type(sym_t *sym);
 
 void table_dump(sym_t *sym) {
+	if (sym->kind == SYMBOL_IMPORT_ASSERTION) {
+		return;
+	}
+	
 	void *_ = alloc_scratch(0);
 
 	if (sym->is_extern) {
-		printf("extern ");
-
-		if (sym->extern_symbol != sym->key) {
-			printf("\"%s\" ", sv_from(sym->extern_symbol));
-		}
+		printf("extern \"%s\" ", sv_from(sym->extern_symbol));
 	}
 
 	if (sym->is_pub) {

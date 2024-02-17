@@ -52,6 +52,7 @@
 	X(TOK_LOOP, "loop") \
 	X(TOK_IO, "io") \
 	X(TOK_IMPORT, "import") \
+	X(TOK_IMPORT_MAIN, "import_main") \
 	X(TOK_PUB, "pub") \
 	X(TOK_EXTERN, "extern") \
 	X(TOK_BREAK, "brk") \

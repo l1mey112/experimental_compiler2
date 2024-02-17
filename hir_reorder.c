@@ -74,26 +74,24 @@ static void visit_definite_successor(rsym_t **po, rsym_t rsym, rsym_t rsucc, loc
 }
 
 // run first before `visit_definite_successor()`
-static void visit_sanity_value_sym(rsym_t **po, rsym_t rsym, hir_expr_t *expr) {
+static void visit_sanity_value_sym(loc_t loc, rsym_t d_sym) {
 	// sanity, can't be type
-	sym_t *sym = &symbols[expr->d_sym];
+	sym_t *sym = &symbols[d_sym];
 
 	if (sym->kind == _SYMBOL_PLACEHOLDER) {
-		err_with_pos(expr->loc, "unknown ident `%s`", sv_from(sym->short_name));
+		err_with_pos(loc, "unknown ident `%s`", sv_from(sym->short_name));
 	}
 
 	if (sym->kind == SYMBOL_TYPE) {
-		err_with_pos(expr->loc, "expected value, got type `%s`", sv_from(sym->short_name));
+		err_with_pos(loc, "expected value, got type `%s`", sv_from(sym->short_name));
 	}
-
-	// check `test = &test` without `: T`
 }
 
 // &expr -> direct = true
 static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr, bool direct) {
 	switch (expr->kind) {
 		case EXPR_SYM: {
-			visit_sanity_value_sym(po, rsym, expr);
+			visit_sanity_value_sym(expr->loc, expr->d_sym);
 			visit_definite_successor(po, rsym, expr->d_sym, expr->loc, !direct);
 			break;
 		}
@@ -452,6 +450,19 @@ static void visit_po(rsym_t **po, rsym_t rsym) {
 		}
 		case SYMBOL_TYPE: {
 			visit_successors_typeinfo(po, rsym, &sym->d_type);
+			break;
+		}
+		case SYMBOL_IMPORT_ASSERTION: {
+			imas_t *imas = &sym->d_imas;
+			
+			for (u32 i = 0, c = arrlenu(imas->entries); i < c; i++) {
+				imas_entry_t *entry = &imas->entries[i];
+
+				visit_sanity_value_sym(entry->symbol_loc, entry->symbol);
+				visit_definite_successor(po, rsym, entry->symbol, entry->symbol_loc, false);
+				//
+				visit_sanity_type(po, entry->type, entry->type_loc);
+			}
 			break;
 		}
 		default: {

@@ -318,6 +318,23 @@ type_t ptype(void) {
 	return ptype_expr(0);
 }
 
+void pimport_insert_validate(loc_t oloc, fs_rmod_t mod, istr_t module_ident) {
+	for (u32 i = 0; i < p.is_len; i++) {
+		pimport_t *is = &p.is[i];
+		if (is->mod == mod) {
+			err_with_pos(oloc, "import `%s` already imported", sv_from(fs_module_symbol(is->mod, module_ident)));
+		} else if (is->name == module_ident) {
+			err_with_pos(oloc, "import name `%s` already used", sv_from(module_ident));
+		}
+	}
+
+	p.is[p.is_len++] = (pimport_t){
+		.mod = mod,
+		.name = module_ident,
+		.loc = oloc,
+	};
+}
+
 void pimport(void) {
 	if (p.has_done_imports) {
 		punexpected("import declaration must come before code");
@@ -343,20 +360,68 @@ void pimport(void) {
 	fs_rmod_t mod = fs_register_import(p.mod, fields, fields_len, oloc);
 	istr_t module_ident = fields[fields_len - 1];
 
-	for (u32 i = 0; i < p.is_len; i++) {
-		pimport_t *is = &p.is[i];
-		if (is->mod == mod) {
-			err_with_pos(oloc, "import `%s` already imported", sv_from(fs_module_symbol(is->mod, module_ident)));
-		} else if (is->name == module_ident) {
-			err_with_pos(oloc, "import name `%s` already used", sv_from(module_ident));
-		}
+	pimport_insert_validate(oloc, mod, module_ident);
+}
+
+void pimport_main(void) {
+	if (p.has_done_imports) {
+		punexpected("import declaration must come before code");
 	}
 
-	p.is[p.is_len++] = (pimport_t){
-		.mod = mod,
-		.name = module_ident,
+	// import_main {}
+
+	istr_t main_ident = sv_move("main");
+
+	loc_t oloc = p.token.loc;
+	if (fs_mod_arena[p.mod].kind == MOD_MAIN) {
+		err_with_pos(oloc, "main module cannot import itself");
+	}
+	pimport_insert_validate(oloc, main_module, main_ident);
+	pnext();
+	//
+	// import_main {
+	//             ^
+	//     main: (): ()
+	// }
+	pexpect(TOK_OCBR);
+
+	imas_entry_t *entries = NULL;
+
+	while (p.token.kind != TOK_CCBR) {
+		pcheck(TOK_IDENT);
+		istr_t ident = p.token.lit;
+		loc_t loc = p.token.loc;
+		pnext();
+		pexpect(TOK_COLON);
+		loc_t type_loc = p.token.loc;
+		type_t type = ptype();
+
+		imas_entry_t entry = {
+			.symbol = table_resolve(main_module, ident),
+			.symbol_loc = loc,
+			.type = type,
+			.type_loc = type_loc,
+		};
+
+		arrpush(entries, entry);
+	}
+	pnext();
+
+	sym_t sym = {
+		.key = table_anon_symbol(),
+		.mod = p.mod,
+		.short_name = ISTR_NONE,
 		.loc = oloc,
+		.kind = SYMBOL_IMPORT_ASSERTION,
+		.d_imas = {
+			.entries = entries,
+		},
+		.is_pub = false,
+		.is_extern = false,
+		.extern_symbol = ISTR_NONE,
 	};
+
+	table_register(sym);
 }
 
 // -1 for not found

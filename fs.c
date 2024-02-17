@@ -37,6 +37,9 @@ fs_rmod_t fs_roots[8];
 u32 fs_platforms_len;
 fs_platform_t fs_platforms[32];
 
+fs_rmod_t main_module;
+fs_rmod_t rt_module;
+
 // register roots
 // register ways to walk possible roots
 
@@ -68,8 +71,12 @@ static void _fs_read_file(const char *fp, fs_rmod_t mod) {
 	_fs_read_file_with_size(fp, mod, statbuf.st_size);
 }
 
+// set root to self as well if none
 static fs_rmod_t _fs_nm(fs_mod_t mod) {
 	u32 l = fs_mod_arena_len;
+	if (mod.root == RMOD_NONE) {
+		mod.root = l;
+	}
 	fs_mod_arena[fs_mod_arena_len++] = mod;
 	return l;
 }
@@ -97,7 +104,7 @@ static fs_rmod_t _fs_nstub(const char *dp, fs_rmod_t parent) {
 		.short_name = sv_move(short_name), // ownership
 		.path = dp,
 		.parent = parent,
-		.root = parentp->root == RMOD_NONE ? parent : parentp->root,
+		.root = parentp->root,
 		.children = NULL,
 	});
 }
@@ -189,7 +196,7 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 			}
 
 			if (plus_p) {
-				if (mod->root == RMOD_NONE && strcmp(plus_p + 1, "rt") == 0) {
+				if (mod->parent == RMOD_NONE && strcmp(plus_p + 1, "rt") == 0) {
 					const char *prefix = strndup(file_head, plus_p - file_head);
 					if (strlen(prefix) == 0) {
 						err_without_pos("empty runtime platform prefix in directory '%s'", make_relative(fsp));
@@ -197,6 +204,7 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 					_fs_register_runtime(prefix, fsp);
 					continue;
 				} else {
+					plus_p++;
 					err_without_pos("unknown postfix '+%s' in directory '%s'", plus_p, make_relative(fsp));
 				}
 			}
@@ -302,6 +310,7 @@ void fs_entrypoint(const char *argv) {
 
 	// register main module
 	_fs_nroot(main);
+	main_module = main; // setup global
 }
 
 void _fs_materialise_platform(u32 i) {
@@ -319,6 +328,7 @@ void _fs_materialise_platform(u32 i) {
 	});
 	_fs_populate(rmod, true);
 	_fs_nroot(rmod);
+	rt_module = rmod; // setup global
 	return;
 }
 

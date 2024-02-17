@@ -88,6 +88,7 @@ void pexpect(tok_t expected);
 void NORETURN punexpected(const char *err);
 type_t ptype(void);
 void pimport(void);
+void pimport_main(void);
 int pimport_ident(istr_t name);
 void pscope_register(pscope_entry_t entry);
 void ppush_scope(void);

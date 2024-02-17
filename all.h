@@ -324,6 +324,9 @@ extern fs_mod_t fs_mod_arena[128];
 extern u32 fs_platforms_len;
 extern fs_platform_t fs_platforms[32];
 
+extern fs_rmod_t main_module;
+extern fs_rmod_t rt_module;
+
 extern tinfo_t types[1024];
 extern u32 type_len;
 
@@ -455,6 +458,8 @@ struct pattern_t {
 typedef struct proc_t proc_t;
 typedef struct global_t global_t;
 typedef struct ir_desc_t ir_desc_t;
+typedef struct imas_t imas_t;
+typedef struct imas_entry_t imas_entry_t;
 
 rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 
@@ -479,6 +484,17 @@ struct global_t {
 	bool is_mut;
 	//
 	hir_expr_t *constant; // possible NULL
+};
+
+struct imas_entry_t {
+	rsym_t symbol;
+	loc_t symbol_loc;
+	type_t type;
+	loc_t type_loc;
+};
+
+struct imas_t {
+	imas_entry_t *entries;
 };
 
 struct local_t {
@@ -531,12 +547,14 @@ struct sym_t {
 		SYMBOL_PROC,
 		SYMBOL_GLOBAL,
 		SYMBOL_TYPE,
+		SYMBOL_IMPORT_ASSERTION, // relies on deps
 	} kind;
 
 	union {
 		proc_t d_proc;
 		global_t d_global;
 		typesymbol_t d_type;
+		imas_t d_imas;
 	};
 };
 
@@ -544,6 +562,7 @@ struct sym_t {
 extern sym_t *symbols;
 extern rsym_t *symbols_po;
 
+istr_t table_anon_symbol(void);
 rsym_t table_resolve(fs_rmod_t mod, istr_t short_name);
 // returns RSYM_NONE if not found
 rsym_t table_resolve_qualified_opt(istr_t qualified_name);

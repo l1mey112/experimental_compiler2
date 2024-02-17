@@ -3,6 +3,7 @@
 void hir_reorder(void);
 void hir_type_proc(sym_t *sym, proc_t *proc);
 void hir_type_global(sym_t *sym, global_t *global);
+void hir_type_import(sym_t *sym, imas_t *imas);
 void hir_normalise_global(global_t *global);
 void hir_normalise_proc(proc_t *proc);
 void hir_eval_global(sym_t *sym, global_t *global);
@@ -43,6 +44,10 @@ void hir_passes(void) {
 				break;
 			} 
 			case SYMBOL_TYPE: {
+				break;
+			}
+			case SYMBOL_IMPORT_ASSERTION: {
+				hir_type_import(sym, &sym->d_imas);
 				break;
 			}
 			default: {

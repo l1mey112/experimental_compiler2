@@ -84,3 +84,68 @@ void hir_type_global(sym_t *sym, global_t *global) {
 		}
 	}
 }
+
+void hir_type_import(sym_t *sym, imas_t *imas) {
+	// import assertions always reside at the top of the file, so they're
+	// always type checked first before everything else in the file
+
+	// ensure that every `main: (): i32` has the right type
+
+	for (u32 i = 0, c = arrlenu(imas->entries); i < c; i++) {
+		imas_entry_t *entry = &imas->entries[i];
+
+		// this symbol shouldn't a typesymbol
+		sym_t *target = &symbols[entry->symbol];
+
+		type_t type;
+
+		// TODO: should probably go back to storing the type in the symbol
+		switch (target->kind) {
+			case SYMBOL_PROC: {
+				type = target->d_proc.type;
+				break;
+			}
+			case SYMBOL_GLOBAL: {
+				type = target->d_global.type;
+				break;
+			}
+			default: {
+				assert_not_reached();
+			}
+		}
+
+		// perform unification so below works out fine
+
+		// import_main {
+		//     main: (): ()
+		// }
+		//
+		// main(): ! = loop ()
+
+		// the above will pass, but in runtime code it may raise unreachable code errors
+		// since we're asserting the type through unification, they aren't actually the same
+
+		if (ctype_unify_innards(entry->type, type) == TYPE_INFER) {
+			print_err_with_pos(target->loc, "symbol `%s` has wrong type", sv_from(target->key));
+			print_err_with_pos(entry->symbol_loc, "import assertion expected `%s`", type_dbg_str(entry->type));
+			err_unwind();
+		}
+
+		// hack, but so what?
+		// it all checks out
+		switch (target->kind) {
+			case SYMBOL_PROC: {
+				target->d_proc.type = entry->type;
+				target->d_proc.ret_type = type_get(entry->type)->d_fn.ret;
+				break;
+			}
+			case SYMBOL_GLOBAL: {
+				target->d_global.type = entry->type;
+				break;
+			}
+			default: {
+				assert_not_reached();
+			}
+		}
+	}
+}

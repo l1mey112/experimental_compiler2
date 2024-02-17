@@ -1,8 +1,8 @@
-; import_main {
-;     main.main: (): ()
-; }
-; 
-; extern main(): i32 = {
-;     main.main
-;     ret 0
-; }
+import_main {
+    main: (): ()
+}
+
+extern "main" c_main(): i32 = {
+    main.main
+    ret 0
+}

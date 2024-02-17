@@ -163,7 +163,7 @@ void pfn(pattrib_t *attrib) {
 
 	istr_t qualified_name = fs_module_symbol(p.mod, name);
 
-	istr_t extern_symbol = qualified_name;
+	istr_t extern_symbol = name;
 
 	if (attrib->is_extern && attrib->export_symbol != ISTR_NONE) {
 		extern_symbol = attrib->export_symbol;
@@ -211,7 +211,8 @@ void pmethod(pattrib_t *attrib) {
 	// main.Foo:function
 	istr_t selector = fs_module_symbol_selector(qualified_name, name);
 
-	istr_t extern_symbol = selector;
+	// TODO: should probably deny methods being extern??
+	istr_t extern_symbol = name;
 
 	if (attrib->is_extern && attrib->export_symbol != ISTR_NONE) {
 		extern_symbol = attrib->export_symbol;
@@ -271,7 +272,7 @@ void ptop_global(pattrib_t *attrib) {
 		desc.hir = hir_dup(pexpr(&desc, 0));
 	}
 
-	istr_t extern_symbol = qualified_name;
+	istr_t extern_symbol = name;
 
 	if (attrib->is_extern && attrib->export_symbol != ISTR_NONE) {
 		extern_symbol = attrib->export_symbol;
@@ -415,7 +416,7 @@ void palias(pattrib_t *attrib) {
 
 // functions, constants, globals, types, attributes, etc.
 void ptop_stmt(void) {
-	if (p.token.kind != TOK_IMPORT) {
+	if (p.token.kind != TOK_IMPORT && p.token.kind != TOK_IMPORT_MAIN) {
 		p.has_done_imports = true;
 	}
 
@@ -431,6 +432,10 @@ void ptop_stmt(void) {
 	retry: switch (p.token.kind) {
 		case TOK_IMPORT: {
 			pimport();
+			break;
+		}
+		case TOK_IMPORT_MAIN: {
+			pimport_main();
 			break;
 		}
 		case TOK_PUB: {

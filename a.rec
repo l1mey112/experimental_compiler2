@@ -531,8 +531,16 @@
 ; KiB = 1024: u64
 ; MiB = 1024 * KiB
 
-KiB = 1024: u64
-MiB = KiB * 1024
-GiB = MiB * 1024
-TiB = GiB * 1024
-PiB = TiB * 1024
+; KiB = 1024: u64
+; MiB = KiB * 1024
+; GiB = MiB * 1024
+; TiB = GiB * 1024
+; PiB = TiB * 1024
+
+extern exit(status: i32): !
+
+pub main() {
+    exit 20
+}
+
+; pub main(): ! = loop ()

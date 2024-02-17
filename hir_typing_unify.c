@@ -88,6 +88,7 @@ end:
 	return ret;
 }
 
+// returns TYPE_INFER on error
 type_t ctype_unify_innards(type_t lhs_t, type_t rhs_t) {
 	ti_kind lhs_kind = type_kind(lhs_t);
 	ti_kind rhs_kind = type_kind(rhs_t);
@@ -108,7 +109,19 @@ type_t ctype_unify_innards(type_t lhs_t, type_t rhs_t) {
 
 	// functions
 	if (lhs_kind == TYPE_FUNCTION && rhs_kind == TYPE_FUNCTION) {
-		assert_not_reached();
+		tinfo_t *lhs_fn = type_get(lhs_t);
+		tinfo_t *rhs_fn = type_get(rhs_t);
+		
+		for (u32 i = 0; i < arrlenu(lhs_fn->d_fn.args); i++) {
+			type_t lhs_arg = lhs_fn->d_fn.args[i];
+			type_t rhs_arg = rhs_fn->d_fn.args[i];
+
+			if (ctype_unify_innards(lhs_arg, rhs_arg) == TYPE_INFER) {
+				return TYPE_INFER;
+			}
+		}
+
+		return ctype_unify_innards(lhs_fn->d_fn.ret, rhs_fn->d_fn.ret);
 	}
 
 	return TYPE_INFER;

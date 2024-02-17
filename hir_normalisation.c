@@ -567,19 +567,21 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 
 			expr->d_call.args = nargs;
 
+			// TODO: unreachable disabled for now, we'll have unreachable
+			//       on the function tags anyway...
 			// __builtin_unreachable()
 			if (ret_type == TYPE_BOTTOM) {
-				hir_expr_t unreachable = {
+				/* hir_expr_t unreachable = {
 					.kind = EXPR_UNREACHABLE,
 					.type = TYPE_BOTTOM,
 					.loc = expr->loc,
 					.d_unreachable = {
 						.kind = UNREACHABLE_HEURISTIC,
 					},
-				};
+				}; */
 
 				arrpush(*stmts, *expr);
-				arrpush(*stmts, unreachable);
+				//arrpush(*stmts, unreachable);
 
 				return ST_DIVERGING;
 			}
