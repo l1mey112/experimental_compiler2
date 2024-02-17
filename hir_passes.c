@@ -5,7 +5,8 @@ void hir_type_proc(sym_t *sym, proc_t *proc);
 void hir_type_global(sym_t *sym, global_t *global);
 void hir_normalise_global(global_t *global);
 void hir_normalise_proc(proc_t *proc);
-    
+void hir_eval_global(sym_t *sym, global_t *global);
+
 // reorder
 //
 // symbol -> hir_typing -> hir_normalisation ------------------>
@@ -35,6 +36,10 @@ void hir_passes(void) {
                     continue;
                 }
                 hir_normalise_global(&sym->d_global);
+				if (sym->d_global.desc.hir == NULL) {
+					continue;
+				}
+				hir_eval_global(sym, &sym->d_global);
 				break;
 			} 
 			case SYMBOL_TYPE: {

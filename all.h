@@ -408,7 +408,12 @@ u32 type_sizeof(arch_t *abi, type_t type);
 // also throws for ZSTs
 u32 type_alignof(arch_t *abi, type_t type);
 
-bool type_integer_fits_in(arch_t *arch, u64 lit, type_t type);
+bool type_abi_integer_fits_in(arch_t *arch, u64 lit, type_t type);
+u64 type_abi_truncate(arch_t *arch, type_t type, u64 lit);
+i64 type_abi_sign_extend(arch_t *arch, type_t type, u64 lit);
+i64 type_abi_signed_int_min(arch_t *arch, type_t type);
+i64 type_abi_signed_int_max(arch_t *arch, type_t type);
+u64 type_abi_unsigned_int_max(arch_t *arch, type_t type);
 
 #define TI_GUARD(type, kind, lvalue) \
 	(type_kind(type) == (kind) && ((lvalue) = type_get(type)))
@@ -472,7 +477,8 @@ struct global_t {
 	type_t type;
 	loc_t type_loc; // used in sym analysis
 	bool is_mut;
-	// TODO: consteval etc
+	//
+	hir_expr_t *constant; // possible NULL
 };
 
 struct local_t {

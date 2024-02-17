@@ -587,7 +587,12 @@ static void _dump_global(sym_t *sym) {
 	if (desc->hir) {
 		printf(" hir = ");
 		_print_expr(desc, desc->hir);
+		printf("\n");
 	}
 
-	printf("\n");
+	if (global->constant) {
+		printf("  (const: ");
+		_print_expr(desc, global->constant);
+		printf(")\n");
+	}
 }

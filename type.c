@@ -429,7 +429,7 @@ u32 type_alignof(arch_t *arch, type_t type) {
 
 // taken from rustc ABI/consteval overflow errors
 
-static u64 truncate(arch_t *arch, type_t type, u64 lit) {
+u64 type_abi_truncate(arch_t *arch, type_t type, u64 lit) {
 	u32 bits = type_sizeof(arch, type) * 8;
 
 	if (bits == 0) {
@@ -441,7 +441,7 @@ static u64 truncate(arch_t *arch, type_t type, u64 lit) {
 	return (lit << shift) >> shift;
 }
 
-static u64 sign_extend(arch_t *arch, type_t type, u64 lit) {
+i64 type_abi_sign_extend(arch_t *arch, type_t type, u64 lit) {
 	u32 bits = type_sizeof(arch, type) * 8;
 
 	if (bits == 0) {
@@ -453,16 +453,44 @@ static u64 sign_extend(arch_t *arch, type_t type, u64 lit) {
 	return (i64)(lit << shift) >> shift;
 }
 
+i64 type_abi_signed_int_min(arch_t *arch, type_t type) {
+	u32 bits = type_sizeof(arch, type) * 8;
+
+	assert(bits != 0);
+
+	if (bits == 64) {
+		return ~0ULL >> 1;
+	}
+
+	return -(1LL << (bits - 1));
+}
+
+i64 type_abi_signed_int_max(arch_t *arch, type_t type) {
+	u32 bits = type_sizeof(arch, type) * 8;
+
+	assert(bits != 0);
+
+	return (1LL << (bits - 1)) - 1;
+}
+
+u64 type_abi_unsigned_int_max(arch_t *arch, type_t type) {
+	u32 bits = type_sizeof(arch, type) * 8;
+
+	assert(bits != 0);
+
+	return (1ULL << bits) - 1;
+}
+
 // checks integer size
 // ensure type is numeric
-bool type_integer_fits_in(arch_t *arch, u64 lit, type_t type) {
+bool type_abi_integer_fits_in(arch_t *arch, u64 lit, type_t type) {
 	assert(type_is_integer(type));
 
-	u64 trunc = truncate(arch, type, lit);
+	u64 trunc = type_abi_truncate(arch, type, lit);
 
 	bool fits_in;
 	if (type_is_signed(type)) {
-		fits_in = sign_extend(arch, type, trunc) == lit;
+		fits_in = type_abi_sign_extend(arch, type, trunc) == (i64)lit;
 	} else {
 		fits_in = trunc == lit;
 	}

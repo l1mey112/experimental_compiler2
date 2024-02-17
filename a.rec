@@ -519,8 +519,20 @@
 ;     factorial.factacc 6
 ; }
 
-fort(v: i32, k: i32) = v
+; fort(v: i32, k: i32) = v
+; 
+; pub main() {
+;     fort 2 { 20 }
+; }
 
-pub main() {
-    fort 2 { 20 }
-}
+;                  'this as comment?
+; TODO: can't unify (u32 + u64), need to perform commutative operation on both types
+;
+; KiB = 1024: u64
+; MiB = 1024 * KiB
+
+KiB = 1024: u64
+MiB = KiB * 1024
+GiB = MiB * 1024
+TiB = GiB * 1024
+PiB = TiB * 1024
