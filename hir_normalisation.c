@@ -880,7 +880,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 	return ST_NONE;
 }
 
-static void nproc(proc_t *proc) {
+void hir_normalise_proc(proc_t *proc) {
 	hir_expr_t *stmts = NULL;
 	hir_expr_t *hir = proc->desc.hir;
 
@@ -936,7 +936,7 @@ static void nproc(proc_t *proc) {
 	});
 }
 
-static void nglobal(global_t *global) {
+void hir_normalise_global(global_t *global) {
 	// globals don't contain `ret`
 	// for consteval after normalisation, we'll have to add a `ret` to the end of the block
 
@@ -958,36 +958,4 @@ static void nglobal(global_t *global) {
 	extern void hir_eval_global(global_t *global);
 
 	hir_eval_global(global); */
-}
-
-void hir_normalisation(void) {
-	for (u32 i = 0, c = arrlenu(symbols_po); i < c; i++) {
-		rsym_t rsym = symbols_po[i];
-		sym_t *sym = &symbols[rsym];
-
-		// after checking, it's assumed that only extern symbols can have no body
-
-		switch (sym->kind) {
-			case SYMBOL_PROC: {
-				if (sym->d_proc.desc.hir == NULL) {
-					continue;
-				}
-				nproc(&sym->d_proc);
-				break;
-			}
-			case SYMBOL_GLOBAL: {
-				if (sym->d_global.desc.hir == NULL) {
-					continue;
-				}
-				nglobal(&sym->d_global);
-				break;
-			} 
-			case SYMBOL_TYPE: {
-				break;
-			}
-			default: {
-				assert_not_reached();
-			}
-		}
-	}
 }

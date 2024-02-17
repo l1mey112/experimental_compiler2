@@ -79,38 +79,16 @@ ret:;
 
 	fs_dump_tree();
 
-	extern void hir_reorder(void);
-	extern void hir_typing(void);
-	extern void hir_normalisation(void);
+	extern void hir_passes(void);
 
-	typedef struct {
-		void (*pass)(void);
-		const char *name;
-	} pass_t;
-
-	#define X(x) { x, #x }
-
-	pass_t hir_passes[] = {
-		X(hir_reorder),
-		X(hir_typing),
-		X(hir_normalisation),
-	};
-
-	#undef X
-
-	if (!err) for (u32 i = 0; i < ARRAYLEN(hir_passes); i++) {
-		printf(BMAG "HIR pass: %s\n" RESET, hir_passes[i].name);
-
-		if (!setjmp(err_diag.unwind)) {
-			hir_passes[i].pass();
-		} else {
-			printf(BRED "HIR pass: %s failed\n" RESET, hir_passes[i].name);
-			err = true;
-			break;
-		}
-
-		table_dump_po();
+	if (!setjmp(err_diag.unwind)) {
+		hir_passes();
+	} else {
+		err = true;
 	}
+
+	printf("\n");
+	table_dump_po();
 
 	return err;
 }

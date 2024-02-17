@@ -3,7 +3,7 @@
 
 cctx_t c;
 
-void cproc(sym_t *sym, proc_t *proc) {
+void hir_type_proc(sym_t *sym, proc_t *proc) {
 	c = (cctx_t){};
 
 	cblk_t *blk = &c.blocks[0]; // we saved space for this in parser.c
@@ -64,7 +64,7 @@ void cproc(sym_t *sym, proc_t *proc) {
 	}
 }
 
-void cglobal(sym_t *sym, global_t *global) {
+void hir_type_global(sym_t *sym, global_t *global) {
 	c = (cctx_t){};
 
 	// it's possible for these to have no body
@@ -81,30 +81,6 @@ void cglobal(sym_t *sym, global_t *global) {
 			global->type = ret;
 		} else {
 			ctype_unify(global->type, global->desc.hir);
-		}
-	}
-}
-
-void hir_typing(void) {
-	for (u32 i = 0, c = arrlenu(symbols_po); i < c; i++) {
-		rsym_t rsym = symbols_po[i];
-		sym_t *sym = &symbols[rsym];
-
-		switch (sym->kind) {
-			case SYMBOL_PROC: {
-				cproc(sym, &sym->d_proc);
-				break;
-			}
-			case SYMBOL_GLOBAL: {
-				cglobal(sym, &sym->d_global);
-				break;
-			} 
-			case SYMBOL_TYPE: {
-				break;
-			}
-			default: {
-				assert_not_reached();
-			}
 		}
 	}
 }
