@@ -57,7 +57,17 @@ static bool cmp_typeinfo(tinfo_t *a, tinfo_t *b) {
 			return a->d_slice.elem == b->d_slice.elem;
 		}
 		case TYPE_ARRAY: {
-			return a->d_array.elem == b->d_array.elem && a->d_array.length == b->d_array.length;
+			// TODO: compare POD instead?
+
+			if (a->d_array.is_symbol != b->d_array.is_symbol) {
+				return false;
+			}
+
+			if (a->d_array.is_symbol) {
+				return a->d_array.elem == b->d_array.elem && a->d_array.d_symbol == b->d_array.d_symbol;
+			} else {
+				return a->d_array.elem == b->d_array.elem && a->d_array.d_length == b->d_array.d_length;
+			}
 		}
 		case TYPE_SYMBOL: {
 			return a->d_symbol == b->d_symbol;
@@ -253,7 +263,11 @@ static void _type_dbg_str(type_t type, bool inner) {
 			break;
 		}
 		case TYPE_ARRAY: {
-			COMMIT(sprintf((char *)p, "[%zu]", typeinfo->d_array.length));
+			if (typeinfo->d_array.is_symbol) {
+				COMMIT(sprintf((char *)p, "[%s]", sv_from(symbols[typeinfo->d_array.d_symbol].key)));
+			} else {
+				COMMIT(sprintf((char *)p, "[%zu]", typeinfo->d_array.d_length));
+			}
 			_type_dbg_str(typeinfo->d_array.elem, false);
 			break;
 		}
@@ -380,6 +394,12 @@ u32 type_sizeof(arch_t *arch, type_t type) {
 		// TYPE_SLICE
 		// TYPE_ARRAY
 		// TYPE_SYMBOL
+		case TYPE_ARRAY: {
+			// TODO: proper alignment and everything
+			tinfo_t *info = type_get(type);
+			assert(!info->d_array.is_symbol);
+			return type_sizeof(arch, info->d_array.elem) * info->d_array.d_length;
+		}
 		default: {
 			// TODO: please fix this
 			assert_not_reached();

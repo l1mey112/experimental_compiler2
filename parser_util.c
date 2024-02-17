@@ -1,5 +1,7 @@
 #include "all.h"
+#include "hir.h"
 #include "parser.h"
+#include <errno.h>
 
 bool pprev_next_to(void) {
 	return p.prev.loc.pos + p.prev.loc.len == p.token.loc.pos;
@@ -54,6 +56,17 @@ type_t ptok_to_type(tok_t kind) {
 	}
 }
 
+u64 pparse_int(token_t token) {
+	u64 lit = strtoull(sv_from(token.lit), NULL, 10);
+
+	// we won't get any other error
+	if (errno == ERANGE) {
+		err_with_pos(token.loc, "integer literal too large to fit in 64 bits");
+	}
+
+	return lit;
+}
+
 enum : u8 {
 	PREC_UNKNOWN,
 	PREC_CALL,
@@ -66,6 +79,37 @@ u8 ptype_prec(void) {
 		case TOK_PIPE: return PREC_CALL; // TODO: same prec?
 		default: return PREC_UNKNOWN;
 	}
+}
+
+// parse const expression and create anonymous global
+rsym_t pconst_expression(void) {
+	loc_t oloc = p.token.loc;
+
+	ir_desc_t desc = {};
+
+	// TODO: mask scopes
+	hir_expr_t expr = pexpr(&desc, 0);
+
+	desc.hir = hir_dup(expr);
+
+	sym_t sym = {
+		.key = table_anon_symbol(),
+		.mod = p.mod,
+		.short_name = ISTR_NONE,
+		.loc = oloc,
+		.kind = SYMBOL_GLOBAL,
+		.d_global = {
+			.desc = desc,
+			.type = TYPE_INFER,
+			.type_loc = (loc_t){0},
+			.is_mut = false,
+		},
+		.is_pub = false,
+		.is_extern = false,
+		.extern_symbol = ISTR_NONE,
+	};
+
+	return table_register(sym);
 }
 
 type_t ptype_expr(u8 prec) {
@@ -91,14 +135,26 @@ type_t ptype_expr(u8 prec) {
 			// []i32
 
 			bool is_array = false;
-			token_t int_size;
+			bool is_array_symbol = false;
+			u64 int_size_val;
+			rsym_t const_sym;
 
-			if (p.token.kind == TOK_INTEGER) {
-				int_size = p.token;
+			if (p.token.kind != TOK_CSQ) {
+				// one of two
+				// 1. integer literal
+				// 2. constant initialiser
+
 				is_array = true;
-				pnext();
-			} else if (p.token.kind != TOK_CSQ) {
-				punexpected("expected integer or `]`");
+
+				// TODO: symbol forwarding
+
+				if (p.token.kind == TOK_INTEGER) {
+					int_size_val = pparse_int(p.token);
+					pnext();
+				} else {
+					is_array_symbol = true;
+					const_sym = pconst_expression();
+				}
 			}
 			pexpect(TOK_CSQ);
 			
@@ -108,17 +164,19 @@ type_t ptype_expr(u8 prec) {
 			type_t elem = ptype_expr(PREC_UNARY);
 
 			if (is_array) {
-				size_t len = strtoull(sv_from(int_size.lit), NULL, 10);
-
-				if (len == 0) {
-					err_with_pos(int_size.loc, "array length cannot be zero");
-				}
-				
-				type = type_new((tinfo_t){
+				tinfo_t info = {
 					.kind = TYPE_ARRAY,
-					.d_array.length = len,
 					.d_array.elem = elem,
-				});
+				};
+
+				if (is_array_symbol) {
+					info.d_array.is_symbol = true;
+					info.d_array.d_symbol = const_sym;
+				} else {
+					info.d_array.d_length = int_size_val;
+				}
+
+				type = type_new(info);
 			} else {
 				type = type_new((tinfo_t){
 					.kind = TYPE_SLICE,
@@ -362,6 +420,8 @@ void pimport(void) {
 
 	pimport_insert_validate(oloc, mod, module_ident);
 }
+
+// import_main -> symbol
 
 void pimport_main(void) {
 	if (p.has_done_imports) {

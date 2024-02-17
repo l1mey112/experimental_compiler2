@@ -340,8 +340,9 @@ void cpattern(ir_desc_t *desc, pattern_t *pattern, type_t type) {
 					break;
 				}
 				case TYPE_ARRAY: {
+					assert(!type_get(type)->d_array.is_symbol);
 					elem_type = type_get(type)->d_array.elem;
-					elems = type_get(type)->d_array.length;
+					elems = type_get(type)->d_array.d_length;
 					break;
 				}
 				default: {
@@ -450,7 +451,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 					.kind = TYPE_ARRAY,
 					.d_array = {
 						.elem = elem_type,
-						.length = len,
+						.d_length = len,
 					}
 				};
 			}

@@ -97,5 +97,6 @@ void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
 pattern_t ppattern(ir_desc_t *desc);
 u32 pblk_locate_label(istr_t opt_label, loc_t onerror);
 u32 pblk_locate_fn(loc_t onerror);
+u64 pparse_int(token_t token);
 
 hir_expr_t pexpr(ir_desc_t *desc, u8 prec);

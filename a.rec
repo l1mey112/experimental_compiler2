@@ -537,10 +537,20 @@
 ; TiB = GiB * 1024
 ; PiB = TiB * 1024
 
-extern exit(status: i32): !
+; TODO: u64max: i32 = 18446744073709551615
 
-pub main() {
-    exit 20
-}
+; extern exit(status: i32): !
+; 
+; pub main() {
+;     exit 20
+; }
 
 ; pub main(): ! = loop ()
+
+; TODO: raise error on the users side for non pub
+
+test = 4
+
+pub main() {
+    let k: [test]i32 = [1, 2, 3, 4]
+}

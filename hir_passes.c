@@ -8,6 +8,62 @@ void hir_normalise_global(global_t *global);
 void hir_normalise_proc(proc_t *proc);
 void hir_eval_global(sym_t *sym, global_t *global);
 
+void hir_global_constexpr(rsym_t rsym, global_t *global) {
+	// search entire type table for references to this global
+	// assumed that only one unique global exists
+
+	sym_t *sym = &symbols[rsym];
+
+	tinfo_t *info = NULL;
+	for (u32 i = 0; i < type_len; i++) {
+		tinfo_t *i_info = &types[i];
+
+		if (i_info->kind == TYPE_ARRAY && i_info->d_array.is_symbol) {
+			if (i_info->d_array.d_symbol == rsym) {
+				info = i_info;
+				break;
+			}
+		}
+	}
+
+	if (info == NULL) {
+		return;
+	}
+
+	// 1. is this global a constant
+	// 2. is this global a positive integer
+	// 3. is this global a non-zero integer
+
+	if (!global->constant) {
+		err_with_pos(sym->loc, "not a constant expression");
+	}
+
+	// there are no negative integers in the HIR,
+	// only positive ones prepended with unary minus
+
+	hir_expr_t *expr = global->constant;
+	if (!type_is_integer(expr->type)) {
+		err_with_pos(sym->loc, "not an integer");
+	}
+
+	// no negatives allowed
+	if (expr->kind == EXPR_PREFIX && expr->d_prefix.op == EXPR_K_SUB) {
+		err_with_pos(sym->loc, "can't have negative array size");
+	}
+
+	assert(expr->kind == EXPR_INTEGER_LIT);
+
+	// no zeros allowed
+	u64 value = expr->d_integer;
+
+	if (value == 0) {
+		err_with_pos(sym->loc, "can't have zero array size");
+	}
+
+	info->d_array.is_symbol = false;
+	info->d_array.d_length = value;
+}
+
 // reorder
 //
 // symbol -> hir_typing -> hir_normalisation ------------------>
@@ -37,10 +93,8 @@ void hir_passes(void) {
                     continue;
                 }
                 hir_normalise_global(&sym->d_global);
-				if (sym->d_global.desc.hir == NULL) {
-					continue;
-				}
 				hir_eval_global(sym, &sym->d_global);
+				hir_global_constexpr(rsym, &sym->d_global);
 				break;
 			} 
 			case SYMBOL_TYPE: {

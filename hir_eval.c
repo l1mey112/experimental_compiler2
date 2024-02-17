@@ -16,7 +16,7 @@ struct eresult_t {
 		u16 d_16;
 		u32 d_32;
 		u64 d_64;
-		size_t d_size;
+		// size_t d_size; (ABI)
 		f32 d_f32;
 		f64 d_f64;
 		bool d_bool;
@@ -54,7 +54,7 @@ static void _estate(edesc_t *desc) {
 }
 
 static eresult_t ehir_infix_eval(eresult_t lhs, eresult_t rhs, type_t type, tok_t tok, loc_t onerror) {
-	assert(type_is_integer(type));
+	assert(type_is_integer(type)); // TODO: floats
 
 	bool is_signed = type_is_signed(type);
 	
@@ -138,6 +138,26 @@ static eresult_t ehir_expr_eval(edesc_t *desc, hir_expr_t *expr) {
 			eresult_t rhs = ehir_expr_eval(desc, expr->d_infix.rhs);
 			return ehir_infix_eval(lhs, rhs, expr->type, expr->d_infix.kind, expr->loc);
 		}
+		case EXPR_PREFIX: {
+			r = ehir_expr_eval(desc, expr->d_prefix.expr);
+			
+			switch (expr->d_prefix.op) {
+				case EXPR_K_NOT: {
+					r.d_bool = !r.d_bool;
+					break;
+				}
+				case EXPR_K_SUB: {
+					if (type_is_integer(expr->type)) {
+						r.d_64 = -r.d_64;
+					} else {
+						BAIL();
+					}
+					break;
+				}
+			}
+
+			return r;
+		}
 		case EXPR_LOCAL: {
 			rlocal_t local = expr->d_local;
 
@@ -171,7 +191,7 @@ static eresult_t ehir_expr_eval(edesc_t *desc, hir_expr_t *expr) {
 		}
 	}
 
-	return r;
+	assert_not_reached();
 }
 
 static void ehir_stmts_eval(edesc_t *desc, hir_expr_t *exprs) {

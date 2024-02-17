@@ -261,7 +261,11 @@ struct tinfo_t {
 			type_t elem;
 		} d_slice;
 		struct {
-			size_t length; // TODO: length or constant symbol?
+			bool is_symbol; // after checking will be desugared
+			union {
+				rsym_t d_symbol;
+				size_t d_length; // TODO: length or constant symbol?
+			};
 			type_t elem;
 		} d_array;
 		type_t *d_tuple;

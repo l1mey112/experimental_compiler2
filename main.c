@@ -50,6 +50,7 @@ void print_diag_without_pos(const char *type, const char *fmt, ...) {
 int main(int argc, const char *argv[]) {
 	bool err = false;
 
+	// const char *arch = "stdc99-64";
 	const char *arch = "c64";
 	const char *platform = "libc";
 
