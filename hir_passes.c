@@ -71,6 +71,10 @@ void hir_global_constexpr(rsym_t rsym, global_t *global) {
 void hir_passes(void) {
     hir_reorder();
 
+	table_dump_po();
+
+	eprintf("--------------\n");
+
     for (u32 i = 0, c = arrlenu(symbols_po); i < c; i++) {
 		rsym_t rsym = symbols_po[i];
 		sym_t *sym = &symbols[rsym];

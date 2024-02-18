@@ -88,9 +88,9 @@ ret:;
 	eprintf("\n");
 	table_dump_po();
 
-	if (!err) {
+	/* if (!err) {
 		hir_cgen(stdout);
-	}
+	} */
 
 	return err;
 }

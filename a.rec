@@ -550,8 +550,22 @@
 ;     let b: [test]i32 = [1, 2, 3, 4]
 ; }
 
-extern exit(status: i32): !
+; extern exit(status: i32): !
+; 
+; test(a: i32) = a + 50
+; 
+; k = test 50
+; 
+; pub main() {
+;     exit 20
+; }
 
-pub main() {
-    exit 20
-}
+pub main() {}
+
+factor(i': i32) = do
+    let f' = 1
+    let take = loop do
+        if (i < 1) brk f
+        f = f * i
+        i--
+    take

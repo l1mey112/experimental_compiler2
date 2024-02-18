@@ -411,7 +411,7 @@ bool pstmt(ir_desc_t *desc, hir_expr_t *expr_out) {
 // do
 //     ...
 //     ...
-hir_expr_t *pdo_block_impl(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
+hir_expr_t *pdo_block_impl(ir_desc_t *desc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 	//
@@ -443,7 +443,7 @@ hir_expr_t *pdo_block_impl(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	return exprs;
 }
 
-hir_expr_t *pbrace_block_impl(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
+hir_expr_t *pbrace_block_impl(ir_desc_t *desc) {
 	pnext();
 	
 	hir_expr_t *exprs = NULL;
@@ -467,10 +467,9 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	// TODO: implement `:do` syntax
 
-	u8 blk_id = desc->next_blk_id++;
-	p.blks[p.blks_len++] = (pblk_t){
-		.blk_id = blk_id,
-		.kind = BLK_LABEL,
+	pblk_t *blk = &p.blks[p.blks_len++];
+
+	*blk = (pblk_t){
 		.label = opt_label,
 		.loc = opt_loc,
 		.always_brk = false,
@@ -479,9 +478,9 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	hir_expr_t *exprs;
 
 	if (p.token.kind == TOK_DO) {
-		exprs = pdo_block_impl(desc, opt_label, opt_loc);
+		exprs = pdo_block_impl(desc);
 	} else if (p.token.kind == TOK_OCBR) {
-		exprs = pbrace_block_impl(desc, opt_label, opt_loc);
+		exprs = pbrace_block_impl(desc);
 	} else {
 		assert_not_reached();
 	}
@@ -501,7 +500,8 @@ hir_expr_t pdo(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 		.type = TYPE_INFER,
 		.d_do_block = {
 			.exprs = exprs,
-			.blk_id = blk_id,
+			.forward = blk->forward,
+			.backward = blk->backward,
 		},
 	};
 
@@ -513,14 +513,13 @@ hir_expr_t ploop(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 	loc_t oloc = p.token.loc;
 	pnext();
 
-	u8 blk_id = desc->next_blk_id++;
-	p.blks[p.blks_len++] = (pblk_t){
-		.blk_id = blk_id,
-		.kind = BLK_LABEL,
+	pblk_t *blk = &p.blks[p.blks_len++];
+	*blk = (pblk_t){
 		.label = opt_label,
 		.loc = opt_loc,
 		.always_brk = true,
 	};
+
 	hir_expr_t *expr = hir_dup(pexpr(desc, 0));
 	p.blks_len--;
 
@@ -529,8 +528,9 @@ hir_expr_t ploop(ir_desc_t *desc, istr_t opt_label, loc_t opt_loc) {
 		.loc = oloc,
 		.type = TYPE_INFER,
 		.d_loop = {
-			.blk_id = blk_id,
 			.expr = expr,
+			.forward = blk->forward,
+			.backward = blk->backward,
 		},
 	};
 
@@ -577,7 +577,6 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 		// TODO: labels
 		case TOK_IF: {
 			// if (...) ... else ...
-			loc_t oloc = token.loc;
 			pnext();
 			pexpect(TOK_OPAR);
 			hir_expr_t *cond = hir_dup(pexpr(desc, 0));
@@ -660,13 +659,15 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 				onerror = p.token.loc;
 				pnext();
 			}
-			u8 blk_id = pblk_locate_label(label, onerror);
+			u32 branch_level = pblk_locate_label(label, onerror);
+			p.blks[p.blks_len - branch_level - 1].forward = true; // brk
+
 			expr = (hir_expr_t){
 				.kind = EXPR_BREAK,
 				.loc = token.loc,
 				.type = TYPE_BOTTOM,
 				.d_break = {
-					.blk_id = blk_id,
+					.branch_level = branch_level,
 					.expr = hir_dup(pexpr(desc, 0)),
 				},
 			};
@@ -684,19 +685,23 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 				onerror = p.token.loc;
 				pnext();
 			}
-			u8 blk_id = pblk_locate_label(label, onerror);
+			u32 branch_level = pblk_locate_label(label, onerror);
+			p.blks[p.blks_len - branch_level - 1].backward = true; // rep
+
 			expr = (hir_expr_t){
 				.kind = EXPR_CONTINUE,
 				.loc = token.loc,
 				.type = TYPE_BOTTOM,
 				.d_continue = {
-					.blk_id = blk_id,
+					.branch_level = branch_level,
 				},
 			};
 			break;
 		}
 		case TOK_RETURN: {
-			u32 blk_id =  pblk_locate_fn(p.token.loc);
+			if (!p.inside_fn) {
+				err_with_pos(p.token.loc, "not inside function");
+			}
 			pnext();
 			expr = (hir_expr_t){
 				.kind = EXPR_RETURN,
@@ -704,7 +709,6 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 				.type = TYPE_BOTTOM,
 				.d_return = {
 					.expr = hir_dup(pexpr(desc, 0)),
-					.blk_id = blk_id,
 				},
 			};
 			break;
@@ -808,7 +812,9 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 						switch (token.kind) {
 							case TOK_NOT: k = EXPR_K_NOT; break;
 							case TOK_SUB: k = EXPR_K_SUB; break;
-							default: {}
+							default: {
+								assert_not_reached();
+							}
 						}
 
 						hir_expr_t rhs = pexpr(desc, PREC_PREFIX);
@@ -889,7 +895,9 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 				switch (token.kind) {
 					case TOK_INC: k = EXPR_K_INC; break;
 					case TOK_DEC: k = EXPR_K_DEC; break;
-					default: {}
+					default: {
+						assert_not_reached();
+					}
 				}
 				
 				expr = (hir_expr_t){

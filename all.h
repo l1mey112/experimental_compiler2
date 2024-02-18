@@ -471,7 +471,6 @@ rlocal_t ir_local_new(ir_desc_t *desc, local_t local);
 struct ir_desc_t {
 	local_t *locals; // variables
 	hir_expr_t *hir; // possible NULL
-	u32 next_blk_id; // each block id must be unique
 };
 
 struct proc_t {

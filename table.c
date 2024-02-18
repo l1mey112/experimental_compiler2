@@ -325,14 +325,36 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_LOOP: {
-			_print_blk_id_space(expr->d_loop.blk_id);
 			eprintf("loop ");
+			if (expr->d_loop.forward || expr->d_loop.backward) {
+				eprintf("<");
+				if (expr->d_loop.forward) {
+					eprintf("f");
+				}
+				if (expr->d_loop.backward) {
+					eprintf("b");
+				}
+				eprintf("> ");
+			}
 			_print_expr(desc, expr->d_loop.expr);
 			break;
 		}
 		case EXPR_DO_BLOCK: {
-			_print_blk_id_space(expr->d_do_block.blk_id);
-			eprintf("do\n");
+			eprintf("do");
+			if (expr->d_do_block.no_branch || expr->d_do_block.forward || expr->d_do_block.backward) {
+				eprintf(" <");
+				if (expr->d_do_block.no_branch) {
+					eprintf("n");
+				}
+				if (expr->d_do_block.forward) {
+					eprintf("f");
+				}
+				if (expr->d_do_block.backward) {
+					eprintf("b");
+				}
+				eprintf("> ");
+			}
+			eprintf("\n");
 			_tabs++;
 			for (int i = 0, c = arrlen(expr->d_do_block.exprs); i < c; i++) {
 				_print_tabs();
@@ -393,12 +415,12 @@ static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_BREAK: {
-			eprintf("brk :%u ", expr->d_break.blk_id);
+			eprintf("brk :%u ", expr->d_break.branch_level);
 			_print_expr(desc, expr->d_break.expr);
 			break;
 		}
 		case EXPR_CONTINUE: {
-			eprintf("rep :%u", expr->d_continue.blk_id);
+			eprintf("rep :%u", expr->d_continue.branch_level);
 			break;
 		}
 		case EXPR_RETURN: {

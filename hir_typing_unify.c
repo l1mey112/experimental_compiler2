@@ -146,7 +146,9 @@ void ctype_cast(type_t to, hir_expr_t *node, loc_t loc) {
 		.kind = EXPR_CAST,
 		.loc = loc,
 		.type = to,
-		.d_cast = dup,
+		.d_cast = {
+			.expr = dup,
+		},
 	};
 }
 

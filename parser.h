@@ -8,16 +8,11 @@ typedef struct pscope_entry_t pscope_entry_t;
 typedef struct pblk_t pblk_t;
 
 struct pblk_t {
-	enum {
-		BLK_LABEL,
-		BLK_FN,
-	} kind;
-
-	u32 blk_id;
-	
 	istr_t label;
 	loc_t loc; // TODO: i don't even think we'll need this?
 	bool always_brk; // if false, a `brk` without a label doesn't resolve to this
+	bool forward; // brk
+	bool backward; // rep
 };
 
 struct pimport_t {
@@ -67,13 +62,15 @@ struct pctx_t {
 	u32 scope_len;
 	pscope_entry_t scope_entries[256]; // scope entries
 	u32 scope_entries_len;
-	pblk_t blks[256]; // not a stack, shared throughout the entire function. index by blocks len
+	pblk_t blks[256]; // a stack using wasm like branching semantics
 	u32 blks_len;
 	//
 	fs_rfile_t file;
 	fs_rmod_t mod;
 	fs_mod_t *modp;
 	bool has_done_imports;
+	//
+	bool inside_fn;
 };
 
 extern pctx_t p;
@@ -96,7 +93,6 @@ void ppop_scope(void);
 void pmask_scope(u32 entries_lo, u32 entries_hi, bool mask);
 pattern_t ppattern(ir_desc_t *desc);
 u32 pblk_locate_label(istr_t opt_label, loc_t onerror);
-u32 pblk_locate_fn(loc_t onerror);
 u64 pparse_int(token_t token);
 
 hir_expr_t pexpr(ir_desc_t *desc, u8 prec);

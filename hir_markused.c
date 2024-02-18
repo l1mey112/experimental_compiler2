@@ -2,6 +2,7 @@
 
 // run over the HIR and mark symbols if used by a parent symbol
 // all "visible" symbols are ones that are externally visible
+// will also order symbols in postorder, like hir_reorder.
 //
 // this is also a sort of correctness pass, further passes like cgen
 // won't be able to generate certain symbols that go unused
@@ -18,12 +19,12 @@ struct mu_entry_t {
 static mu_entry_t *mu_map = NULL;
 static rsym_t *symbols_marked = NULL;
 
-void msymbol(rsym_t rsym);
+void msymbol_dfs(rsym_t rsym);
 
 void mhir_expr(hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_SYM: {
-			msymbol(expr->d_sym);
+			msymbol_dfs(expr->d_sym);
 			break;
 		}
 		//
@@ -160,7 +161,7 @@ void mhir_expr(hir_expr_t *expr) {
 	}
 }
 
-void msymbol(rsym_t rsym) {
+void msymbol_dfs(rsym_t rsym) {
 	// have i visited this symbol before?
 	if (hmgeti(mu_map, rsym) != -1) {
 		return;
@@ -168,7 +169,6 @@ void msymbol(rsym_t rsym) {
 
 	// mark visited
 	hmputs(mu_map, (mu_entry_t) { .key = rsym });
-	arrpush(symbols_marked, rsym);
 
 	sym_t *sym = &symbols[rsym];
 
@@ -189,6 +189,9 @@ void msymbol(rsym_t rsym) {
 			assert_not_reached();
 		}
 	}
+
+	// add to postorder
+	arrpush(symbols_marked, rsym);
 }
 
 void hir_markused(void) {
@@ -197,7 +200,7 @@ void hir_markused(void) {
 		sym_t *sym = &symbols[rsym];
 
 		if (sym->is_extern) {
-			msymbol(rsym);
+			msymbol_dfs(rsym);
 		}
 	}
 

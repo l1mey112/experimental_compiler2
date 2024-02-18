@@ -6,12 +6,8 @@ cctx_t c;
 void hir_type_proc(sym_t *sym, proc_t *proc) {
 	c = (cctx_t){};
 
-	cblk_t *blk = &c.blocks[0]; // we saved space for this in parser.c
-
-	*blk = (cblk_t){
-		.upvalue = proc->ret_type,
-		.brk_type = TYPE_INFER,
-	};
+	c.proc_upvalue = proc->ret_type;
+	c.proc_ret_type = TYPE_INFER;
 
 	bool ret_annotated = proc->ret_type != TYPE_INFER;
 
@@ -44,11 +40,11 @@ void hir_type_proc(sym_t *sym, proc_t *proc) {
 		if (ret_annotated) {
 			(void)ctype_unify(proc->ret_type, proc->desc.hir);
 		} else {
-			if (blk->brk_type == TYPE_INFER) {
+			if (c.proc_ret_type == TYPE_INFER) {
 				proc->ret_type = expr_type;
 			} else {
-				(void)ctype_unify(blk->brk_type, proc->desc.hir);
-				proc->ret_type = blk->brk_type;
+				(void)ctype_unify(c.proc_ret_type, proc->desc.hir);
+				proc->ret_type = c.proc_ret_type;
 			}
 		}
 

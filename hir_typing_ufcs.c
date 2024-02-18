@@ -2,7 +2,7 @@
 #include "check.h"
 #include "hir.h"
 
-void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr);
+void ccall_args(ir_desc_t *desc, hir_expr_t *expr);
 
 // TODO: remove `cufcs_autocall` and make specialised functions
 //       for expressions that take a `*call` parameter
@@ -30,12 +30,12 @@ void cufcs_autocall(ir_desc_t *desc, hir_expr_t *expr, u8 cfg) {
 			},
 		};
 		*expr = call;
-		ccall_args(desc, TYPE_INFER, expr);
+		ccall_args(desc, expr);
 	}
 }
 
 // sets expr->type, doesn't check `f`
-void ccall_args(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
+void ccall_args(ir_desc_t *desc, hir_expr_t *expr) {
 	// iterate one by one over the args
 	// we don't use a curried form internally to not waste analysis checking
 	// for partial application. most function calls are complete calls anyway.
@@ -91,7 +91,7 @@ void ccall(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 		}
 	}
 
-	ccall_args(desc, TYPE_INFER, expr);
+	ccall_args(desc, expr);
 }
 
 // TODO: extract cnamed_field into UFCS autocall
@@ -238,7 +238,7 @@ skip_expr:;
 			}
 		};
 
-		ccall_args(desc, TYPE_INFER, expr);
+		ccall_args(desc, expr);
 	}
 
 	return;

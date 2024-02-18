@@ -11,13 +11,16 @@ struct cblk_t {
 	type_t upvalue;
 	type_t brk_type;
 	loc_t brk_loc; // if `first_type` not TYPE_INFER
-	bool is_rep;
 };
 
 struct cctx_t {
 	fs_rmod_t mod;
 	fs_mod_t *modp;
 	cblk_t blocks[128]; // overkill, index by blk_id
+	u32 blocks_len;
+	//
+	type_t proc_upvalue;
+	type_t proc_ret_type;
 };
 
 extern cctx_t c;

@@ -101,12 +101,14 @@ struct hir_expr_t {
 		} d_prefix;
 		struct {
 			hir_expr_t *exprs; // all do blocks have at least one expr (before transformations), unless they become a EXPR_TUPLE_UNIT
-			u32 blk_id;
-			bool is_single_expr; // no reps, brks at non last position
+			bool forward; // brk, set by parser meaning the last expr isn't a `brk` yet
+			bool backward; // rep
+			bool no_branch; // doesn't participate as branch target
 		} d_do_block;
 		struct {
 			hir_expr_t *expr;
-			u32 blk_id;
+			bool forward;
+			bool backward;
 		} d_loop;
 		struct {
 			hir_expr_t *lhs;
@@ -139,14 +141,13 @@ struct hir_expr_t {
 		hir_expr_t *d_array;
 		struct {
 			hir_expr_t *expr;
-			u8 blk_id;
+			u32 branch_level;
 		} d_break;
 		struct {
-			u8 blk_id;
+			u32 branch_level;
 		} d_continue;
 		struct {
 			hir_expr_t *expr;
-			u32 blk_id; // functions are blocks on their own
 		} d_return;
 		struct {
 			hir_expr_t *cond;

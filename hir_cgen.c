@@ -218,11 +218,12 @@ void gredirect(sym_t *sym) {
 		char c = s[i];
 		if (c == ':') {
 			gprintf("\\:");
-		} else if (c == '"') {
-			gprintf("\\\"");
 		} else {
 			gprintf("%c", c);
 		}
+		/* else if (c == '"') {
+			gprintf("\\\"");
+		} */
 	}
 }
 
@@ -238,12 +239,12 @@ void gproc_def(rsym_t rsym, proc_t *proc) {
 	gmangle_symbol(rsym);
 	gprintf("(");
 	gproc_def_args(proc);
-	gprintf(") __asm__(\"");
+	gprintf(") LINK(");
 	gredirect(sym);
-	gprintf("\")");
+	gprintf(")");
 
 	if (is_diverging) {
-		gprintf(" __attribute__((noreturn))");
+		gprintf(" DIVERGING");
 	}
 
 	gprintf(";\n");
@@ -259,9 +260,9 @@ void gglobal_def(rsym_t rsym, global_t *global) {
 	gtype(global->type);
 	gprintf(" ");
 	gmangle_symbol(rsym);
-	gprintf(" __asm__(\"");
+	gprintf(" LINK(");
 	gredirect(sym);
-	gprintf("\")");
+	gprintf(")");
 
 	if (global->constant) {
 		gprintf(" = ");
@@ -354,12 +355,17 @@ void hir_cgen(FILE *file) {
 	gprintf("#include <stdint.h>\n");
 	gprintf("#include <stdbool.h>\n");
 	gprintf("#include <stddef.h>\n");
-	gprintf("#include <features.h>\n");
 
 	gprintf("\n");
 
 	gprintf("// %s\n", build_token);
 	gprintf("_Static_assert(%u == sizeof(void*), \"abi sanity\");\n", abi.ptr_size);
+	gprintf("_Static_assert(%u == sizeof(uintptr_t), \"abi sanity\");\n", abi.ptr_size);
+
+	gprintf("\n");
+
+	gprintf("#define DIVERGING __attribute__((noreturn))\n");
+	gprintf("#define LINK(x) __asm__(#x)\n");
 
 	gprintf("\n");
 

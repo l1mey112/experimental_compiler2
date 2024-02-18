@@ -14,12 +14,20 @@ enum : rlocal_t {
 #define UNIT(loc_v) (hir_expr_t){ .kind = EXPR_TUPLE_UNIT, .type = TYPE_UNIT, .loc = loc_v }
 
 typedef struct nblk_t nblk_t;
+typedef struct nadj_t nadj_t;
 
 struct nblk_t {
 	rlocal_t dest;
 };
 
-nblk_t blks[128];
+static nblk_t blks[128];
+static u32 blks_len;
+
+// array of block indices to adjust branch levels
+static u32 branch_adj[64];
+static u32 branch_adj_len;
+
+// TODO: check use of `UNIT` for trivial ZST
 
 // a ZST is a type with a single value.
 // this doesn't fit in our imperative vision after normalisation.
@@ -41,7 +49,7 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 static u8 nhir_discard_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr);
 
 static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, rlocal_t target) {
-	nblk_t* blk = &blks[expr->d_do_block.blk_id];
+	nblk_t* blk = &blks[blks_len++];
 	*blk = (nblk_t){
 		.dest = target,
 	};
@@ -53,22 +61,24 @@ static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 	// convert `loop expr` into:
 	//
-	// :0 do
+	// do <b>
 	//     expr
 	//     rep :0
 
 	hir_expr_t do_res = {
 		.kind = EXPR_DO_BLOCK,
-		.type = loop_type != TYPE_BOTTOM ? TYPE_UNIT : TYPE_BOTTOM,
+		.type = TYPE_UNIT,
 		.loc = expr->loc,
 		.d_do_block = {
 			.exprs = NULL,
-			.blk_id = expr->d_do_block.blk_id,
+			.forward = expr->d_loop.forward,
+			.backward = true,
 		},
 	};
 
 	// discard
 	DIVERGING(nhir_discard_expr(desc, &loop_stmts, loop_expr));
+	blks_len--;
 
 	// loop to top
 	hir_expr_t do_rep = {
@@ -76,7 +86,7 @@ static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 		.type = TYPE_BOTTOM,
 		.loc = expr->loc,
 		.d_continue = {
-			.blk_id = expr->d_do_block.blk_id,
+			.branch_level = 0, // top
 		},
 	};
 
@@ -86,11 +96,12 @@ static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 	arrpush(*stmts, do_res);
 
-	if (loop_type == TYPE_BOTTOM) {
+	if (type_is_diverging(loop_type)) {
+		assert(!expr->d_loop.forward);
 		return ST_DIVERGING;
 	}
 
-	if (loop_type == TYPE_UNIT) {
+	if (is_trivial_zst(loop_type)) {
 		*expr = UNIT(expr->loc);
 	} else {
 		*expr = (hir_expr_t){
@@ -106,7 +117,7 @@ static u8 nhir_loop_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 
 // needs var
 static bool nhir_loop_nv(hir_expr_t *expr) {
-	return expr->type != TYPE_UNIT && expr->type != TYPE_BOTTOM;
+	return !is_trivial_zst(expr->type);
 }
 
 static u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
@@ -126,14 +137,22 @@ static u8 nhir_loop(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 
 static u8 nhir_do_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, rlocal_t target) {
 	hir_expr_t do_expr = *expr;
+	bool single_brk = !do_expr.d_do_block.forward && !do_expr.d_do_block.backward;
 
-	nblk_t* blk = &blks[do_expr.d_do_block.blk_id];
-	*blk = (nblk_t){
-		.dest = target,
-	};
+	nblk_t* blk;
+	if (!single_brk) {
+		blk = &blks[blks_len++];
+		*blk = (nblk_t){
+			.dest = target,
+		};
+	} else {
+		// removal of the `do` block, adjust branch level
+		branch_adj[branch_adj_len++] = blks_len;
+	}
 
-	bool single_brk = do_expr.d_do_block.is_single_expr;
 	u32 c = arrlenu(do_expr.d_do_block.exprs);
+
+	bool trivial_zst = is_trivial_zst(do_expr.type);
 
 	if (single_brk) {
 		assert(do_expr.d_do_block.exprs[c - 1].kind == EXPR_BREAK);
@@ -151,7 +170,7 @@ static u8 nhir_do_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 			*expr = *nexpr->d_break.expr;
 
 			// will be discarded by further code down the line and replaced with ()
-			if (do_expr.type == TYPE_UNIT || do_expr.type == TYPE_BOTTOM) {
+			if (trivial_zst) {
 				status = nhir_discard_expr(desc, nstmts, expr);
 			} else {
 				status = nhir_expr(desc, nstmts, expr);
@@ -167,12 +186,19 @@ static u8 nhir_do_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 		}
 	}
 
+	if (!single_brk) {
+		blks_len--;
+	} else {
+		branch_adj_len--;
+	}
+
 	// construct ret
-	if (do_expr.type == TYPE_UNIT) {
+
+	if (type_is_diverging(do_expr.type)) {
+		assert(status == ST_DIVERGING);
+	} else if (is_trivial_zst(do_expr.type)) {
 		*expr = UNIT(do_expr.loc);
 		status = ST_NONE;
-	} else if (do_expr.type == TYPE_BOTTOM) {
-		assert(status == ST_DIVERGING);
 	} else if (!single_brk) {
 		*expr = (hir_expr_t){
 			.kind = EXPR_LOCAL,
@@ -188,7 +214,7 @@ static u8 nhir_do_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 	// do -> stmts
 	if (!single_brk) {
 		do_expr.d_do_block.exprs = sep_stmts;
-		do_expr.type = do_expr.type == TYPE_BOTTOM ? TYPE_BOTTOM : TYPE_UNIT;
+		do_expr.type = TYPE_UNIT;
 
 		arrpush(*stmts, do_expr);
 	}
@@ -197,7 +223,7 @@ static u8 nhir_do_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 }
 
 static bool nhir_do_nv(hir_expr_t *expr) {
-	return expr->type != TYPE_UNIT && expr->type != TYPE_BOTTOM && !expr->d_do_block.is_single_expr;
+	return !is_trivial_zst(expr->type) && expr->d_do_block.forward;
 }
 
 static u8 nhir_do(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
@@ -252,7 +278,7 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 			.type = TYPE_BOTTOM,
 			.d_do_block = {
 				.exprs = else_stmts,
-				.blk_id = BLK_ID_NONE,
+				.no_branch = true,
 			},
 		});
 	}
@@ -268,7 +294,7 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 				.type = TYPE_BOTTOM,
 				.d_do_block = {
 					.exprs = then_stmts,
-					.blk_id = BLK_ID_NONE,
+					.no_branch = true,
 				},
 			}),
 			.els = new_els,
@@ -284,7 +310,7 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 			.d_local = target,
 			.loc = expr->loc,
 		};
-	} else if (expr->type == TYPE_BOTTOM) {
+	} else if (type_is_diverging(expr->type)) {
 		assert(status == ST_DIVERGING);
 	} else {
 		*expr = UNIT(expr->loc);
@@ -294,7 +320,7 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 
 static bool nhir_if_nv(hir_expr_t *expr) {
 	bool has_else = expr->d_if.els != NULL;
-	bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
+	bool has_tmpvar = has_else && !is_trivial_zst(expr->type);
 
 	return has_tmpvar;
 }
@@ -612,11 +638,25 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 			return nhir_loop(desc, stmts, expr);
 		}
 		case EXPR_CONTINUE: {
+			// adjust branch levels
+			for (u32 i = 0; i < branch_adj_len; i++) {
+				if (branch_adj[i] > blks_len) {
+					expr->d_break.branch_level--;
+				}
+			}
+
 			arrpush(*stmts, *expr);
 			return ST_DIVERGING;
 		}
 		case EXPR_BREAK: {
-			nblk_t *blk = &blks[expr->d_break.blk_id];
+			// adjust branch levels
+			for (u32 i = 0; i < branch_adj_len; i++) {
+				if (branch_adj[i] >= blks_len) {
+					expr->d_break.branch_level--;
+				}
+			}
+
+			nblk_t *blk = &blks[blks_len - expr->d_break.branch_level - 1];
 
 			// `blk->dest` can be -1
 			DIVERGING(nhir_expr_target(desc, stmts, expr->d_break.expr, blk->dest));
@@ -626,7 +666,7 @@ static u8 nhir_expr(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 				.type = TYPE_BOTTOM,
 				.loc = expr->loc,
 				.d_break = {
-					.blk_id = expr->d_break.blk_id,
+					.branch_level = expr->d_break.branch_level,
 					.expr = hir_dup(UNIT(expr->loc)),
 				},
 			};
@@ -847,7 +887,6 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 						.loc = expr->loc,
 						.d_return = {
 							.expr = expr,
-							.blk_id = BLK_ID_NONE,
 						}
 					};
 
@@ -870,7 +909,6 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 			.loc = expr->loc,
 			.d_return = {
 				.expr = hir_dup(UNIT(expr->loc)),
-				.blk_id = BLK_ID_NONE,
 			},
 		};
 
@@ -882,6 +920,11 @@ static u8 nhir_expr_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr
 }
 
 void hir_normalise_proc(proc_t *proc) {
+	// diverging all the way down could result
+	// in a logic error where these aren't reset
+	blks_len = 0;
+	branch_adj_len = 0;
+	
 	hir_expr_t *stmts = NULL;
 	hir_expr_t *hir = proc->desc.hir;
 
@@ -932,12 +975,15 @@ void hir_normalise_proc(proc_t *proc) {
 		.type = TYPE_BOTTOM,
 		.d_do_block = {
 			.exprs = stmts,
-			.blk_id = BLK_ID_NONE,
+			.no_branch = true,
 		},
 	});
 }
 
 void hir_normalise_global(global_t *global) {
+	blks_len = 0;
+	branch_adj_len = 0;
+
 	// globals don't contain `ret`
 	// for consteval after normalisation, we'll have to add a `ret` to the end of the block
 
@@ -951,12 +997,7 @@ void hir_normalise_global(global_t *global) {
 		.type = TYPE_BOTTOM,
 		.d_do_block = {
 			.exprs = stmts,
-			.blk_id = BLK_ID_NONE,
+			.no_branch = true,
 		},
 	});
-
-	/* // eval
-	extern void hir_eval_global(global_t *global);
-
-	hir_eval_global(global); */
 }

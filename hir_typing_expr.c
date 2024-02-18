@@ -13,8 +13,7 @@
 
 // sets expr->type
 void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
-	u32 blk_id = expr->d_do_block.blk_id;
-	cblk_t *blk = &c.blocks[blk_id];
+	cblk_t *blk = &c.blocks[c.blocks_len++];
 
 	// all do blocks have at least one expr
 
@@ -35,9 +34,6 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 
 	hir_expr_t *stmt_last = &expr->d_do_block.exprs[stmts_len - 1];
 
-	// singular exit brk, and no rep
-	expr->d_do_block.is_single_expr = blk->brk_type == TYPE_INFER && !blk->is_rep;
-
 	// TODO: what happens on `stmt_last !` ???
 
 	// brk () || no brk && expr: ()
@@ -48,7 +44,7 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			.loc = stmt_last->loc,
 			.type = TYPE_BOTTOM,
 			.d_break = {
-				.blk_id = blk_id,
+				.branch_level = 0, // top
 				.expr = hir_dup((hir_expr_t){
 					.kind = EXPR_TUPLE_UNIT,
 					.loc = stmt_last->loc,
@@ -71,7 +67,7 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 			.loc = stmt_last->loc,
 			.type = TYPE_BOTTOM,
 			.d_break = {
-				.blk_id = blk_id,
+				.branch_level = 0, // top
 				.expr = NULL,
 			},
 		};
@@ -102,12 +98,13 @@ void cdo(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	}
 	//}
 
+	c.blocks_len--;
 	expr->type = blk->brk_type;
 }
 
 // sets expr->type
 void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
-	cblk_t *blk = &c.blocks[expr->d_loop.blk_id];
+	cblk_t *blk = &c.blocks[c.blocks_len++];
 
 	*blk = (cblk_t){
 		.brk_type = TYPE_INFER,
@@ -117,10 +114,11 @@ void cloop(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr) {
 	(void)cexpr(desc, TYPE_UNIT, expr->d_loop.expr, BM_RVALUE);
 
 	// if a loop block has no breaks, it loops forever
-	if (blk->brk_type == TYPE_INFER) {
+	if (!expr->d_loop.forward) {
 		blk->brk_type = TYPE_BOTTOM;
 	}
 
+	c.blocks_len--;
 	expr->type = blk->brk_type;
 }
 
@@ -517,7 +515,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 
 			type_t then_type = cexpr(desc, upvalue, expr->d_if.then, BM_RVALUE);
 			if (expr->d_if.els) {
-				type_t else_type = cexpr(desc, upvalue, expr->d_if.els, BM_RVALUE);
+				(void)cexpr(desc, upvalue, expr->d_if.els, BM_RVALUE);
 				expr->type = ctype_unify(then_type, expr->d_if.els);				
 			} else {
 				// fake construction of type unit will be unwrapped by normalisation passes
@@ -622,7 +620,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 				err_with_pos(expr->d_index.expr->loc, "type mismatch: expected array or slice type, got `%s`", type_dbg_str(type));
 			}
 
-			type_t index_type = cexpr(desc, TYPE_USIZE, expr->d_index.index, BM_RVALUE);
+			(void)cexpr(desc, TYPE_USIZE, expr->d_index.index, BM_RVALUE);
 			ctype_unify(TYPE_USIZE, expr->d_index.index);
 
 			expr->type = type_array_or_slice_elem(type);
@@ -637,12 +635,12 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			}
 
 			if (expr->d_slice.lo) {
-				type_t index_type = cexpr(desc, TYPE_USIZE, expr->d_slice.lo, BM_RVALUE);
+				(void)cexpr(desc, TYPE_USIZE, expr->d_slice.lo, BM_RVALUE);
 				ctype_unify(TYPE_USIZE, expr->d_slice.lo);
 			}
 
 			if (expr->d_slice.hi) {
-				type_t index_type = cexpr(desc, TYPE_USIZE, expr->d_slice.hi, BM_RVALUE);
+				(void)cexpr(desc, TYPE_USIZE, expr->d_slice.hi, BM_RVALUE);
 				ctype_unify(TYPE_USIZE, expr->d_slice.hi);
 			}
 
@@ -715,7 +713,7 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;
 		}
 		case EXPR_BREAK: {
-			cblk_t *blk = &c.blocks[expr->d_break.blk_id]; // 1:1 correspondence
+			cblk_t *blk = &c.blocks[c.blocks_len - expr->d_break.branch_level - 1]; // 1:1 correspondence
 
 			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_break.expr, BM_RVALUE);
 
@@ -736,28 +734,26 @@ type_t cexpr(ir_desc_t *desc, type_t upvalue, hir_expr_t *expr, u8 cfg) {
 			break;
 		}
 		case EXPR_CONTINUE: {
-			cblk_t *blk = &c.blocks[expr->d_continue.blk_id];
-			blk->is_rep = true;
+			// cblk_t *blk = &c.blockss[c.blocks_len - expr->d_break.branch_level - 1]; // 1:1 correspondence
 			expr->type = TYPE_BOTTOM;
 			break;
 		}
 		// TODO: need for inference as well, still need brk_type
 		case EXPR_RETURN: {
-			cblk_t *blk = &c.blocks[expr->d_return.blk_id]; // 1:1 correspondence
+			//cblk_t *blk = &c.blocks[expr->d_return.blk_id]; // 1:1 correspondence
 
-			type_t brk_type = cexpr(desc, blk->upvalue, expr->d_return.expr, BM_RVALUE);
+			type_t brk_type = cexpr(desc, c.proc_upvalue, expr->d_return.expr, BM_RVALUE);
 
 			// if `blk->upvalue` is set, that is the type of the entire function
-			if (blk->upvalue != TYPE_INFER) {
-				(void)ctype_unify(blk->upvalue, expr->d_return.expr);
+			if (c.proc_upvalue != TYPE_INFER) {
+				(void)ctype_unify(c.proc_upvalue, expr->d_return.expr);
 			} else {
 				// no ! precedence
-				if (blk->brk_type == TYPE_INFER || blk->brk_type == TYPE_BOTTOM) {
-					blk->brk_type = brk_type;
-					blk->brk_loc = expr->loc;				
+				if (c.proc_ret_type == TYPE_INFER || c.proc_ret_type == TYPE_BOTTOM) {
+					c.proc_ret_type = brk_type;
 				} else {
 					// ignore the return value, don't want ! precedence
-					(void)ctype_unify(blk->brk_type, expr->d_return.expr);
+					(void)ctype_unify(c.proc_ret_type, expr->d_return.expr);
 				}
 			}
 

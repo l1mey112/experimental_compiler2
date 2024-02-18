@@ -55,6 +55,7 @@ type_t pfn_arg(ir_desc_t *desc) {
 }
 
 void pfn_shared(proc_t *proc) {
+	p.inside_fn = true;
 	pexpect(TOK_OPAR);
 
 	// c(...) = 0
@@ -88,16 +89,11 @@ void pfn_shared(proc_t *proc) {
 	loc_t ret_type_loc = {};
 	hir_expr_t *expr = NULL;
 
-	proc->desc.next_blk_id++; // save pos for later
-	p.blks[p.blks_len++] = (pblk_t){
-		.kind = BLK_FN,
-	};
-
 	ppush_scope();
 	if (p.token.kind == TOK_OCBR || p.token.kind == TOK_DO) {
 		// func() {} -> func() = void do ...
 		ret_type = TYPE_UNIT;
-		
+
 		// will jmp to `{}` or `do`
 		expr = hir_dup(pexpr(&proc->desc, 0));
 		expr = hir_dup((hir_expr_t){
@@ -125,7 +121,6 @@ void pfn_shared(proc_t *proc) {
 	}
 	ppop_scope();
 	ppop_scope();
-	p.blks_len--;
 
 	// construct type late
 	// create function type if return is annotated
@@ -144,6 +139,7 @@ void pfn_shared(proc_t *proc) {
 	proc->type = type;
 	proc->ret_type = ret_type;
 	proc->ret_type_loc = ret_type_loc;
+	p.inside_fn = false;
 }
 
 // TODO: in pident_wstruc and ( after it, make that illegal
