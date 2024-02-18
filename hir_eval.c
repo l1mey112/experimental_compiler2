@@ -133,6 +133,10 @@ static eresult_t ehir_expr_eval(edesc_t *desc, hir_expr_t *expr) {
 			r.d_64 = expr->d_integer;
 			return r;
 		}
+		case EXPR_BOOL_LIT: {
+			r.d_bool = expr->d_bool_lit;
+			return r;
+		}
 		case EXPR_INFIX: {
 			eresult_t lhs = ehir_expr_eval(desc, expr->d_infix.lhs);
 			eresult_t rhs = ehir_expr_eval(desc, expr->d_infix.rhs);

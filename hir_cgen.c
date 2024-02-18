@@ -47,6 +47,10 @@ void ghir_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			gprintf("%lu", expr->d_integer);
 			break;
 		}
+		case EXPR_BOOL_LIT: {
+			gprintf("%s", expr->d_bool_lit ? "true" : "false");
+			break;
+		}
 		case EXPR_LOCAL: {
 			gmangle_local(desc, expr->d_local);
 			break;
@@ -172,7 +176,8 @@ void gtype(type_t type) {
 // int __REDIRECT(main$Foo$$new, (int num), main\.Foo\:new);
 // int main$Foo$$new(int num) {};
 
-void gproc_def_ret(proc_t *proc) {
+// returns if diverging
+bool gproc_def_ret(proc_t *proc) {
 	type_t ret = type_underlying(type_get(proc->type)->d_fn.ret);
 	bool is_diverging = type_is_diverging(ret);
 
@@ -181,6 +186,8 @@ void gproc_def_ret(proc_t *proc) {
 	} else {
 		gtype(ret);
 	}
+
+	return is_diverging;
 }
 
 void gproc_def_args(proc_t *proc) {
@@ -196,20 +203,7 @@ void gproc_def_args(proc_t *proc) {
 	}
 }
 
-void gproc_def(rsym_t rsym, proc_t *proc) {
-	sym_t *sym = &symbols[rsym];
-
-	if (!sym->is_extern) {
-		gprintf("static ");
-	}
-
-	gproc_def_ret(proc);
-	gprintf(" __REDIRECT(");
-	gmangle_symbol(rsym);
-	gprintf(", (");
-	gproc_def_args(proc);
-	gprintf("), ");
-
+void gredirect(sym_t *sym) {
 	const char *s;
 
 	if (sym->is_extern) {
@@ -224,12 +218,57 @@ void gproc_def(rsym_t rsym, proc_t *proc) {
 		char c = s[i];
 		if (c == ':') {
 			gprintf("\\:");
+		} else if (c == '"') {
+			gprintf("\\\"");
 		} else {
 			gprintf("%c", c);
 		}
 	}
+}
 
-	gprintf(");\n");
+void gproc_def(rsym_t rsym, proc_t *proc) {
+	sym_t *sym = &symbols[rsym];
+
+	if (!sym->is_extern) {
+		gprintf("static ");
+	}
+
+	bool is_diverging = gproc_def_ret(proc);
+	gprintf(" ");
+	gmangle_symbol(rsym);
+	gprintf("(");
+	gproc_def_args(proc);
+	gprintf(") __asm__(\"");
+	gredirect(sym);
+	gprintf("\")");
+
+	if (is_diverging) {
+		gprintf(" __attribute__((noreturn))");
+	}
+
+	gprintf(";\n");
+}
+
+void gglobal_def(rsym_t rsym, global_t *global) {
+	sym_t *sym = &symbols[rsym];
+
+	if (!sym->is_extern) {
+		gprintf("static ");
+	}
+
+	gtype(global->type);
+	gprintf(" ");
+	gmangle_symbol(rsym);
+	gprintf(" __asm__(\"");
+	gredirect(sym);
+	gprintf("\")");
+
+	if (global->constant) {
+		gprintf(" = ");
+		ghir_expr(&global->desc, global->constant);
+	}
+
+	gprintf(";\n");
 }
 
 // forward declare defs
@@ -244,10 +283,7 @@ void gdefs(void) {
 				break;
 			}
 			case SYMBOL_GLOBAL: {
-				assert_not_reached();
-			}
-			case SYMBOL_TYPE:
-			case SYMBOL_IMPORT_ASSERTION: {
+				gglobal_def(rsym, &sym->d_global);
 				break;
 			}
 			default: {
@@ -297,9 +333,10 @@ void gsyms(void) {
 				break;
 			}
 			case SYMBOL_GLOBAL: {
-				assert_not_reached();
+				// globals will already have initialisers, else they'll be initialised
+				// at runtime in a seperate function called before `main.main`
+				break;
 			}
-
 			default: {
 				assert_not_reached();
 			}
