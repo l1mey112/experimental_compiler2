@@ -560,7 +560,14 @@
 ;     exit 20
 ; }
 
-pub main() {}
+extern exit(status: i32): !
+
+pub main() {
+    let k = factor 6
+
+    if (k == 720) exit 0
+    else          exit 1
+}
 
 factor(i': i32) = do
     let f' = 1

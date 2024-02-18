@@ -6,6 +6,8 @@ FILE *gfile;
 #define gprintf_stmt(...) do { gtabs(); gprintf(__VA_ARGS__); } while (0)
 static u32 _tabs = 0;
 
+static u32 branch_level = 0;
+
 static void gtabs(void) {
 	for (u32 i = 0; i < _tabs; i++) {
 		gprintf("\t");
@@ -95,10 +97,9 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 	for (u32 i = 0, c = arrlenu(stmts); i < c; i++) {
 		hir_expr_t *expr = &stmts[i];
 
-		gtabs();
-
 		switch (expr->kind) {
 			case EXPR_RETURN: {
+				gtabs();
 				if (expr->d_return.expr->kind == EXPR_TUPLE_UNIT) {
 					gprintf("return;\n");
 					break;
@@ -109,6 +110,7 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 				break;
 			}
 			case EXPR_ASSIGN: {
+				gtabs();
 				ghir_expr(desc, expr->d_assign.lhs);
 				gprintf(" = ");
 				ghir_expr(desc, expr->d_assign.rhs);
@@ -116,22 +118,61 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 				break;
 			}
 			case EXPR_IF: {
-				gprintf("if (");
+				gprintf_stmt("if (");
 				ghir_expr(desc, expr->d_if.cond);
 				assert(expr->d_if.then->kind == EXPR_DO_BLOCK);
-				assert(expr->d_if.els->kind == EXPR_DO_BLOCK);
 				gprintf(") {\n");
 				_tabs++;
 				gstmts(desc, expr->d_if.then->d_do_block.exprs);
 				_tabs--;
-				gprintf_stmt("} else {\n");
-				_tabs++;
-				gstmts(desc, expr->d_if.els->d_do_block.exprs);
-				_tabs--;
-				gprintf_stmt("}\n");
+
+				if (expr->d_if.els == NULL) {
+					gprintf_stmt("}\n");
+					break;
+				} else {
+					assert(expr->d_if.els->kind == EXPR_DO_BLOCK);
+					gprintf_stmt("} else {\n");
+					_tabs++;
+					gstmts(desc, expr->d_if.els->d_do_block.exprs);
+					_tabs--;
+					gprintf_stmt("}\n");
+				}
+				break;
+			}
+			case EXPR_DO_BLOCK: {
+				if (expr->d_do_block.backward) {
+					_tabs--;
+					gprintf_stmt("_bL%u:\n", branch_level);
+					_tabs++;
+				}
+
+				if (!expr->d_do_block.no_branch) {
+					branch_level++;
+				}
+				
+				gstmts(desc, expr->d_do_block.exprs);
+
+				if (!expr->d_do_block.no_branch) {
+					branch_level--;
+				}
+				
+				if (expr->d_do_block.forward) {
+					_tabs--;
+					gprintf_stmt("_fL%u:\n", branch_level);
+					_tabs++;
+				}
+				break;
+			}
+			case EXPR_BREAK: {
+				gprintf_stmt("goto _fL%u;\n", branch_level - 1 - expr->d_break.branch_level);
+				break;
+			}
+			case EXPR_CONTINUE: {
+				gprintf_stmt("goto _bL%u;\n", branch_level - 1 - expr->d_continue.branch_level);
 				break;
 			}
 			default: {
+				gtabs();
 				ghir_expr(desc, expr);
 				gprintf(";\n");
 				break;
