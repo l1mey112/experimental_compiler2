@@ -335,6 +335,42 @@ void gdefs(void) {
 	}
 }
 
+// already_def can be NULL
+void gdesc_predef_locals(ir_desc_t *desc, rlocal_t *already_def) {
+	// def locals on the same line if ones were defined before
+	// don't bother creating a optimised in order list
+
+	type_t before = TYPE_INFER;
+	for (u32 i = 0, c = arrlenu(desc->locals); i < c; i++) {
+		for (u32 j = 0, c = arrlenu(already_def); j < c; j++) {
+			if (already_def[j] == i) {
+				goto next;
+			}
+		}
+
+		local_t *local = &desc->locals[i];
+
+		if (before != TYPE_INFER && local->type == before) {
+			gprintf(", ");
+		} else {
+			if (before != TYPE_INFER) {
+				gprintf(";\n");
+			}
+			gtabs();
+			gtype(local->type);
+			gprintf(" ");
+			before = local->type;
+		}
+		
+		gmangle_local(desc, i);
+	next:
+	}
+
+	if (arrlenu(desc->locals) > 0) {
+		gprintf(";\n");
+	}
+}
+
 void gproc(rsym_t rsym) {
 	sym_t *sym = &symbols[rsym];
 
@@ -355,6 +391,7 @@ void gproc(rsym_t rsym) {
 	gproc_def_args(&sym->d_proc);
 	gprintf(") {\n");
 	_tabs++;
+	gdesc_predef_locals(&sym->d_proc.desc, proc->arguments);
 	gstmts(&sym->d_proc.desc, body->d_do_block.exprs);
 	_tabs--;
 	gprintf("}\n");
@@ -395,7 +432,6 @@ void hir_cgen(FILE *file) {
 
 	gprintf("#include <stdint.h>\n");
 	gprintf("#include <stdbool.h>\n");
-	gprintf("#include <stddef.h>\n");
 
 	gprintf("\n");
 
