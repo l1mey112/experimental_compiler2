@@ -6,14 +6,10 @@
 #include <unistd.h>
 #include "ansi.h"
 
+// leak everything
 const char* __asan_default_options(void) { return "detect_leaks=0"; }
 
 err_diag_t err_diag;
-
-// we aren't using the /proc filesystem, yet...
-/* #ifndef __linux__ 
-	#error "not portable to places other than linux"
-#endif */
 
 void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
 	char err_string[256];
@@ -50,7 +46,7 @@ void print_diag_without_pos(const char *type, const char *fmt, ...) {
 int main(int argc, const char *argv[]) {
 	bool err = false;
 
-	// const char *arch = "stdc99-64";
+	// const char *arch = "stdc99_64";
 	const char *arch = "c64";
 	const char *platform = "libc";
 
@@ -83,7 +79,7 @@ ret:;
 	extern void hir_passes(void);
 	extern void hir_cgen(FILE *file);
 
-	if (!setjmp(err_diag.unwind)) {
+	if (!err && !setjmp(err_diag.unwind)) {
 		hir_passes();
 	} else {
 		err = true;
@@ -92,7 +88,9 @@ ret:;
 	eprintf("\n");
 	table_dump_po();
 
-	hir_cgen(stdout);
+	if (!err) {
+		hir_cgen(stdout);
+	}
 
 	return err;
 }

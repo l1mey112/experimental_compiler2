@@ -145,7 +145,7 @@ static void visit_successors_hir_impl(rsym_t **po, rsym_t rsym, hir_expr_t *expr
 			break;
 		}
 		case EXPR_DEREF: {
-			visit_successors_hir_impl(po, rsym, expr->d_deref->d_deref, true);
+			visit_successors_hir_impl(po, rsym, expr->d_deref, true);
 			break;
 		}
 		//

@@ -7,6 +7,7 @@ void hir_type_import(sym_t *sym, imas_t *imas);
 void hir_normalise_global(global_t *global);
 void hir_normalise_proc(proc_t *proc);
 void hir_eval_global(sym_t *sym, global_t *global);
+void hir_markused(void);
 
 // TODO: this is damn hacky, but simple. "hacky" is in the eye of the beholder anyway
 //       though it seems it would be better handled in the checker looking at places
@@ -107,6 +108,8 @@ void hir_passes(void) {
 			}
 		}
 	}
+
+	hir_markused();
 
 	// remove aggregate fields etc of ()
 	// it's safe to do this after normalisation

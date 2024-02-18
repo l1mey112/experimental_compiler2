@@ -293,8 +293,6 @@ static u8 nhir_if_target(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr, 
 }
 
 static bool nhir_if_nv(hir_expr_t *expr) {
-	rlocal_t target = TARGET_DISCARD;
-
 	bool has_else = expr->d_if.els != NULL;
 	bool has_tmpvar = has_else && !(expr->type == TYPE_UNIT || expr->type == TYPE_BOTTOM);
 
@@ -357,6 +355,7 @@ static void nhir_assign_local(ir_desc_t *desc, hir_expr_t **stmts, loc_t loc, rl
 static hir_expr_t *nhir_lvalue(ir_desc_t *desc, hir_expr_t **stmts, hir_expr_t *expr) {
 	// catch non side effecting expressions
 	switch (expr->kind) {
+		case EXPR_SYM:
 		case EXPR_LOCAL: {
 			return expr;
 		}
