@@ -500,6 +500,7 @@ void compiler_process_file(fs_rfile_t file) {
 		.pend = f->data + f->len,
 		.plast_nl = f->data,
 		.file = file,
+		.filep = f,
 		.mod = f->mod,
 		.modp = &fs_mod_arena[f->mod],
 	};

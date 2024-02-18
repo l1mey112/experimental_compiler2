@@ -575,4 +575,4 @@ factor(i': i32) = do
         if (i < 1) brk f
         f = f * i
         i--
-    take
+    takee

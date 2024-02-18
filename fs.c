@@ -57,12 +57,17 @@ static void _fs_read_file_with_size(const char *fp, fs_rmod_t mod, size_t size) 
 		}
 	}
 
+	static u64 bs_search_next_offset = 0;
+
 	fs_file_t *file = &fs_files_queue[fs_files_queue_len++];
 
 	file->fp = make_relative(fp);
 	file->data = (u8*)ptr;
 	file->len = size;
 	file->mod = mod;
+	file->bs_offset_pos = bs_search_next_offset;
+
+	bs_search_next_offset += size;
 }
 
 static void _fs_read_file(const char *fp, fs_rmod_t mod) {
@@ -604,4 +609,68 @@ void fs_dump_tree(void) {
 	for (u32 i = 0; i < fs_platforms_len; i++) {
 		TPRINTF("runtime %u: %s %s\n", i, fs_platforms[i].name, make_relative(fs_platforms[i].rt_path));
 	}
+}
+
+lineinfo_t fs_reconstruct_lineinfo(loc_t loc) {
+	// 1. list all files in an array in order of processing, store positions in the file
+	//    offset by the last position. all files are a "next index" of eachother
+	// 2. a location maps to a position which may be within any file
+	// 3. perform a binary search to find the file encompassing the location in the shortest time
+	// 4. then iterate char by char matching each `\n` to reconstruct the newlines in a file
+	//    (possibly memoise this, there will be multiple diagnostics in one go and all errors most likely happen in a single file)
+
+	// check if invalid
+	assert(loc.len != 0);
+
+	u32 l_idx = 0;
+	u32 r_idx = fs_files_queue_len - 1;
+
+	if (r_idx == 0) {
+		assert_not_reached();
+	}
+
+	while (l_idx != r_idx) {
+		// m := ceil((L + R) / 2)
+		u32 m = 1 + ((l_idx + r_idx - 1) / 2);
+
+		fs_file_t *mp = &fs_files_queue[m];
+
+		if (mp->bs_offset_pos + mp->len > loc.pos) {
+			r_idx = m - 1;
+		} else {
+			l_idx = m;
+		}
+	}
+
+	fs_file_t *mp = &fs_files_queue[l_idx];
+
+	if (!(loc.pos >= mp->bs_offset_pos && loc.pos + loc.len <= mp->bs_offset_pos + mp->len)) {
+		assert_not_reached();
+	}
+
+	u32 pos = loc.pos - mp->bs_offset_pos;
+
+	// TODO: memoise this... even at least for one file at a time
+
+	u8 *p = mp->data;
+	u32 col = 0;
+	u32 line_nr = 0;
+	for (u64 i = 0; i < pos; ++i) {
+		if (p[i] == '\n') {
+			line_nr++;
+			col = 0;
+		} else {
+			col++;
+		}
+	}
+
+	lineinfo_t lineinfo = {
+		.line_nr = line_nr,
+		.col = col,
+		.pos = pos,
+		.len = loc.len,
+		.file = l_idx,
+	};
+
+	return lineinfo;
 }

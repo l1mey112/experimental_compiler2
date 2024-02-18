@@ -413,20 +413,21 @@ bool pstmt(ir_desc_t *desc, hir_expr_t *expr_out) {
 //     ...
 hir_expr_t *pdo_block_impl(ir_desc_t *desc) {
 	loc_t oloc = p.token.loc;
+	u32 oline_nr = p.line_token.line_nr;
 	pnext();
 	//
 	// TODO: handle the case where the next line token is dedented less than the actual do
 	//       would need some lexer stuff (store the start of the line in parser)
-	if (p.token.kind == TOK_EOF || p.token.loc.line_nr == oloc.line_nr) {
+	if (p.token.kind == TOK_EOF || p.line_token.line_nr == oline_nr) {
 		err_with_pos(oloc, "expected newline after `do`");
 	}
-	
+
 	hir_expr_t *exprs = NULL;
 
-	u32 bcol = p.token.loc.col;
+	u32 bcol = p.line_token.col;
 	ppush_scope();
 	while (p.token.kind != TOK_EOF) {
-		u32 cln = p.token.loc.line_nr;
+		u32 cln = p.line_token.line_nr;
 
 		hir_expr_t expr;
 		bool set = pstmt(desc, &expr);
@@ -434,7 +435,7 @@ hir_expr_t *pdo_block_impl(ir_desc_t *desc) {
 			arrpush(exprs, expr);
 		}
 
-		if (cln != p.token.loc.line_nr && p.token.loc.col < bcol) {
+		if (cln != p.line_token.line_nr && p.line_token.col < bcol) {
 			break;
 		}
 	}
@@ -864,7 +865,7 @@ static bool pexpr_fallable_unit(ir_desc_t *desc, hir_expr_t *out_expr) {
 }
 
 static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
-	u32 line_nr = p.token.loc.line_nr;
+	u32 line_nr = p.line_token.line_nr;
 
 	hir_expr_t expr;
 
@@ -873,19 +874,18 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 	}
 	
 	while (true) {
-		token_t token = p.token;
-
-		if (token.kind == TOK_EOF) {
+		if (p.token.kind == TOK_EOF) {
 			break;
 		}
 
 		u8 nprec = ptok_prec_ambiguities();
 		nprec = nprec == 0 ? PREC_CALL : nprec;
 
-		if (prec >= nprec || token.loc.line_nr != line_nr) {
+		if (prec >= nprec || p.line_token.line_nr != line_nr) {
 			goto exit;
 		}
 
+		token_t token = p.token;
 		switch (token.kind) {
 			case TOK_INC:
 			case TOK_DEC: {
@@ -1080,7 +1080,7 @@ static bool pexpr_fallable(ir_desc_t *desc, u8 prec, hir_expr_t *out_expr) {
 					hir_expr_t *exprs = NULL;
 					
 					hir_expr_t situ_expr;
-					while (p.token.loc.line_nr == line_nr) {
+					while (p.line_token.line_nr == line_nr) {
 						// don't allow `main()` in expressions
 						//                 ^^ next to eachother!
 

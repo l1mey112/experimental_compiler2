@@ -6,6 +6,7 @@ typedef struct pimport_t pimport_t;
 typedef struct pproc_decls_t pproc_decls_t;
 typedef struct pscope_entry_t pscope_entry_t;
 typedef struct pblk_t pblk_t;
+typedef struct plex_pair_t plex_pair_t;
 
 struct pblk_t {
 	istr_t label;
@@ -51,10 +52,16 @@ struct pctx_t {
 	u8 *pc;
 	u8 *pend;
 	u8 *plast_nl;
-	u32 line_nr;
+	u32 pline_nr;
+	//
 	token_t prev;
 	token_t token;
 	token_t peek;
+	//
+	lineinfo_t line_prev;
+	lineinfo_t line_token;
+	lineinfo_t line_peek;
+	//
 	pimport_t is[64]; // import stack
 	u32 is_len;
 	//
@@ -66,6 +73,7 @@ struct pctx_t {
 	u32 blks_len;
 	//
 	fs_rfile_t file;
+	fs_file_t *filep;
 	fs_rmod_t mod;
 	fs_mod_t *modp;
 	bool has_done_imports;
@@ -73,8 +81,13 @@ struct pctx_t {
 	bool inside_fn;
 };
 
+struct plex_pair_t {
+	token_t token;
+	lineinfo_t lineinfo;
+};
+
 extern pctx_t p;
-token_t plex(void);
+plex_pair_t plex(void);
 void pnext(void);
 const char *tok_op_str(tok_t tok);
 const char *tok_dbg_str(token_t tok);

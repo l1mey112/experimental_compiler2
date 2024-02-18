@@ -26,7 +26,7 @@ static void pstring_literal(token_t *token) {
 		u8 ch = *p.pc;
 		if (ch == '\n') {
 			p.plast_nl = p.pc;
-			p.line_nr++;
+			p.pline_nr++;
 		}
 
 		if (ch == '"') {
@@ -41,7 +41,7 @@ static void pstring_literal(token_t *token) {
 	token->lit = sv_intern(start + 1, len - 2);
 }
 
-token_t plex(void) {
+plex_pair_t plex(void) {
 	while (p.pc < p.pend) {
 		u8 ch = *p.pc;
 
@@ -49,7 +49,7 @@ token_t plex(void) {
 			p.pc++;
 			if (ch == '\n') {
 				p.plast_nl = p.pc;
-				p.line_nr++;
+				p.pline_nr++;
 			}
 			continue;
 		}
@@ -64,15 +64,19 @@ token_t plex(void) {
 
 		u8 *start = p.pc;
 		token_t token = {
-			.loc.line_nr = p.line_nr,
-			.loc.col = p.pc - p.plast_nl,
-			.loc.file = p.file,
-			.loc.pos = start - p.pstart,
+			.loc.pos = p.filep->bs_offset_pos + (start - p.pstart),
+		};
+
+		lineinfo_t lineinfo = {
+			.line_nr = p.pline_nr,
+			.col = p.pc - p.plast_nl,
+			.file = p.file,
+			.pos = start - p.pstart,
 		};
 
 		if (ch == '"') {
 			pstring_literal(&token);
-			return token;
+			return (plex_pair_t){token, lineinfo};
 		}
 
 		if (is_id_begin(ch)) {
@@ -85,7 +89,7 @@ token_t plex(void) {
 			if (is_underscore && p.pc - start == 1) {
 				token.loc.len = 1;
 				token.kind = TOK_UNDERSCORE;
-				return token;
+				return (plex_pair_t){token, lineinfo};
 			}
 
 			// get length and id pointer
@@ -105,7 +109,7 @@ token_t plex(void) {
 				token.lit = istr;
 			}
 
-			return token;
+			return (plex_pair_t){token, lineinfo};
 		} else if (isdigit(ch)) {
 			do {
 				p.pc++;
@@ -119,7 +123,7 @@ token_t plex(void) {
 			token.lit = sv_intern(start, len);
 			token.loc.len = len;
 
-			return token;
+			return (plex_pair_t){token, lineinfo};
 		} else {
 			size_t avail = p.pend - p.pc;
 
@@ -148,11 +152,24 @@ token_t plex(void) {
 				err_with_pos(token.loc, "unexpected character `%c`", ch);
 			}
 
-			return token;
+			return (plex_pair_t){token, lineinfo};
 		}
 	}
 
-	return (token_t){.kind = TOK_EOF};
+	// one before
+	u8 *npc = p.pc - 1;
+
+	lineinfo_t lineinfo = {
+		.line_nr = p.pline_nr,
+		.col = npc - p.plast_nl,
+		.file = p.file,
+		.pos = npc - p.pstart,
+	};
+
+	// EOF has no stored lineinfo
+	return (plex_pair_t){
+		{.kind = TOK_EOF}, lineinfo
+	};
 }
 
 const char *tok_op_str(tok_t tok) {
@@ -216,6 +233,10 @@ const char *tok_dbg_str(token_t tok) {
 
 void pnext(void) {
 	p.prev = p.token;
+	p.line_prev = p.line_token;
 	p.token = p.peek;
-	p.peek = plex();
+	p.line_token = p.line_peek;
+	plex_pair_t l = plex();
+	p.peek = l.token;
+	p.line_peek = l.lineinfo;
 }

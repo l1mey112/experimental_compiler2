@@ -33,7 +33,6 @@ typedef double f64;
 		__ret;                                             \
 	})
 
-typedef struct loc_t loc_t;
 typedef struct err_diag_t err_diag_t;
 typedef struct token_t token_t;
 typedef u16 type_t;
@@ -49,8 +48,6 @@ typedef u32 istr_t;
 #define RMOD_NONE ((fs_rmod_t)-1)
 #define RSYM_NONE ((rsym_t)-1)
 #define ISTR_NONE ((istr_t)-1)
-
-#define LOC_NONE ((loc_t){})
 
 istr_t sv_intern(u8 *sv, size_t len);
 istr_t sv_move(const char *p);
@@ -77,6 +74,23 @@ void __sanitizer_print_stack_trace(void);
 } while (0)
 
 #endif
+
+typedef struct loc_t loc_t;
+typedef struct lineinfo_t lineinfo_t;
+
+struct lineinfo_t {
+	u32 line_nr;
+	u32 col;
+	u32 pos;
+	u16 len;
+	fs_rfile_t file;
+};
+
+// len == 0 is invalid
+struct loc_t {
+	u64 pos : 48;
+	u16 len;
+};
 
 struct err_diag_t {
 	jmp_buf unwind;
@@ -148,15 +162,6 @@ enum tok_t {
 };
 
 typedef enum tok_t tok_t;
-
-// TODO(zakazaka): u32 start u32 end is better (compute later)
-struct loc_t {
-	u32 line_nr;
-	u32 col;
-	u32 pos;
-	u16 len;
-	fs_rfile_t file;
-};
 
 struct token_t {
 	tok_t kind;
@@ -313,6 +318,7 @@ struct fs_file_t {
 	u8 *data;
 	size_t len;
 	fs_rmod_t mod;
+	u64 bs_offset_pos;
 };
 
 // registered runtime which can be rematerialised into the MOD_RT
@@ -335,6 +341,7 @@ extern char *build_token;
 extern tinfo_t types[1024];
 extern u32 type_len;
 
+lineinfo_t fs_reconstruct_lineinfo(loc_t loc);
 fs_rmod_t fs_register_root(const char *dp);
 fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
 istr_t fs_module_symbol(fs_rmod_t mod, istr_t symbol);

@@ -4,11 +4,11 @@
 #include <errno.h>
 
 bool pprev_next_to(void) {
-	return p.prev.loc.pos + p.prev.loc.len == p.token.loc.pos;
+	return p.line_prev.pos + p.line_prev.len == p.line_token.pos;
 }
 
 bool ppeek_next_to(void) {
-	return p.token.loc.pos + p.token.loc.len == p.peek.loc.pos;
+	return p.line_token.pos + p.line_token.len == p.line_peek.pos;
 }
 
 #define DEFAULT_DBG_TOK(expected) (token_t){.kind = expected, .lit = ISTR_NONE}

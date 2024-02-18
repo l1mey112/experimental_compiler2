@@ -363,7 +363,7 @@ void gdesc_predef_locals(ir_desc_t *desc, rlocal_t *already_def) {
 		}
 		
 		gmangle_local(desc, i);
-	next:
+	next:;
 	}
 
 	if (arrlenu(desc->locals) > 0) {

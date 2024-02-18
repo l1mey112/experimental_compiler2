@@ -19,12 +19,13 @@ void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
 	vsnprintf(err_string, sizeof(err_string), fmt, args);
 	va_end(args);
 
-	fs_file_t *file = &fs_files_queue[loc.file];
+	lineinfo_t lineinfo = fs_reconstruct_lineinfo(loc);
+	fs_file_t *file = &fs_files_queue[lineinfo.file];
 
 	if (isatty(fileno(stdout))) {
-		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, file->fp, loc.line_nr + 1, loc.col + 1, err_string);	
+		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, file->fp, lineinfo.line_nr + 1, lineinfo.col + 1, err_string);	
 	} else {
-		eprintf("%s: %s:%u:%u: %s\n", type, file->fp, loc.line_nr + 1, loc.col + 1, err_string);	
+		eprintf("%s: %s:%u:%u: %s\n", type, file->fp, lineinfo.line_nr + 1, lineinfo.col + 1, err_string);	
 	}
 }
 
