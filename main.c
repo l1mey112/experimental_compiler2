@@ -23,9 +23,9 @@ void print_diag_with_pos(const char *type, loc_t loc, const char *fmt, ...) {
 	fs_file_t *file = &fs_files_queue[lineinfo.file];
 
 	if (isatty(fileno(stdout))) {
-		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, file->fp, lineinfo.line_nr + 1, lineinfo.col + 1, err_string);	
+		eprintf("\033[1;31m%s:\033[0m %s:%u:%u: %s\n", type, fs_make_relative(file->fp), lineinfo.line_nr + 1, lineinfo.col + 1, err_string);	
 	} else {
-		eprintf("%s: %s:%u:%u: %s\n", type, file->fp, lineinfo.line_nr + 1, lineinfo.col + 1, err_string);	
+		eprintf("%s: %s:%u:%u: %s\n", type, fs_make_relative(file->fp), lineinfo.line_nr + 1, lineinfo.col + 1, err_string);	
 	}
 }
 
@@ -48,7 +48,7 @@ int main(int argc, const char *argv[]) {
 	bool err = false;
 
 	// const char *arch = "stdc99_64";
-	const char *arch = "c64";
+	const char *arch = "stdc_64";
 	const char *platform = "libc";
 
 	if (argc == 2) {
@@ -58,7 +58,7 @@ int main(int argc, const char *argv[]) {
 		}
 
 		fs_entrypoint(argv[1]);
-		fs_target(arch, platform);
+		fs_target(arch, platform, false);
 
 		// queue can grow
 		for (fs_rfile_t i = 0; i < fs_files_queue_len; i++) {

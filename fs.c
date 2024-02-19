@@ -21,7 +21,6 @@ static u32 global_cwd_len;
 static const char *last_path(const char* path);
 static bool path_collides(const char *path, const char *npath);
 static void base_path_in_place(char* path);
-static const char *make_relative(const char *path);
 static bool is_our_ext(const char *fp);
 static const char *absolute_directory_of_exe(void);
 
@@ -61,7 +60,7 @@ static void _fs_read_file_with_size(const char *fp, fs_rmod_t mod, size_t size) 
 
 	fs_file_t *file = &fs_files_queue[fs_files_queue_len++];
 
-	file->fp = make_relative(fp);
+	file->fp = fp;
 	file->data = (u8*)ptr;
 	file->len = size;
 	file->mod = mod;
@@ -206,13 +205,13 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 				if (mod->parent == RMOD_NONE && strcmp(plus_p + 1, "rt") == 0) {
 					const char *prefix = strndup(file_head, plus_p - file_head);
 					if (strlen(prefix) == 0) {
-						err_without_pos("empty runtime platform prefix in directory '%s'", make_relative(fsp));
+						err_without_pos("empty runtime platform prefix in directory '%s'", fs_make_relative(fsp));
 					}
 					_fs_register_runtime(prefix, fsp);
 					continue;
 				} else {
 					plus_p++;
-					err_without_pos("unknown postfix '+%s' in directory '%s'", plus_p, make_relative(fsp));
+					err_without_pos("unknown postfix '+%s' in directory '%s'", plus_p, fs_make_relative(fsp));
 				}
 			}
 
@@ -230,7 +229,7 @@ static void _fs_populate(fs_rmod_t rmod, bool read_files) {
 
 			// unknown postfix
 			if (plus_p) {
-				err_without_pos("unknown postfix '+%s' in file '%s'", plus_p, make_relative(fsp));
+				err_without_pos("unknown postfix '+%s' in file '%s'", plus_p, fs_make_relative(fsp));
 			}
 
 			_fs_read_file_with_size(fsp, rmod, statbuf.st_size);
@@ -331,7 +330,7 @@ const char *_fs_arch_string(arch_t arch) {
 void _fs_materialise_platform(u32 i) {
 	fs_platform_t *p = &fs_platforms[i];
 
-	eprintf("rt_path: %s\n", make_relative(p->rt_path));
+	eprintf("rt_path: %s\n", fs_make_relative(p->rt_path));
 	
 	fs_rmod_t rmod = _fs_nm((fs_mod_t){
 		.kind = MOD_RT,
@@ -352,13 +351,15 @@ void _fs_materialise_platform(u32 i) {
 arch_t abi;
 
 // only call this once
-void fs_target(const char *arch, const char *platform) {
+void fs_target(const char *arch, const char *platform, bool debug_symbols) {
 	eprintf("selected target: %s-%s\n", arch, platform);
+	eprintf("debug symbols: %s\n", debug_symbols ? "true" : "false");
 
-	if (strcmp(arch, "c64") == 0) {
+	if (strcmp(arch, "stdc_64") == 0) {
 		abi = (arch_t){
-			.kind = ARCH_C64,
+			.kind = ARCH_STDC_64,
 			.ptr_size = 8,
+			.debug_symbols = debug_symbols,
 		};
 	} else {
 		err_without_pos("unknown architecture '%s'", arch);
@@ -530,7 +531,7 @@ void base_path_in_place(char* path) {
 }
 
 // walk forward
-const char *make_relative(const char *path) {
+const char *fs_make_relative(const char *path) {
 	if (global_cwd_len > strlen(path)) {
 		return path;
 	}
@@ -587,7 +588,7 @@ static void _fs_dump_tree(fs_rmod_t rmod) {
 		eprintf("%s", sv_from(mod->key));
 	}
 
-	eprintf(" [%s] %s", kind_str, make_relative(mod->path));
+	eprintf(" [%s] %s", kind_str, fs_make_relative(mod->path));
 	if (mod->files_count > 0) {
 		eprintf(" (%u files)", mod->files_count);
 	}
@@ -607,7 +608,7 @@ void fs_dump_tree(void) {
 	}
 
 	for (u32 i = 0; i < fs_platforms_len; i++) {
-		TPRINTF("runtime %u: %s %s\n", i, fs_platforms[i].name, make_relative(fs_platforms[i].rt_path));
+		TPRINTF("runtime %u: %s %s\n", i, fs_platforms[i].name, fs_make_relative(fs_platforms[i].rt_path));
 	}
 }
 
@@ -625,7 +626,7 @@ lineinfo_t fs_reconstruct_lineinfo(loc_t loc) {
 	u32 l_idx = 0;
 	u32 r_idx = fs_files_queue_len - 1;
 
-	if (r_idx == 0) {
+	if (fs_files_queue_len == 0) {
 		assert_not_reached();
 	}
 
@@ -635,7 +636,7 @@ lineinfo_t fs_reconstruct_lineinfo(loc_t loc) {
 
 		fs_file_t *mp = &fs_files_queue[m];
 
-		if (mp->bs_offset_pos + mp->len > loc.pos) {
+		if (loc.pos < mp->bs_offset_pos) {
 			r_idx = m - 1;
 		} else {
 			l_idx = m;
@@ -645,6 +646,8 @@ lineinfo_t fs_reconstruct_lineinfo(loc_t loc) {
 	fs_file_t *mp = &fs_files_queue[l_idx];
 
 	if (!(loc.pos >= mp->bs_offset_pos && loc.pos + loc.len <= mp->bs_offset_pos + mp->len)) {
+		// printf("loc.pos: %lu, mp->bs_offset_pos: %lu, loc.len: %u, mp->len: %lu\n", loc.pos, mp->bs_offset_pos, loc.len, mp->len);
+		// printf("l_idx: %u, fp: %s\n", l_idx, mp->fp);
 		assert_not_reached();
 	}
 

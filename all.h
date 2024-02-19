@@ -46,6 +46,7 @@ typedef struct fs_platform_t fs_platform_t;
 typedef u32 istr_t;
 
 #define RMOD_NONE ((fs_rmod_t)-1)
+#define RFILE_NONE ((fs_rfile_t)-1)
 #define RSYM_NONE ((rsym_t)-1)
 #define ISTR_NONE ((istr_t)-1)
 
@@ -341,6 +342,7 @@ extern char *build_token;
 extern tinfo_t types[1024];
 extern u32 type_len;
 
+const char *fs_make_relative(const char *path);
 lineinfo_t fs_reconstruct_lineinfo(loc_t loc);
 fs_rmod_t fs_register_root(const char *dp);
 fs_rmod_t fs_register_import(fs_rmod_t src, istr_t *path, u32 path_len, loc_t onerror);
@@ -349,7 +351,7 @@ istr_t fs_module_symbol(fs_rmod_t mod, istr_t symbol);
 istr_t fs_module_symbol_selector(istr_t qualified_name, istr_t selector);
 void fs_dump_tree(void);
 void fs_entrypoint(const char *argv);
-void fs_target(const char *arch, const char *platform);
+void fs_target(const char *arch, const char *platform, bool debug_symbols);
 
 void compiler_process_file(fs_rfile_t f);
 void compiler_pass_all(void);
@@ -385,7 +387,7 @@ typedef struct platform_t platform_t;
 typedef struct target_t target_t;
 
 #define X_ARCHS \
-	X(ARCH_C64, "c64")
+	X(ARCH_STDC_64, "stdc_64")
 
 #define X_PLATFORMS \
 	X(PLATFORM_LIBC, "libc")
@@ -397,6 +399,7 @@ struct arch_t {
 		#undef X
 	} kind;
 
+	bool debug_symbols;
 	u8 ptr_size;
 };
 

@@ -4,9 +4,30 @@ FILE *gfile;
 
 #define gprintf(...) fprintf(gfile, __VA_ARGS__)
 #define gprintf_stmt(...) do { gtabs(); gprintf(__VA_ARGS__); } while (0)
-static u32 _tabs = 0;
+#define gprintf_stmt_debug(loc, ...) do { gdebug(loc); gprintf_stmt(__VA_ARGS__); } while (0)
 
+static u32 _tabs = 0;
 static u32 branch_level = 0;
+
+static void gdebug(loc_t loc) {
+	// unlikely, will be called on stmt base which will usually have a location
+	if (!abi.debug_symbols || loc.len == 0) {
+		return;
+	}
+
+	static fs_rfile_t last_file = (u16)-1;
+
+	lineinfo_t lineinfo = fs_reconstruct_lineinfo(loc); // TODO: no memo will make this slow
+
+	gprintf("# %u", lineinfo.line_nr + 1);
+
+	if (last_file != lineinfo.file) {
+		gprintf(" \"%s\"", fs_files_queue[lineinfo.file].fp);
+		last_file = lineinfo.file;
+	}
+
+	gprintf("\n");
+}
 
 static void gtabs(void) {
 	for (u32 i = 0; i < _tabs; i++) {
@@ -99,7 +120,7 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 
 		switch (expr->kind) {
 			case EXPR_RETURN: {
-				gtabs();
+				gprintf_stmt_debug(expr->loc, "");
 				if (expr->d_return.expr->kind == EXPR_TUPLE_UNIT) {
 					gprintf("return;\n");
 					break;
@@ -110,7 +131,7 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 				break;
 			}
 			case EXPR_ASSIGN: {
-				gtabs();
+				gprintf_stmt_debug(expr->loc, "");
 				ghir_expr(desc, expr->d_assign.lhs);
 				gprintf(" = ");
 				ghir_expr(desc, expr->d_assign.rhs);
@@ -118,7 +139,7 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 				break;
 			}
 			case EXPR_IF: {
-				gprintf_stmt("if (");
+				gprintf_stmt_debug(expr->loc, "if (");
 				ghir_expr(desc, expr->d_if.cond);
 				assert(expr->d_if.then->kind == EXPR_DO_BLOCK);
 				gprintf(") {\n");
@@ -142,7 +163,7 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 			case EXPR_DO_BLOCK: {
 				if (expr->d_do_block.backward) {
 					_tabs--;
-					gprintf_stmt("_bL%u:\n", branch_level);
+					gprintf_stmt_debug(expr->loc, "_bL%u:\n", branch_level);
 					_tabs++;
 				}
 
@@ -164,15 +185,15 @@ void gstmts(ir_desc_t *desc, hir_expr_t *stmts) {
 				break;
 			}
 			case EXPR_BREAK: {
-				gprintf_stmt("goto _fL%u;\n", branch_level - 1 - expr->d_break.branch_level);
+				gprintf_stmt_debug(expr->loc, "goto _fL%u;\n", branch_level - 1 - expr->d_break.branch_level);
 				break;
 			}
 			case EXPR_CONTINUE: {
-				gprintf_stmt("goto _bL%u;\n", branch_level - 1 - expr->d_continue.branch_level);
+				gprintf_stmt_debug(expr->loc, "goto _bL%u;\n", branch_level - 1 - expr->d_continue.branch_level);
 				break;
 			}
 			default: {
-				gtabs();
+				gprintf_stmt_debug(expr->loc, "");
 				ghir_expr(desc, expr);
 				gprintf(";\n");
 				break;
@@ -390,6 +411,7 @@ void gproc(rsym_t rsym) {
 	gprintf("(");
 	gproc_def_args(&sym->d_proc);
 	gprintf(") {\n");
+	gprintf_stmt_debug(sym->loc, ""); // fn start
 	_tabs++;
 	gdesc_predef_locals(&sym->d_proc.desc, proc->arguments);
 	gstmts(&sym->d_proc.desc, body->d_do_block.exprs);
