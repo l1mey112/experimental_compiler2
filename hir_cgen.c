@@ -1,4 +1,5 @@
 #include "all.h"
+#include <stdint.h>
 
 FILE *gfile;
 
@@ -67,7 +68,50 @@ void ghir_expr(ir_desc_t *desc, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_INTEGER_LIT: {
 			// TODO: int max and proper suffix
-			gprintf("%lu", expr->d_integer);
+			type_t type = type_underlying(expr->type);
+			assert(type_is_integer(type));
+
+			// should a proper suffix be done instead of spamming macros?
+			// it's compliant though.
+			const char *macro_name;
+
+			switch (type) {
+				case TYPE_I8: macro_name = "INT8_C"; break;
+				case TYPE_I16: macro_name = "INT16_C"; break;
+				case TYPE_I32: macro_name = "INT32_C"; break;
+				case TYPE_I64: macro_name = "INT64_C"; break;
+				case TYPE_U8: macro_name = "UINT8_C"; break;
+				case TYPE_U16: macro_name = "UINT16_C"; break;
+				case TYPE_U32: macro_name = "UINT32_C"; break;
+				case TYPE_U64: macro_name = "UINT64_C"; break;
+				case TYPE_ISIZE: {
+					if (abi.ptr_size == 8) {
+						macro_name = "INT64_C"; break;
+					} else if (abi.ptr_size == 4) {
+						macro_name = "INT32_C"; break;
+					} else {
+						// abormal
+						assert_not_reached();
+					}
+					break;
+				}
+				case TYPE_USIZE: {
+					if (abi.ptr_size == 8) {
+						macro_name = "UINT64_C"; break;
+					} else if (abi.ptr_size == 4) {
+						macro_name = "UINT32_C"; break;
+					} else {
+						// abormal
+						assert_not_reached();
+					}
+					break;
+				}
+				default: {
+					assert_not_reached();
+				}
+			}
+
+			gprintf("%s(%lu)", macro_name, expr->d_integer);
 			break;
 		}
 		case EXPR_BOOL_LIT: {
@@ -103,8 +147,13 @@ void ghir_expr(ir_desc_t *desc, hir_expr_t *expr) {
 			break;
 		}
 		case EXPR_PREFIX: {
-			gprintf("%s", expr->d_prefix.op == EXPR_K_NOT ? "!" : "-");
-			ghir_expr(desc, expr->d_prefix.expr);
+			// sigh...
+			if (expr->d_prefix.expr->kind == EXPR_INTEGER_LIT && type_is_signed(expr->type) && expr->d_prefix.expr->d_integer == (u64)INT64_MAX + 1) {
+				gprintf("INT64_MIN");
+			} else {
+				gprintf("%s", expr->d_prefix.op == EXPR_K_NOT ? "!" : "-");
+				ghir_expr(desc, expr->d_prefix.expr);
+			}
 			break;
 		}
 		default: {

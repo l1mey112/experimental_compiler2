@@ -521,7 +521,7 @@ void pscope_register(pscope_entry_t to_register) {
 
 		// still check masked entries
 
-		if (entry->kind == PS_DEBUG_REFERENCE) {
+		if (entry->name == to_register.name && entry->kind == PS_DEBUG_REFERENCE) {
 			print_err_with_pos(entry->loc, "variable `%s` used before definition in the same scope", sv_from(to_register.name));
 			print_hint_with_pos(to_register.loc, "previous declaration here");
 			err_unwind();
