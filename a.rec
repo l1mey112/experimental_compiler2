@@ -567,6 +567,8 @@ pub main() {
     exit k
 }
 
+tester = if (factor == 720) 20 else 50
+
 factor = {
     let i' = 6
     let f' = 1

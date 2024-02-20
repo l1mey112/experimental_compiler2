@@ -7,8 +7,6 @@ typedef struct hir_sf_t hir_sf_t;
 
 // TODO: need to represent `let` decls as actual exprs..
 
-#define BLK_ID_NONE ((u8)-1)
-
 struct hir_sf_t {
 	istr_t field;
 	loc_t field_loc;

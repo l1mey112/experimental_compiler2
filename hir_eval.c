@@ -37,22 +37,6 @@ struct edesc_t {
 	bool has_result; // false if non constant expression
 };
 
-static void _estate(edesc_t *desc) {
-	u32 locals = arrlenu(desc->local_offsets);
-	
-	for (u32 i = 0; i < locals; i++) {
-		local_t *local = &desc->desc->locals[i];
-
-		if (local->name == ISTR_NONE) {
-			eprintf("_%u", i);
-		} else {
-			eprintf("%s", sv_from(local->name));
-		}
-
-		eprintf(": %u (%s) init: %u\n", desc->local_offsets[i], type_dbg_str(local->type), desc->local_tags[i]);
-	}
-}
-
 static eresult_t ehir_infix_eval(eresult_t lhs, eresult_t rhs, type_t type, tok_t tok, loc_t onerror) {
 	assert(type_is_integer(type)); // TODO: floats
 
@@ -314,11 +298,9 @@ void hir_eval_global(sym_t *sym, global_t *global) {
 	// TODO: blk ids
 	assert(desc.desc->hir->kind == EXPR_DO_BLOCK);
 
-	_estate(&desc);
 	if (setjmp(desc.ret) == 0) {
 		ehir_stmts_eval(&desc, desc.desc->hir->d_do_block.exprs);
 	}
-	_estate(&desc);
 
 	if (desc.has_result) {
 		hir_expr_t expr = ehir_construct_expr(desc.result, global->type, sym->loc);

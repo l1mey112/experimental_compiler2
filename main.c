@@ -81,6 +81,16 @@ int main(int argc, const char *argv[]) {
 					}
 				}),
 				.ret_type = TYPE_UNIT,
+				.desc = {
+					.hir = hir_dup((hir_expr_t){
+						.kind = EXPR_DO_BLOCK,
+						.d_do_block = {
+							.exprs = NULL,
+							.no_branch = true,
+						},
+					}),
+					.locals = NULL,
+				},
 			}
 		};
 

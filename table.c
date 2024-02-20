@@ -271,12 +271,6 @@ static void _print_pattern(ir_desc_t *desc, pattern_t *pattern) {
 	}
 }
 
-static void _print_blk_id_space(u8 blk_id) {
-	if (blk_id != BLK_ID_NONE) {
-		eprintf(":%u ", blk_id);
-	}
-}
-
 static void _print_expr(ir_desc_t *desc, hir_expr_t *expr) {
 	switch (expr->kind) {
 		case EXPR_LOCAL: {
@@ -627,12 +621,14 @@ static void _dump_global(sym_t *sym) {
 	if (desc->hir) {
 		eprintf(" hir = ");
 		_print_expr(desc, desc->hir);
+	} else {
 		eprintf("\n");
 	}
 
 	if (global->constant) {
 		eprintf("  (const: ");
 		_print_expr(desc, global->constant);
-		eprintf(")\n");
 	}
+
+	eprintf("\n");
 }

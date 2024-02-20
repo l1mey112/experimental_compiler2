@@ -196,7 +196,7 @@ void msymbol_dfs(rsym_t rsym) {
 
 void hir_markused(void) {
 	// iterate over all symbols, externally visible are roots
-	for (rsym_t rsym = 0; rsym < hmlenu(symbols); rsym++) {
+	for (rsym_t rsym = 0, c = hmlenu(symbols); rsym < c; rsym++) {
 		sym_t *sym = &symbols[rsym];
 
 		if (sym->is_extern) {

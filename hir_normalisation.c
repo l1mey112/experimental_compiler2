@@ -990,7 +990,20 @@ void hir_normalise_global(global_t *global) {
 	hir_expr_t *stmts = NULL;
 	hir_expr_t *hir = global->desc.hir;
 
-	nhir_expr_target(&global->desc, &stmts, hir, TARGET_RETURN);
+	// only single `ret`
+	// no ! in globals
+	assert(nhir_expr(&global->desc, &stmts, hir) == ST_NONE);
+
+	hir_expr_t ret = {
+		.kind = EXPR_RETURN,
+		.type = TYPE_BOTTOM,
+		.loc = hir->loc,
+		.d_return = {
+			.expr = hir,
+		},
+	};
+
+	arrpush(stmts, ret);
 
 	global->desc.hir = hir_dup((hir_expr_t){
 		.kind = EXPR_DO_BLOCK,

@@ -312,6 +312,10 @@ void gproc_def_args(proc_t *proc) {
 		gprintf(" ");
 		gmangle_local(&proc->desc, rlocal);
 	}
+
+	if (arrlenu(proc->arguments) == 0) {
+		gprintf("void");
+	}
 }
 
 void gredirect(sym_t *sym) {

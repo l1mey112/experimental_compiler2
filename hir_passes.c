@@ -8,6 +8,7 @@ void hir_normalise_global(global_t *global);
 void hir_normalise_proc(proc_t *proc);
 void hir_eval_global(sym_t *sym, global_t *global);
 void hir_markused(void);
+void hir_global_lower(void);
 
 // TODO: this is damn hacky, but simple. "hacky" is in the eye of the beholder anyway
 //       though it seems it would be better handled in the checker looking at places
@@ -79,6 +80,10 @@ void hir_passes(void) {
 		rsym_t rsym = symbols_po[i];
 		sym_t *sym = &symbols[rsym];
 
+		if (rsym == __main_init) {
+			continue;
+		}
+
         // after checking, it's assumed that only extern symbols can have no body
 
 		switch (sym->kind) {
@@ -114,6 +119,7 @@ void hir_passes(void) {
 	}
 
 	hir_markused();
+	hir_global_lower(); // TODO: globals with side effects will be KILLED if not used
 
 	// remove aggregate fields etc of ()
 	// it's safe to do this after normalisation
