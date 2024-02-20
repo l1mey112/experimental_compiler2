@@ -5,7 +5,7 @@ cctx_t c;
 
 void hir_type_proc(sym_t *sym, proc_t *proc) {
 	c = (cctx_t){};
-
+	c.is_proc = true;
 	c.proc_upvalue = proc->ret_type;
 	c.proc_ret_type = TYPE_INFER;
 

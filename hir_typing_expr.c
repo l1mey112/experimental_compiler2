@@ -215,6 +215,9 @@ void clvalue(ir_desc_t *desc, hir_expr_t *expr, bool is_mutable) {
 					if (is_mutable && !symbol->d_global.is_mut) {
 						err_with_pos(expr->loc, "cannot mutate immutable global variable `%s`", sv_from(symbol->short_name));
 					}
+					if (is_mutable && !c.is_proc) {
+						err_with_pos(expr->loc, "cannot mutate global variable outside of a function");
+					}
 					break;
 				}
 				default: {

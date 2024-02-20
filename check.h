@@ -19,6 +19,7 @@ struct cctx_t {
 	cblk_t blocks[128]; // overkill, index by blk_id
 	u32 blocks_len;
 	//
+	bool is_proc;
 	type_t proc_upvalue;
 	type_t proc_ret_type;
 };

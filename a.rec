@@ -567,7 +567,7 @@ pub main() {
     exit k
 }
 
-tester = if (factor == 720) 20 else 50
+tester' = 60
 
 factor = {
     let i' = 6
@@ -575,6 +575,6 @@ factor = {
     let take = loop do
         if (i < 1) brk f
         f = f * i
-        i--
+        i--    
     take
 }
