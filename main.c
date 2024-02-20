@@ -44,6 +44,8 @@ void print_diag_without_pos(const char *type, const char *fmt, ...) {
 	}
 }
 
+rsym_t __main_init;
+
 int main(int argc, const char *argv[]) {
 	bool err = false;
 
@@ -57,13 +59,38 @@ int main(int argc, const char *argv[]) {
 			goto ret;
 		}
 
+		// god this needs to be standardised in an interface
 		fs_entrypoint(argv[1]);
 		fs_target(arch, platform, false);
+
+		sym_t main_init = {
+			.key = sv_move("main.init"),
+			.mod = main_module,
+			.short_name = sv_move("init"),
+			.loc = (loc_t){},
+			.is_pub = true,
+			.is_extern = false,
+			.extern_symbol = ISTR_NONE,
+			.kind = SYMBOL_PROC,
+			.d_proc = {
+				.type = type_new((tinfo_t){
+					.kind = TYPE_FUNCTION,
+					.d_fn = {
+						.args = NULL,
+						.ret = TYPE_UNIT,
+					}
+				}),
+				.ret_type = TYPE_UNIT,
+			}
+		};
+
+		__main_init = hmlen(symbols);
+		hmputs(symbols, main_init);
 
 		// queue can grow
 		for (fs_rfile_t i = 0; i < fs_files_queue_len; i++) {
 			u32 old_sz = fs_files_queue_len;
-			eprintf("parsing file '%s'\n", fs_files_queue[i].fp);
+			eprintf("parsing file '%s'\n", fs_make_relative(fs_files_queue[i].fp));
 			compiler_process_file(i);
 			if (old_sz != fs_files_queue_len) {
 				eprintf("  %u new files added\n", fs_files_queue_len - old_sz);

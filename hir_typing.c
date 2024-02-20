@@ -122,8 +122,12 @@ void hir_type_import(sym_t *sym, imas_t *imas) {
 		// since we're asserting the type through unification, they aren't actually the same
 
 		if (ctype_unify_innards(entry->type, type) == TYPE_INFER) {
-			print_err_with_pos(target->loc, "symbol `%s` has wrong type", sv_from(target->key));
-			print_err_with_pos(entry->symbol_loc, "import assertion expected `%s`", type_dbg_str(entry->type));
+			if (entry->symbol == __main_init) {
+				print_err_with_pos(entry->symbol_loc, "reserved symbol `main.init` must have type `(): ()`");
+			} else {
+				print_err_with_pos(target->loc, "symbol `%s` has wrong type", sv_from(target->key));
+				print_hint_with_pos(entry->symbol_loc, "import assertion expected `%s`", type_dbg_str(entry->type));	
+			}
 			err_unwind();
 		}
 

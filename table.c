@@ -19,10 +19,15 @@
 sym_t *symbols;
 rsym_t *symbols_po;
 
-rsym_t table_resolve(fs_rmod_t mod, istr_t short_name) {
+rsym_t table_resolve(fs_rmod_t mod, istr_t short_name, loc_t onerror) {
 	istr_t qualified_name = fs_module_symbol(mod, short_name);
 	ptrdiff_t sym = hmgeti(symbols, qualified_name);
-	
+
+	// if you have access to the symbol anyway you've `import_main`ed anyway
+	if (sym == __main_init && mod != main_module) {
+		err_with_pos(onerror, "`main.init` can only be used through `import_main`");
+	}
+
 	if (sym != -1) {
 		return sym;
 	}
@@ -61,6 +66,10 @@ istr_t table_anon_symbol(void) {
 }
 
 rsym_t table_register(sym_t desc) {
+	if (desc.key == sv_move("main.init")) {
+		err_with_pos(desc.loc, "`main.init` is a reserved symbol");
+	}
+
 	ptrdiff_t sym = hmgeti(symbols, desc.key);
 
 	if (sym != -1 && symbols[sym].kind != _SYMBOL_PLACEHOLDER) {
@@ -82,8 +91,6 @@ rsym_t table_register(sym_t desc) {
 // i8..! and symbols get qualified names
 istr_t table_type_qualified_name(type_t type) {
 	ti_kind kind = type_kind(type);
-
-	istr_t ret;
 
 	switch (kind) {
 		#define X(name, lit) \

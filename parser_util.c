@@ -208,12 +208,12 @@ type_t ptype_expr(u8 prec) {
 				istr_t lit = p.token.lit;
 				pnext();
 
-				typesym = table_resolve(p.is[id].mod, lit);
+				typesym = table_resolve(p.is[id].mod, lit, loc);
 			} else {
 				// TODO: perform search of local scope, incase of scoped defs
 
 				// main.Foo
-				typesym = table_resolve(p.mod, lit);
+				typesym = table_resolve(p.mod, lit, loc);
 				pnext();
 			}
 			
@@ -456,8 +456,17 @@ void pimport_main(void) {
 		loc_t type_loc = p.token.loc;
 		type_t type = ptype();
 
+		rsym_t sym;
+
+		// bypass resolution checks
+		if (ident == sv_move("init")) {
+			sym = __main_init;
+		} else {
+			sym = table_resolve(main_module, ident, loc);
+		}
+
 		imas_entry_t entry = {
-			.symbol = table_resolve(main_module, ident),
+			.symbol = sym,
 			.symbol_loc = loc,
 			.type = type,
 			.type_loc = type_loc,

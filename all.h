@@ -335,6 +335,7 @@ extern fs_mod_t fs_mod_arena[128];
 extern u32 fs_platforms_len;
 extern fs_platform_t fs_platforms[32];
 
+extern rsym_t __main_init;
 extern fs_rmod_t main_module;
 extern fs_rmod_t rt_module;
 extern char *build_token;
@@ -577,7 +578,7 @@ extern sym_t *symbols;
 extern rsym_t *symbols_po;
 
 istr_t table_anon_symbol(void);
-rsym_t table_resolve(fs_rmod_t mod, istr_t short_name);
+rsym_t table_resolve(fs_rmod_t mod, istr_t short_name, loc_t onerror);
 // returns RSYM_NONE if not found
 rsym_t table_resolve_qualified_opt(istr_t qualified_name);
 // returns RSYM_NONE if not found

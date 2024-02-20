@@ -1,8 +1,10 @@
 import_main {
     main: (): ()
+    init: (): ()
 }
 
 extern "main" c_main(): i32 = {
+    main.init
     main.main
     ret 0
 }

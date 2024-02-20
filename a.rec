@@ -563,20 +563,16 @@
 extern exit(status: i32): !
 
 pub main() {
-    let k = factor 6
-
-    let c = i64min
-
-    if (k == 720) exit 0
-    else          exit 1
+    let k = factor
+    exit k
 }
 
-factor(i': i32) = do
+factor = {
+    let i' = 6
     let f' = 1
     let take = loop do
         if (i < 1) brk f
         f = f * i
         i--
     take
-
-i64min: i64 = -9223372036854775808
+}
